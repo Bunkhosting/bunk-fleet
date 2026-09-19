@@ -62,6 +62,13 @@ defmodule ControlPlane.Provisioning do
   # no-op that re-reports the same result).
   @redelivery_ttl_seconds 90
 
+  # Boven deze grens wordt een commando niet meer uitgedeeld maar gemeld. Niet
+  # als mislukt gemarkeerd: het werk is waarschijnlijk juist wél gedaan -- er is
+  # alleen nooit een resultaat teruggekomen -- en zo'n commando alsnog laten
+  # falen zou een draaiende machine terugbetalen en opruimen. Melden, en een
+  # mens laat beslissen. Zelfde afweging als in `Fleet.Drift`.
+  @max_afleveringen 5
+
   @doc """
   Creates a VPS and dispatches a provision command to the node it is placed on.
 
@@ -804,10 +811,30 @@ defmodule ControlPlane.Provisioning do
       from c in Command,
         where:
           c.node_id == ^node_id and
+            c.delivery_count < ^@max_afleveringen and
             (c.status == :pending or
                (c.status == :delivered and not is_nil(c.delivered_at) and
                   c.delivered_at < ^cutoff)),
         order_by: [asc: c.inserted_at]
+    )
+  end
+
+  @doc """
+  De commando's die vastzitten in herlevering: vaak genoeg uitgedeeld en nog
+  steeds zonder resultaat.
+
+  Deze worden niet meer aan een node gegeven. Dat is het halve antwoord; het
+  andere halve is dat iemand ze te zien krijgt, want een commando dat stil uit
+  de omloop verdwijnt is erger dan een dat eeuwig rondgaat -- dan staat er een
+  VPS in "aanmaken" waar nooit meer iets mee gebeurt.
+  """
+  @spec vastgelopen_commandos() :: [Command.t()]
+  def vastgelopen_commandos do
+    Repo.all(
+      from c in Command,
+        where: c.status == :delivered and c.delivery_count >= ^@max_afleveringen,
+        order_by: [asc: c.inserted_at],
+        preload: [:vps]
     )
   end
 
@@ -843,9 +870,22 @@ defmodule ControlPlane.Provisioning do
     # double-booked capacity).
     Repo.update_all(
       from(c in Command, where: c.id in ^ids and c.status in [:pending, :delivered]),
-      set: [status: :delivered, delivered_at: ts, updated_at: ts]
+      set: [status: :delivered, delivered_at: ts, updated_at: ts],
+      inc: [delivery_count: 1]
     )
   end
+
+  @doc """
+  Hoe vaak een commando opnieuw uitgedeeld mag worden voordat er iemand moet
+  kijken.
+
+  Eén aflevering is normaal. Twee of drie hoort bij een agent die opnieuw
+  opstartte voordat hij zijn resultaat kwijt kon. Daarboven gaat er iets anders
+  mis: niet het werk maar het terugmelden. Dan blijft dit zich elke
+  #{@redelivery_ttl_seconds} seconden herhalen terwijl de VPS bij de klant in
+  "aanmaken" staat en op de node allang draait.
+  """
+  def max_afleveringen, do: @max_afleveringen
 
   @doc """
   Applies an agent-reported command result.

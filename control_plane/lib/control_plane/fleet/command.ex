@@ -66,6 +66,11 @@ defmodule ControlPlane.Fleet.Command do
     # of commands whose agent crashed before reporting a result.
     field :delivered_at, :utc_datetime
 
+    # Hoe vaak dit commando is uitgedeeld. Eén keer is normaal; twee of drie keer
+    # hoort bij een agent die opnieuw opstartte. Blijft het oplopen, dan faalt
+    # niet het werk maar het terugmelden, en dat herstelt zichzelf niet.
+    field :delivery_count, :integer, default: 0
+
     belongs_to :node, Node
     belongs_to :vps, Vps
 

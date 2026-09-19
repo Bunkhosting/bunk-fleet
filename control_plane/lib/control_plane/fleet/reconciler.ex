@@ -157,6 +157,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     state = maybe_check_schijf(state)
     settle_subscriptions()
     roll_out_agent()
+    meld_vastgelopen_commandos()
     state = maybe_check_drift(state)
 
     # Helemaal achteraan, en dat is de hele betekenis: dit levensteken zegt niet
@@ -283,6 +284,48 @@ defmodule ControlPlane.Fleet.Reconciler do
   # niet uit onze eigen log maar uit de dienst aan de andere kant -- die
   # alarmeert juist wanneer het levensteken uitblijft.
   defp maybe_piep(state), do: state
+
+  # Een commando dat vaak genoeg is uitgedeeld en nog steeds geen resultaat
+  # opleverde, wordt niet meer aangeboden aan de node. Daarmee is het uit de
+  # eeuwige lus -- en meteen ook uit het zicht, want er gebeurt dan helemaal
+  # niets meer. Een VPS die in "aanmaken" blijft staan terwijl hij op de node
+  # draait, is precies het geval waarin de klant het als eerste merkt.
+  #
+  # Dus melden, niet opruimen: het werk is waarschijnlijk juist wél gedaan, en
+  # zo'n commando alsnog laten falen zou een draaiende machine terugbetalen en
+  # verwijderen.
+  defp meld_vastgelopen_commandos do
+    case Provisioning.vastgelopen_commandos() do
+      [] ->
+        :ok
+
+      commandos ->
+        regels =
+          Enum.map_join(commandos, "\n", fn c ->
+            "  #{c.kind} voor vps #{c.vps_id || "-"} (#{c.delivery_count} keer uitgedeeld)"
+          end)
+
+        Logger.error("#{length(commandos)} commando(s) zitten vast in herlevering")
+
+        ControlPlane.Notifier.deliver_operational_alert(
+          "#{length(commandos)} commando(s) zitten vast in herlevering",
+          """
+          Deze commando's zijn #{Provisioning.max_afleveringen()} keer of vaker
+          aan een node gegeven zonder dat er ooit een resultaat terugkwam:
+
+          #{regels}
+
+          Dat betekent meestal niet dat het werk mislukte, maar dat het
+          terugmelden mislukte -- de VPS draait dan gewoon terwijl hij bij de
+          klant in "aanmaken" staat. Kijk op de node of de machine er is, en zet
+          het commando daarna met de hand op done of failed.
+          """
+        )
+    end
+  rescue
+    exception ->
+      Logger.error("melden van vastgelopen commando's mislukte: #{Exception.message(exception)}")
+  end
 
   defp check_schijf(laatste_alarm) do
     now = System.monotonic_time(:millisecond)
