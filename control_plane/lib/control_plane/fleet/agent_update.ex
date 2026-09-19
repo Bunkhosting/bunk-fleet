@@ -19,6 +19,18 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   rest, in groepen van #{2}. Blijft de kanarie weg, dan stopt de uitrol en blijft
   de rest op de oude binary staan in plaats van er achteraan te vallen.
 
+  ## Een zwijgende node telt niet mee
+
+  Dat wachten geldt alleen voor nodes die nog leven. Een node die niet meer
+  heartbeat haalt zijn commando's niet op en kan dus per definitie geen update
+  installeren -- hem meetellen als "de uitrol loopt nog" betekent dat één
+  machine die uit staat de hele fleet op de oude binary houdt. Dat gebeurde ook:
+  een node die al een dag stil was hield drie builds tegen en schreef elke
+  dertig seconden dezelfde foutregel.
+
+  Zijn update-commando blijft klaarstaan. Komt hij terug, dan haalt hij het op
+  en loopt hij alsnog bij.
+
   ## Waar "klaar" aan afgelezen wordt
 
   Aan `nodes.agent_version` tegenover de build van deze control plane. Het
@@ -50,6 +62,15 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   # is ruim genoeg voor een trage schijf en kort genoeg om niet een halve dag
   # stil te staan.
   @stall_after_seconds 900
+
+  # Een node die niet meer heartbeat kan per definitie geen update installeren:
+  # hij haalt zijn commando's niet eens op. Zo'n node telt daarom niet mee als
+  # "de uitrol loopt nog", want anders houdt één machine die het weekend uit
+  # staat de hele fleet op de oude binary -- en dat is precies wat er gebeurde.
+  #
+  # Zijn update-commando blijft gewoon klaarstaan. Komt hij terug, dan haalt hij
+  # het op en loopt hij alsnog bij.
+  @levend_seconds 180
 
   @doc """
   Zet de volgende golf klaar, of wacht. Bedoeld om elke reconciler-tik aan te
@@ -110,9 +131,12 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   # Online nodes die de doelversie nog niet draaien, oudste heartbeat eerst zodat
   # de volgorde over tikken heen stabiel is.
   defp behind(doel) do
+    levend = Clock.shift(-@levend_seconds)
+
     Repo.all(
       from n in Node,
         where: n.status in [:online, :draining],
+        where: not is_nil(n.last_heartbeat_at) and n.last_heartbeat_at >= ^levend,
         where: is_nil(n.agent_version) or n.agent_version != ^doel,
         order_by: [asc: n.inserted_at],
         select: n.id
@@ -124,9 +148,14 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   end
 
   defp in_flight do
+    levend = Clock.shift(-@levend_seconds)
+
     Repo.all(
       from c in Command,
+        join: n in Node,
+        on: n.id == c.node_id,
         where: c.kind == :update and c.status in [:pending, :delivered],
+        where: not is_nil(n.last_heartbeat_at) and n.last_heartbeat_at >= ^levend,
         select: %{id: c.id, node_id: c.node_id, inserted_at: c.inserted_at}
     )
   end
@@ -141,11 +170,23 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   defp melden_vastgelopen(lopend, doel) do
     ids = Enum.map_join(lopend, ", ", & &1.node_id)
 
-    Logger.error(
-      "agent-uitrol naar #{doel} staat stil: node(s) #{ids} melden zich niet terug; " <>
-        "de rest van de fleet blijft op de oude binary"
-    )
+    # De melder is tegelijk het geheugen. Zonder dit schreef deze regel zich elke
+    # dertig seconden opnieuw in de log -- een storing die dagen kan duren, en
+    # dan is de log niet meer te lezen op het moment dat je hem nodig hebt. De
+    # mail was al begrensd; dat antwoord zegt ook of dit nieuws is.
+    case melden(ids, doel) do
+      {:error, :throttled} ->
+        Logger.warning("agent-uitrol naar #{doel} staat nog steeds stil op node(s) #{ids}")
 
+      _ ->
+        Logger.error(
+          "agent-uitrol naar #{doel} staat stil: node(s) #{ids} melden zich niet terug; " <>
+            "de rest van de fleet blijft op de oude binary"
+        )
+    end
+  end
+
+  defp melden(ids, doel) do
     Notifier.deliver_operational_alert(
       "Agent-uitrol staat stil",
       "De uitrol naar #{doel} wacht al langer dan #{div(@stall_after_seconds, 60)} minuten op " <>

@@ -32,6 +32,13 @@ defmodule ControlPlane.FleetAgentUpdateTest do
   defp restore(nil), do: Application.delete_env(:control_plane, :build_version)
   defp restore(v), do: Application.put_env(:control_plane, :build_version, v)
 
+  # Een verse heartbeat hoort erbij, ook al gaat geen van deze tests erover.
+  #
+  # `:online` zonder heartbeat bestaat in productie niet: `mark_stale_nodes_offline/1`
+  # zet zo'n node op `:offline`. Een fixture die dat wel doet beschrijft een
+  # toestand die niet voorkomt, en dan testen deze tests iets anders dan ze
+  # denken -- de uitrol slaat een node die niet meer praat namelijk over, want
+  # die haalt zijn commando's toch niet op.
   defp fleet_node(regio, attrs \\ %{}) do
     Repo.insert!(
       struct(
@@ -39,7 +46,8 @@ defmodule ControlPlane.FleetAgentUpdateTest do
           name: "node-#{System.unique_integer([:positive])}",
           region_id: regio.id,
           hypervisor: :proxmox,
-          status: :online
+          status: :online,
+          last_heartbeat_at: DateTime.utc_now() |> DateTime.truncate(:second)
         },
         attrs
       )
