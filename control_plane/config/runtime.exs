@@ -166,6 +166,14 @@ if config_env() == :prod do
     config :control_plane, ControlPlane.Mailer, adapter: Swoosh.Adapters.Local
   end
 
+  # Het adres waar het control plane elke minuut een levensteken heen stuurt.
+  #
+  # Bewust BUITEN het SMTP-blok hierboven: deze switch bestaat juist voor de
+  # gevallen waarin mailen niet meer lukt of het hele proces weg is. Leeg = uit,
+  # en dat meldt de reconciler één keer bij het opstarten zodat "staat uit" en
+  # "werkt" niet op elkaar lijken.
+  config :control_plane, :deadman_url, System.get_env("DEADMAN_URL")
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

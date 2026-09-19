@@ -36,6 +36,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.AgentUpdate
   alias ControlPlane.Fleet.Drift
+  alias ControlPlane.Fleet.HartslagNaarBuiten
   alias ControlPlane.Provisioning
   alias ControlPlane.Schijfruimte
   alias ControlPlane.Subscriptions
@@ -102,6 +103,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     schijf_interval_ms = Keyword.get(opts, :schijf_interval_ms, @default_schijf_interval_ms)
 
     schedule_tick(interval_ms)
+    HartslagNaarBuiten.meld_stand()
 
     {:ok,
      %{
@@ -117,7 +119,8 @@ defmodule ControlPlane.Fleet.Reconciler do
        last_scrub_ms: nil,
        schijf_interval_ms: schijf_interval_ms,
        last_schijf_ms: nil,
-       last_schijf_alarm_ms: nil
+       last_schijf_alarm_ms: nil,
+       last_hartslag_ms: nil
      }}
   end
 
@@ -154,7 +157,12 @@ defmodule ControlPlane.Fleet.Reconciler do
     state = maybe_check_schijf(state)
     settle_subscriptions()
     roll_out_agent()
-    maybe_check_drift(state)
+    state = maybe_check_drift(state)
+
+    # Helemaal achteraan, en dat is de hele betekenis: dit levensteken zegt niet
+    # "het proces bestaat" maar "deze ronde is van begin tot eind doorlopen".
+    # Een tik die halverwege omvalt, komt hier niet.
+    maybe_piep(state)
   rescue
     exception ->
       Logger.error(
@@ -266,6 +274,15 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp maybe_check_schijf(state), do: state
+
+  defp maybe_piep(%{last_hartslag_ms: last} = state),
+    do: %{state | last_hartslag_ms: HartslagNaarBuiten.piep(last)}
+
+  # Een staat zonder deze sleutel bestaat alleen in tests, die hem bewust
+  # minimaal opbouwen. Stil overslaan mag hier: of deze switch werkt, blijkt
+  # niet uit onze eigen log maar uit de dienst aan de andere kant -- die
+  # alarmeert juist wanneer het levensteken uitblijft.
+  defp maybe_piep(state), do: state
 
   defp check_schijf(laatste_alarm) do
     now = System.monotonic_time(:millisecond)
