@@ -5,6 +5,7 @@ defmodule ControlPlane.Release do
   """
   @app :control_plane
 
+  alias ControlPlane.Accounts.Testaccount
   alias ControlPlane.Credits.Reset
   alias ControlPlane.Privacy.Export
   alias ControlPlane.Repo
@@ -84,6 +85,40 @@ defmodule ControlPlane.Release do
           {:error, :not_found} ->
             IO.puts("Geen account gevonden met het adres #{email}")
             {:error, :not_found}
+        end
+      end)
+
+    uitkomst
+  end
+
+  @doc """
+  Maakt een bevestigd testaccount aan.
+
+  Registreren gaat normaal langs Turnstile en een bevestigingsmail; zonder deze
+  weg is alles achter het inlogscherm niet te testen zonder een mens met een
+  browser. Zie `ControlPlane.Accounts.Testaccount` voor waarom dit bewust geen
+  endpoint is.
+
+  Het wachtwoord komt van de aanroeper en wordt hier nooit teruggegeven of
+  gelogd.
+  """
+  def create_test_user(email, wachtwoord) do
+    load_app()
+
+    {:ok, uitkomst, _} =
+      Ecto.Migrator.with_repo(Repo, fn _repo ->
+        case Testaccount.maak(email, wachtwoord) do
+          {:ok, user} ->
+            IO.puts("Testaccount aangemaakt: #{user.email} (bevestigd, met welkomstkrediet)")
+            :ok
+
+          {:error, :bestaat_al} ->
+            IO.puts("Er bestaat al een account met dit adres; niets gedaan.")
+            {:error, :bestaat_al}
+
+          {:error, reden} ->
+            IO.puts("Aanmaken mislukt: #{inspect(reden)}")
+            {:error, reden}
         end
       end)
 
