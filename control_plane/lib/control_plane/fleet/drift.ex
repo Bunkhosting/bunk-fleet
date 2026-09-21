@@ -31,11 +31,16 @@ defmodule ControlPlane.Fleet.Drift do
 
   require Logger
 
+  alias ControlPlane.Clock
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Notifier
   alias ControlPlane.Repo
+
+  # Hoe vers een heartbeat moet zijn voordat een node werk krijgt. Ruim boven het
+  # hartslaginterval van dertig seconden, zodat één gemiste tik niets overslaat.
+  @node_levend_seconds 180
 
   @doc """
   Zet een inventarisatie klaar voor elke online node die er nog geen heeft.
@@ -46,10 +51,19 @@ defmodule ControlPlane.Fleet.Drift do
   """
   @spec request_all() :: non_neg_integer()
   def request_all do
+    # Ook hier telt de heartbeat en niet alleen de status. Een node die niet
+    # praat haalt zijn commando's niet op, dus zo'n inventarisatie blijft
+    # openstaan -- en `open_verzoek?/1` zorgt er dan voor dat die node nooit meer
+    # opnieuw wordt gevraagd. Het vangnet dat drift moet opsporen zou zichzelf
+    # daarmee uitschakelen voor precies de nodes waar het meest mis kan zijn.
+    levend = Clock.shift(-@node_levend_seconds)
+
     nodes =
       Repo.all(
         from n in Node,
-          where: n.status in [:online, :draining],
+          where:
+            n.status in [:online, :draining] and
+              not is_nil(n.last_heartbeat_at) and n.last_heartbeat_at >= ^levend,
           select: n.id
       )
 

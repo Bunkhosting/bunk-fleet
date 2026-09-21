@@ -119,6 +119,11 @@ defmodule ControlPlane.Backups do
   # niet dagen te blijven staan.
   @vastgelopen_na_uren 6
 
+  # Hoe vers een heartbeat moet zijn voordat we een node werk geven. Ruim boven
+  # het hartslaginterval van dertig seconden, zodat één gemiste tik geen ronde
+  # overslaat.
+  @node_levend_seconds 180
+
   @doc """
   Zet back-ups die blijven hangen op mislukt.
 
@@ -390,13 +395,24 @@ defmodule ControlPlane.Backups do
             (b.started_at >= ^cutoff or b.status == :running),
         select: 1
 
+    # De node moet niet alleen de juiste status hebben maar ook nog praten.
+    #
+    # `:draining` telt mee -- een node die leegloopt hoort zijn klanten gewoon te
+    # blijven back-uppen -- maar een node die niet meer heartbeat haalt zijn
+    # commando's niet op. Een back-up daarheen sturen levert een rij op die zes
+    # uur "bezig" staat en dan mislukt, elke dag opnieuw, voor werk dat nooit is
+    # begonnen. Dat de node stil is, wordt al ergens anders gemeld; daar hoeft
+    # geen stroom mislukte back-ups bij.
+    levend = DateTime.add(now, -@node_levend_seconds, :second)
+
     Repo.all(
       from v in Vps,
         as: :vps,
         join: n in assoc(v, :node),
         where:
           v.status == :active and not is_nil(v.provider_vm_id) and
-            n.status in [:online, :draining],
+            n.status in [:online, :draining] and
+            not is_nil(n.last_heartbeat_at) and n.last_heartbeat_at >= ^levend,
         where: not exists(recent),
         preload: [:node]
     )

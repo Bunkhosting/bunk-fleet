@@ -125,6 +125,19 @@ defmodule ControlPlane.BackupGelijktijdigTest do
     assert %{started: 1} = Backups.run_due()
   end
 
+  test "een node die niet meer praat krijgt geen back-upwerk" do
+    vps = draaiende_vps()
+
+    # Zonder deze regel wordt er elke dag een back-up naar een dode node
+    # gestuurd, die daar zes uur "bezig" staat en dan mislukt -- voor werk dat
+    # nooit is begonnen. Dat de node stil is, wordt al ergens anders gemeld.
+    Repo.update_all(from(n in Node, where: n.id == ^vps.node_id),
+      set: [last_heartbeat_at: Clock.shift(-86_400)]
+    )
+
+    assert %{started: 0} = Backups.run_due()
+  end
+
   test "een back-up die net loopt wordt met rust gelaten" do
     vps = draaiende_vps()
     assert {:ok, _} = Backups.start_on_demand(vps)
