@@ -71,6 +71,11 @@ defmodule ControlPlane.Fleet.Command do
     # niet het werk maar het terugmelden, en dat herstelt zichzelf niet.
     field :delivery_count, :integer, default: 0
 
+    # Wanneer er over dit commando is gemeld dat het vastzit. Gezet zodat dat
+    # één keer gebeurt: een toestand die blijft bestaan hoort niet elk uur
+    # opnieuw een mail op te leveren.
+    field :stuck_notified_at, :utc_datetime
+
     belongs_to :node, Node
     belongs_to :vps, Vps
 
@@ -84,5 +89,10 @@ defmodule ControlPlane.Fleet.Command do
     |> validate_required([:node_id, :kind])
     |> assoc_constraint(:node)
     |> assoc_constraint(:vps)
+    # Er mag maar één machtscommando (start/stop/reboot/pause/resume) tegelijk
+    # onderweg zijn per VPS. De index dwingt dat af; zonder deze regel zou een
+    # botsing een uitzondering worden in plaats van een changeset-fout, en dan
+    # krijgt een klant een 500 waar "er loopt er al een" het juiste antwoord is.
+    |> unique_constraint([:vps_id, :kind], name: :commands_een_machtscommando_per_vps_uidx)
   end
 end

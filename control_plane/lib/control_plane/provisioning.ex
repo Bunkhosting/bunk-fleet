@@ -763,30 +763,56 @@ defmodule ControlPlane.Provisioning do
   defp enqueue_power_command(vps, kind) do
     # An identical power command is already queued/delivered (e.g. a
     # double-clicked Stop) — don't enqueue a duplicate. Idempotent no-op.
+    #
+    # Deze controle is de goedkope voorwacht en niet het slot. Kijken-dan-
+    # schrijven verliest van echte gelijktijdigheid: tien verzoeken tegelijk
+    # lezen alle tien "er loopt niets" voordat er één invoegt. Het slot is de
+    # partiële unieke index `commands_een_machtscommando_per_vps_uidx`.
     if in_flight?(vps.id, kind) do
       {:ok, %{vps: vps, command: nil}}
     else
-      multi =
-        Multi.insert(Multi.new(), :command, fn _ ->
-          Command.changeset(%Command{}, %{
-            node_id: vps.node_id,
-            vps_id: vps.id,
-            kind: kind,
-            status: :pending,
-            payload: %{"vm_id" => vps.provider_vm_id}
-          })
-        end)
-
-      case Repo.transaction(multi) do
-        {:ok, %{command: command}} ->
-          Events.broadcast_changed(:vps)
-          {:ok, %{vps: vps, command: command}}
-
-        {:error, _step, reason, _changes} ->
-          {:error, reason}
-      end
+      vps
+      |> machtscommando(kind)
+      |> Repo.transaction()
+      |> machtsuitkomst(vps)
     end
   end
+
+  defp machtscommando(vps, kind) do
+    Multi.insert(Multi.new(), :command, fn _ ->
+      Command.changeset(%Command{}, %{
+        node_id: vps.node_id,
+        vps_id: vps.id,
+        kind: kind,
+        status: :pending,
+        payload: %{"vm_id" => vps.provider_vm_id}
+      })
+    end)
+  end
+
+  defp machtsuitkomst({:ok, %{command: command}}, vps) do
+    Events.broadcast_changed(:vps)
+    {:ok, %{vps: vps, command: command}}
+  end
+
+  # Een botsing op de index betekent dat een gelijktijdig verzoek net vóór ons
+  # hetzelfde commando heeft ingepland. Dat is geen fout maar precies de
+  # uitkomst die we wilden: er staat er één, en het antwoord is hetzelfde als
+  # wanneer de voorwacht hem had gevangen.
+  defp machtsuitkomst({:error, _step, reason, _changes}, vps) do
+    if unieke_botsing?(reason),
+      do: {:ok, %{vps: vps, command: nil}},
+      else: {:error, reason}
+  end
+
+  defp unieke_botsing?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_veld, {_bericht, opts}} -> opts[:constraint] == :unique
+      _ -> false
+    end)
+  end
+
+  defp unieke_botsing?(_), do: false
 
   @doc """
   Lists the commands that should be (re)delivered to `node` now, oldest first.
@@ -832,9 +858,33 @@ defmodule ControlPlane.Provisioning do
   def vastgelopen_commandos do
     Repo.all(
       from c in Command,
-        where: c.status == :delivered and c.delivery_count >= ^@max_afleveringen,
+        where:
+          c.status == :delivered and c.delivery_count >= ^@max_afleveringen and
+            is_nil(c.stuck_notified_at),
         order_by: [asc: c.inserted_at],
         preload: [:vps]
+    )
+  end
+
+  @doc """
+  Merkt deze commando's als gemeld, zodat het bij één melding blijft.
+
+  Een toestand die blijft bestaan hoort niet elk uur opnieuw een mail op te
+  leveren: na de eerste weet de lezer het, en elke volgende maakt de kans
+  kleiner dat hij de volgende écht leest. Dit is precies de fout die hier zat --
+  88 foutregels en drie mails per uur over drie commando's die één keer bekeken
+  hadden moeten worden.
+  """
+  @spec markeer_gemeld([Command.t()]) :: {non_neg_integer(), nil}
+  def markeer_gemeld([]), do: {0, nil}
+
+  def markeer_gemeld(commandos) do
+    ids = Enum.map(commandos, & &1.id)
+    nu = Clock.now()
+
+    Repo.update_all(
+      from(c in Command, where: c.id in ^ids),
+      set: [stuck_notified_at: nu, updated_at: nu]
     )
   end
 

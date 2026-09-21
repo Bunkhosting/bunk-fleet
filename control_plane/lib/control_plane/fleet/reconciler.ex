@@ -319,8 +319,17 @@ defmodule ControlPlane.Fleet.Reconciler do
           terugmelden mislukte -- de VPS draait dan gewoon terwijl hij bij de
           klant in "aanmaken" staat. Kijk op de node of de machine er is, en zet
           het commando daarna met de hand op done of failed.
+
+          Dit bericht komt één keer per commando. Blijft de toestand bestaan,
+          dan blijft hij zichtbaar in het beheerscherm -- maar hij mailt niet
+          opnieuw.
           """
         )
+
+        # Pas markeren NA het versturen: gaat het melden mis, dan hoort het bij
+        # de volgende tik opnieuw geprobeerd te worden in plaats van stil te
+        # verdwijnen.
+        Provisioning.markeer_gemeld(commandos)
     end
   rescue
     exception ->
