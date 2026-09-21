@@ -906,6 +906,16 @@ defmodule ControlPlane.Provisioning do
       owner_email: field(attrs, :owner_email),
       owner_id: field(attrs, :owner_id),
       ip_address: field(attrs, :ip_address),
+      # Welk pakket er besteld is. Stond hier niet, en dat was niet zichtbaar:
+      # de controller zet `package_id` keurig in de attrs, deze lijst liet hem
+      # vallen, en een veld dat hier ontbreekt verdwijnt zonder foutmelding.
+      #
+      # Twee dingen hingen eraan. Het dashboard toonde elke VPS als "Onbekend
+      # pakket" zonder prijs -- de eerlijke terugval voor "de server weet het
+      # niet", alleen wist de server het wél. En `snelheid_van_pakket/1` leest
+      # dit veld: die gaf dus altijd nil, waardoor er nooit een `rate_mbit` in
+      # een provision-opdracht stond en de bandbreedtelimiet nooit is toegepast.
+      package_id: field(attrs, :package_id),
       # Het moment waarop de besteller om onmiddellijke levering vroeg. Hoort bij
       # de VPS en niet bij het verzoek: de bewijslast dat die bevestiging er was
       # ligt bij ons en moet de request overleven.
