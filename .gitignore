@@ -16,3 +16,6 @@ deps/
 agent/bunk-agent
 agent/bunk-agent-new
 .build-version
+
+# Het wachtwoord van het testaccount hoort hier nooit in te staan.
+.testpw
