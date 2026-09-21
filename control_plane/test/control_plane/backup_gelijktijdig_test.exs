@@ -98,6 +98,33 @@ defmodule ControlPlane.BackupGelijktijdigTest do
     assert {:ok, %VpsBackup{}} = Backups.start_on_demand(vps)
   end
 
+  test "een vastgelopen back-up houdt de nachtelijke ronde niet tegen" do
+    vps = draaiende_vps()
+    assert {:ok, backup} = Backups.start_on_demand(vps)
+
+    # Blijft hangen: de node meldt nooit terug. Twee dagen oud, zoals het geval
+    # op productie -- en daarmee ook buiten het dagvenster waarin een recente
+    # poging een VPS sowieso overslaat.
+    Repo.update_all(from(b in VpsBackup, where: b.id == ^backup.id),
+      set: [started_at: Clock.shift(-48 * 3600)]
+    )
+
+    # Dit is de ernstige kant. `due_vpses/1` slaat een VPS over zolang er een
+    # back-up op :running staat -- "whenever it started". Zonder opruiming stopt
+    # de nachtelijke back-up van die machine dus voorgoed, stil, terwijl het
+    # welkomstscherm belooft dat er elke nacht een gemaakt wordt. Op productie
+    # stond zo'n rij twee dagen; die VPS had in die twee dagen geen enkele
+    # back-up.
+    assert %{started: 0} = Backups.run_due()
+
+    # Na het opruimen is de machine weer aan de beurt. Let op de volgorde in
+    # `due_vpses/1`: een mislukte poging binnen het dagvenster zou hem alsnog
+    # overslaan -- terecht, dat is de normale wachttijd -- maar een rij die
+    # blijft hangen mag hem nooit voorgoed overslaan.
+    Backups.fail_vastgelopen()
+    assert %{started: 1} = Backups.run_due()
+  end
+
   test "een back-up die net loopt wordt met rust gelaten" do
     vps = draaiende_vps()
     assert {:ok, _} = Backups.start_on_demand(vps)
