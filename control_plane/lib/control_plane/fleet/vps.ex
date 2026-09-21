@@ -115,6 +115,25 @@ defmodule ControlPlane.Fleet.Vps do
     |> validate_format(:name, ~r/\A[^\x00-\x1F\x7F]*\z/,
       message: "mag geen controltekens bevatten"
     )
+    # En een naam is een naam. Dit stond er niet, en daardoor accepteerde de API
+    # `<script>alert(1)</script>` als naam van een VPS -- terwijl het bestelscherm
+    # belooft dat alleen letters, cijfers, koppeltekens en underscores mogen.
+    #
+    # Het is geen XSS-gat: React en LiveView escapen allebei. Het gaat om het gat
+    # tussen wat het scherm belooft en wat de API afdwingt, want een aanvaller
+    # gebruikt het scherm niet. En deze naam reist verder dan het dashboard: hij
+    # komt in de gastnaam op de hypervisor, in operationele mail en in logs, en
+    # elk van die plekken heeft zijn eigen manier om ergens in te ontsnappen.
+    #
+    # Ruim genoeg voor echte namen ("Web server 2", "db-prod.eu"), krap genoeg om
+    # markup, aanhalingstekens en shell-tekens buiten te laten.
+    # De vooruitblik eist minstens één letter of cijfer: "   " en "---" passen
+    # anders binnen de tekenklasse en leveren een VPS op die in het scherm geen
+    # naam lijkt te hebben.
+    |> validate_format(:name, ~r/\A(?=.*[\p{L}\p{N}])[\p{L}\p{N} ._-]+\z/u,
+      message:
+        "mag alleen letters, cijfers, spaties, punten, koppeltekens en underscores bevatten"
+    )
     |> validate_spec()
     |> assoc_constraint(:region)
     |> assoc_constraint(:node)
