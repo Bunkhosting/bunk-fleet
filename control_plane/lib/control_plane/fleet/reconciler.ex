@@ -158,6 +158,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     settle_subscriptions()
     roll_out_agent()
     meld_vastgelopen_commandos()
+    ruim_vastgelopen_backups_op()
     state = maybe_check_drift(state)
 
     # Helemaal achteraan, en dat is de hele betekenis: dit levensteken zegt niet
@@ -284,6 +285,20 @@ defmodule ControlPlane.Fleet.Reconciler do
   # niet uit onze eigen log maar uit de dienst aan de andere kant -- die
   # alarmeert juist wanneer het levensteken uitblijft.
   defp maybe_piep(state), do: state
+
+  # Een back-up staat op :running tot de node terugmeldt. Meldt hij nooit terug,
+  # dan blijft die rij staan -- op productie stond er een sinds twee dagen
+  # "bezig" in het dashboard van een klant. Sinds er maar één lopende back-up per
+  # VPS mag zijn, houdt zo'n rij bovendien elke volgende back-up tegen.
+  defp ruim_vastgelopen_backups_op do
+    case Backups.fail_vastgelopen() do
+      {0, _} -> :ok
+      {n, _} -> Logger.warning("#{n} vastgelopen back-up(s) op mislukt gezet")
+    end
+  rescue
+    exception ->
+      Logger.error("opruimen van vastgelopen back-ups mislukte: #{Exception.message(exception)}")
+  end
 
   # Een commando dat vaak genoeg is uitgedeeld en nog steeds geen resultaat
   # opleverde, wordt niet meer aangeboden aan de node. Daarmee is het uit de

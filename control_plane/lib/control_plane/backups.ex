@@ -97,9 +97,66 @@ defmodule ControlPlane.Backups do
     end)
     |> Repo.transaction()
     |> case do
-      {:ok, %{backup: backup}} -> {:ok, backup}
-      {:error, _step, reason, _changes} -> {:error, reason}
+      {:ok, %{backup: backup}} ->
+        {:ok, backup}
+
+      # Een botsing op de unieke index betekent dat een gelijktijdig verzoek net
+      # vóór ons een back-up heeft gestart. Dat is hetzelfde antwoord als wanneer
+      # `loopt_er_al_een?/1` hem had gevangen -- de voorwacht is goedkoop, de
+      # index is het slot.
+      {:error, _step, %Ecto.Changeset{} = changeset, _changes} ->
+        if unieke_botsing?(changeset), do: {:error, :already_running}, else: {:error, changeset}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
     end
+  end
+
+  # Hoe lang een back-up mag draaien voordat we hem als vastgelopen beschouwen.
+  #
+  # Een vzdump van twintig gigabyte is een kwestie van minuten; van een terabyte
+  # kan het uren duren. Zes uur is ruim genoeg voor het tweede en kort genoeg om
+  # niet dagen te blijven staan.
+  @vastgelopen_na_uren 6
+
+  @doc """
+  Zet back-ups die blijven hangen op mislukt.
+
+  Een back-up staat op `:running` totdat de node terugmeldt. Meldt hij nooit
+  terug -- de node valt uit, het resultaat gaat verloren -- dan blijft die rij
+  eeuwig staan. Op productie stond er een sinds twee dagen "bezig" in het
+  dashboard van een klant.
+
+  Sinds er één lopende back-up per VPS mag zijn, is dit niet langer alleen
+  cosmetisch: zo'n blijvende rij zou elke volgende back-up van die VPS
+  tegenhouden. Een vangnet dat een dienst blokkeert is erger dan geen vangnet.
+
+  Mislukt en niet verwijderd: "de back-up van dinsdag is niet gelukt" is iets
+  wat een klant hoort te kunnen zien.
+  """
+  @spec fail_vastgelopen(pos_integer()) :: {non_neg_integer(), nil}
+  def fail_vastgelopen(uren \\ @vastgelopen_na_uren) do
+    grens = Clock.shift(-uren * 3600)
+    nu = Clock.now()
+
+    Repo.update_all(
+      from(b in VpsBackup,
+        where: b.status == :running and not is_nil(b.started_at) and b.started_at < ^grens
+      ),
+      set: [
+        status: :failed,
+        error: "de node meldde niets terug binnen #{uren} uur",
+        finished_at: nu,
+        updated_at: nu
+      ]
+    )
+  end
+
+  defp unieke_botsing?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {_veld, {_bericht, opts}} -> opts[:constraint] == :unique
+      _ -> false
+    end)
   end
 
   @doc """

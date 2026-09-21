@@ -47,6 +47,11 @@ defmodule ControlPlane.Backups.VpsBackup do
     ])
     |> validate_required([:vps_id, :status])
     |> validate_number(:size_bytes, greater_than_or_equal_to: 0)
+    # Eén lopende back-up per VPS, afgedwongen door de database. De controle in
+    # `Backups.start_on_demand/1` kijkt eerst en schrijft daarna, en dat verliest
+    # van gelijktijdigheid: drie verzoeken tegelijk leverden er drie op, en een
+    # back-up is een volledige vzdump op de machine van een operator.
+    |> unique_constraint(:vps_id, name: :vps_backups_een_lopende_per_vps_uidx)
     # The volid comes back from the node and is later handed to it again as the
     # archive to restore. Keep it to what a storage identifier can be, so nothing
     # that arrives here can become anything else there.
