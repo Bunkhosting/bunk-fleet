@@ -126,6 +126,53 @@ test.describe("ingelogd", () => {
     expect.soft(/€\s?\d/.test(tekst), "geen bedrag op de facturatiepagina").toBe(true);
   });
 
+  test("twee keer bestellen na een mislukking gebruikt dezelfde sleutel", async ({ page }) => {
+    /**
+     * Het geval waarvoor `ControlPlane.Idempotency` is geschreven: de
+     * verbinding valt weg vlak voordat het antwoord terugkomt, de klant leest
+     * "kon VPS niet aanvragen" en klikt opnieuw. Was de eerste bestelling
+     * gelukt, dan staan er zonder sleutel twee VPS'en met twee afschrijvingen
+     * op zijn rekening, en ziet hij dat pas op zijn rekening.
+     *
+     * Die beveiliging stond klaar in het control plane en werd door niemand
+     * aangeroepen: dit scherm stuurde geen `Idempotency-Key`. Precies dat soort
+     * gat -- code die bestaat en niets doet -- is van buitenaf onzichtbaar,
+     * want er gaat nooit iets fout tot het misgaat.
+     *
+     * De bestelling verlaat de browser hier NIET. Beide antwoorden komen uit de
+     * test, dus er wordt niets aangemaakt en er beweegt geen geld; wat gemeten
+     * wordt is wat de browser verstuurde.
+     */
+    const sleutels: string[] = [];
+
+    await page.route("**/api/v1/vpses", async (route) => {
+      if (route.request().method() !== "POST") return route.continue();
+      sleutels.push(route.request().headers()["idempotency-key"] ?? "");
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "tijdelijk_niet_bereikbaar" }),
+      });
+    });
+
+    await ga(page, `${APP}/dashboard/vps/new`);
+
+    await page.getByText("Starter", { exact: true }).first().click();
+    await page.locator('input[type="checkbox"]').first().check();
+
+    const knop = page.getByRole("button", { name: "VPS Aanvragen" });
+    await knop.click();
+    await expect.poll(() => sleutels.length, { timeout: 15_000 }).toBe(1);
+
+    await knop.click();
+    await expect.poll(() => sleutels.length, { timeout: 15_000 }).toBe(2);
+
+    expect(sleutels[0], "de bestelling ging zonder Idempotency-Key de deur uit").not.toBe("");
+    expect(sleutels[1], "de herhaling kreeg een nieuwe sleutel en telt dus als tweede bestelling").toBe(
+      sleutels[0],
+    );
+  });
+
   test("het beheerpaneel blijft dicht voor een gewone klant", async ({ page }) => {
     const res = await ga(page, `${APP}/dashboard/beheer`);
     const status = res?.status() ?? 0;

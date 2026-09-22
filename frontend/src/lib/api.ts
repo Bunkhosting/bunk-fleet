@@ -647,6 +647,20 @@ export const vpsApi = {
      * veertien dagen bedenktijd over een dienst die al draait.
      */
     immediate_delivery_consent: boolean;
+    /**
+     * Maakt van twee keer hetzelfde verzoek één bestelling. Zonder sleutel
+     * gedraagt de control plane zich als vanouds, en dat is precies het
+     * probleem: valt de verbinding weg vlak voordat het antwoord terugkomt,
+     * dan klikt de klant opnieuw en staan er twee VPS'en met twee
+     * afschrijvingen op zijn rekening.
+     *
+     * De sleutel hoort bij de BESTELLING en niet bij de klik. Wie hem per
+     * aanroep opnieuw verzint, verandert niets; wie hem afleidt uit de inhoud
+     * van het verzoek, geeft een klant die bewust twee dezelfde VPS'en bestelt
+     * de eerste terug. Daarom komt hij van de aanroeper: alleen die weet of
+     * dit een herhaling is of een nieuwe bedoeling.
+     */
+    idempotency_key?: string;
   }) => {
     const packages = await ensurePackages();
     const pkg = packages.find((p) => p.id === data.package_id);
@@ -661,7 +675,7 @@ export const vpsApi = {
       // region we guessed would override that with a worse answer.
       ...(data.region_code ? { region_code: data.region_code } : {}),
       immediate_delivery_consent: data.immediate_delivery_consent,
-    });
+    }, data.idempotency_key ? { headers: { "Idempotency-Key": data.idempotency_key } } : undefined);
     return { data: transformVps(res.data.vps) };
   },
 

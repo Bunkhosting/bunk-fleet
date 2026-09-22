@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Check, Wallet, AlertCircle } from "lucide-react";
@@ -67,6 +67,33 @@ export default function NewVpsPage() {
     });
   }, [toast]);
 
+  // Eén sleutel per bestelling, niet per klik.
+  //
+  // De klik is al afgeschermd: de knop staat uit zolang het verzoek loopt. Wat
+  // niet afgeschermd was, is het geval waarvoor `ControlPlane.Idempotency`
+  // bestaat -- de verbinding valt weg vlak voordat het antwoord terugkomt, de
+  // klant leest "kon VPS niet aanvragen", klikt opnieuw, en de eerste
+  // bestelling was gelukt. Twee VPS'en, twee afschrijvingen, en hij ziet het
+  // pas op zijn rekening. Die beveiliging stond klaar in het control plane en
+  // werd door niemand aangeroepen, want dit scherm stuurde geen sleutel.
+  //
+  // De sleutel blijft staan zolang dit scherm open is, dus een herhaling na een
+  // mislukking krijgt dezelfde. Lukt het wel, dan gaat de klant naar de
+  // VPS-lijst en begint een volgende bestelling met een nieuw scherm en dus een
+  // nieuwe sleutel -- iemand die bewust twee keer hetzelfde bestelt krijgt er
+  // dus ook twee.
+  const sleutel = useRef<string | null>(null);
+
+  const bestelSleutel = () => {
+    if (!sleutel.current) {
+      sleutel.current =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `bestelling-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+    return sleutel.current;
+  };
+
   const handleSubmit = async () => {
     if (!selectedPackageId) {
       toast({
@@ -95,6 +122,7 @@ export default function NewVpsPage() {
         label: label || undefined,
         region_code: regionCode || undefined,
         immediate_delivery_consent: true,
+        idempotency_key: bestelSleutel(),
       });
       toast({
         title: "Gelukt!",
