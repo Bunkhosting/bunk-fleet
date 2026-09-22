@@ -47,7 +47,25 @@ defmodule ControlPlane.Console.Relay do
   # How long the agent has to dial back before the console gives up. The agent
   # polls every couple of seconds; anything beyond this is a node that is not
   # coming.
+  #
+  # De agent geeft het zelf na twaalf seconden op met de VPS
+  # (`consoleDialWindow` in cmd/bunk-agent/console.go) en belt dan terug om te
+  # zeggen dát hij er niet bij kan. Deze grens ligt daar bewust boven, zodat dat
+  # bericht nog binnenkomt en de klant hoort wat er aan de hand is in plaats van
+  # een time-out te zien.
   @attach_timeout_ms 15_000
+
+  @doc """
+  Hoelang de agent heeft om terug te bellen.
+
+  Staat hier als functie en niet alleen als getal in dit bestand, omdat
+  `ControlPlane.Console.Session` er zijn eigen grens op moet afstemmen -- en
+  omdat een test dat verband kan vastleggen. Toen die twee los van elkaar
+  stonden, was de SSH-grens eronder korter dan deze, en dan is de tijd die hier
+  staat nooit beschikbaar.
+  """
+  @spec attach_timeout_ms() :: pos_integer()
+  def attach_timeout_ms, do: @attach_timeout_ms
 
   # --- requests waiting to be polled ----------------------------------------
 

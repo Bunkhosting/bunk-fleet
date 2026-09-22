@@ -49,6 +49,36 @@ defmodule ControlPlane.Console.Session do
     {:ok, state, {:continue, :connect}}
   end
 
+  # De grens waarbinnen de SSH-verbinding door de relay tot stand moet komen.
+  #
+  # Dit getal hoort het GROOTSTE te zijn van de drie op dit pad, en stond lang
+  # op tien seconden -- het kleinste. De gevolgen waren allebei zichtbaar in
+  # productie:
+  #
+  #   * De agent mag twaalf seconden proberen de VPS te bereiken en belt daarna
+  #     terug om te zeggen dat het niet lukt. Dat bericht kwam altijd te laat.
+  #   * De relay geeft de agent vijftien seconden om te koppelen. Die tijd was
+  #     nooit beschikbaar.
+  #   * En een handshake die dóór de tunnel net wat langer deed -- gemeten: één
+  #     op de zes sessies -- werd afgekapt en aan de klant gemeld als "je VPS
+  #     neemt geen SSH aan", terwijl er niets met zijn VPS aan de hand was.
+  #
+  # Twintig seconden is lang om naar een scherm te kijken. Een terminal die na
+  # twaalf seconden opengaat is nog steeds beter dan een terminal die zegt dat
+  # je machine stuk is.
+  @connect_timeout_ms 20_000
+
+  @doc """
+  Hoelang een console mag doen over het opzetten van de SSH-verbinding.
+
+  Openbaar zodat `ControlPlaneWeb.ConsoleTimeoutsTest` kan vastleggen dat hij
+  boven `ControlPlane.Console.Relay.attach_timeout_ms/0` ligt. Dat verband is
+  het hele punt: twee grenzen op één pad waarvan de buitenste korter is dan de
+  binnenste, maken de binnenste betekenisloos.
+  """
+  @spec connect_timeout_ms() :: pos_integer()
+  def connect_timeout_ms, do: @connect_timeout_ms
+
   @impl true
   def handle_continue(:connect, st) do
     _ = start_ssh()
@@ -68,7 +98,7 @@ defmodule ControlPlane.Console.Session do
         silently_accept_hosts: fn _peer, _fingerprint -> false end,
         key_cb: {ControlPlane.Console.KeyCb, [pem: key, vps_id: st.vps_id]},
         auth_methods: ~c"publickey",
-        connect_timeout: 10_000
+        connect_timeout: connect_timeout_ms()
       ]
 
       with {:ok, conn} <- connect(st, opts),
