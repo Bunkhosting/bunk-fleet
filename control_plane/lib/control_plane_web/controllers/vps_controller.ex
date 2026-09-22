@@ -28,6 +28,7 @@ defmodule ControlPlaneWeb.VpsController do
   alias ControlPlane.Idempotency
   alias ControlPlane.Provisioning
   alias ControlPlane.Repo
+  alias ControlPlaneWeb.Fouten
 
   def index(conn, _params) do
     vpses =
@@ -43,8 +44,7 @@ defmodule ControlPlaneWeb.VpsController do
          %Vps{} = vps <- Fleet.get_vps_for_owner(conn.assigns.current_user.id, id) do
       json(conn, %{vps: vps_json(vps)})
     else
-      nil -> not_found(conn)
-      :error -> not_found(conn)
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
@@ -220,11 +220,7 @@ defmodule ControlPlaneWeb.VpsController do
       |> put_status(:accepted)
       |> json(%{vps: vps_json(vps)})
     else
-      {:error, :already_deleting} -> error(conn, :conflict, "already_deleting")
-      {:error, :no_node} -> error(conn, :unprocessable_entity, "no_node")
-      nil -> not_found(conn)
-      :error -> not_found(conn)
-      anders -> not_found(conn, anders)
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
@@ -240,8 +236,7 @@ defmodule ControlPlaneWeb.VpsController do
          %Vps{} <- Fleet.get_vps_for_owner(conn.assigns.current_user.id, uuid) do
       json(conn, %{backups: Enum.map(Backups.list_for_vps(uuid), &backup_json/1)})
     else
-      nil -> not_found(conn)
-      :error -> not_found(conn)
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
@@ -271,12 +266,7 @@ defmodule ControlPlaneWeb.VpsController do
          {:ok, backup} <- Backups.start_on_demand(vps) do
       conn |> put_status(:accepted) |> json(%{backup: backup_json(backup)})
     else
-      {:error, :already_running} -> error(conn, :conflict, "backup_already_running")
-      {:error, :node_unreachable} -> error(conn, :conflict, "node_unreachable")
-      {:error, :not_provisioned} -> error(conn, :conflict, "not_provisioned")
-      nil -> not_found(conn)
-      :error -> not_found(conn)
-      anders -> not_found(conn, anders)
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
@@ -294,12 +284,7 @@ defmodule ControlPlaneWeb.VpsController do
          {:ok, restoring} <- Backups.restore(vps, backup_uuid) do
       conn |> put_status(:accepted) |> json(%{vps: vps_json(restoring)})
     else
-      {:error, {:invalid_status, status}} -> error(conn, :conflict, "invalid_status_#{status}")
-      {:error, :backup_not_restorable} -> error(conn, :conflict, "backup_not_restorable")
-      {:error, :not_provisioned} -> error(conn, :conflict, "not_provisioned")
-      nil -> not_found(conn)
-      :error -> not_found(conn)
-      anders -> not_found(conn, anders)
+      anders -> Fouten.fout(conn, anders)
     end
   end
 

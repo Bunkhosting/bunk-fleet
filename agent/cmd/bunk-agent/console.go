@@ -197,21 +197,17 @@ func pipe(ctx context.Context, a, b net.Conn) bool {
 // assignedSubnet is the network this node's VPSes live on, as a mask the console
 // target check can be held against.
 //
-// Enrolment records it; an operator who declared their own network has it in the
-// environment too, which is the fallback for a node that enrolled before the
-// control plane started sending it back. nil when neither is known — the
-// private-address rules in allowedConsoleTarget still apply.
+// Welk netwerk dat is, beantwoordt `vpsNetwerkVan` -- dezelfde functie die het
+// instellen van de bridge gebruikt. Dat is met opzet: twee antwoorden op die
+// vraag betekende ooit dat de console een adres goedkeurde op een bridge die
+// nooit was ingericht.
 func assignedSubnet(st persistedState, cfg config.VpsNetworkConfig) *net.IPNet {
-	for _, candidate := range []vpsNetwork{
-		{Gateway: st.VpsGateway, CidrPrefix: st.VpsCidrPrefix},
-		{Gateway: cfg.Gateway, CidrPrefix: cfg.CidrPrefix},
-	} {
-		if candidate.Gateway == "" || candidate.CidrPrefix <= 0 {
-			continue
-		}
-		if subnet, err := candidate.subnet(); err == nil {
-			return subnet
-		}
+	netwerk := vpsNetwerkVan(st, cfg)
+	if netwerk.Gateway == "" {
+		return nil
+	}
+	if subnet, err := netwerk.subnet(); err == nil {
+		return subnet
 	}
 	return nil
 }

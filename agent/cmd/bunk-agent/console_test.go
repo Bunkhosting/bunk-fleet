@@ -148,3 +148,61 @@ func TestPipeStoptAlsEenKantSluit(t *testing.T) {
 		t.Fatal("pipe merkte niet dat een kant sloot")
 	}
 }
+
+// Het instellen van de bridge en de consolecontrole moeten hetzelfde netwerk
+// zien. Toen dat niet zo was, keek de console ook naar agent.env en het
+// instellen alleen naar state.json -- met als gevolg dat de console een adres
+// goedkeurde op een bridge die nooit was ingericht.
+func TestZelfdeNetwerkVoorBridgeEnConsole(t *testing.T) {
+	gevallen := []struct {
+		naam string
+		st   persistedState
+		cfg  config.VpsNetworkConfig
+	}{
+		{"alleen uit de opgeslagen staat",
+			persistedState{VpsGateway: "10.10.4.1", VpsCidrPrefix: 22},
+			config.VpsNetworkConfig{}},
+		{"alleen uit de eigen configuratie",
+			persistedState{},
+			config.VpsNetworkConfig{Gateway: "192.168.50.1", CidrPrefix: 24}},
+		{"allebei: de staat wint",
+			persistedState{VpsGateway: "10.10.4.1", VpsCidrPrefix: 22},
+			config.VpsNetworkConfig{Gateway: "192.168.50.1", CidrPrefix: 24}},
+		{"geen van beide", persistedState{}, config.VpsNetworkConfig{}},
+	}
+
+	for _, g := range gevallen {
+		t.Run(g.naam, func(t *testing.T) {
+			netwerk := vpsNetwerkVan(g.st, g.cfg)
+			subnet := assignedSubnet(g.st, g.cfg)
+
+			if netwerk.Gateway == "" {
+				if subnet != nil {
+					t.Fatalf("geen netwerk, maar de console kreeg %v", subnet)
+				}
+				return
+			}
+			if subnet == nil {
+				t.Fatalf("netwerk %v, maar de console kreeg niets", netwerk)
+			}
+			if !subnet.Contains(net.ParseIP(netwerk.Gateway)) {
+				t.Fatalf("de console kreeg %v, dat past niet bij gateway %s",
+					subnet, netwerk.Gateway)
+			}
+		})
+	}
+}
+
+// De gateway die het control plane bij de inschrijving terugstuurde wint van
+// wat er lokaal is ingetypt: het CP deelt de blokken uit en weet dus of de wens
+// van de operator is gehonoreerd.
+func TestOpgeslagenStaatWintVanConfiguratie(t *testing.T) {
+	netwerk := vpsNetwerkVan(
+		persistedState{VpsGateway: "10.10.4.1", VpsCidrPrefix: 22},
+		config.VpsNetworkConfig{Gateway: "192.168.50.1", CidrPrefix: 24},
+	)
+
+	if netwerk.Gateway != "10.10.4.1" {
+		t.Fatalf("gateway = %s, wil 10.10.4.1", netwerk.Gateway)
+	}
+}

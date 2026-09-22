@@ -72,7 +72,7 @@ func run(logger *slog.Logger) error {
 		state = st
 		cp.SetCredentials(st.NodeID, st.AgentToken)
 		logger.Info("loaded persisted enrollment", "node_id", st.NodeID)
-		applyVpsNetwork(logger, cfg.VpsNetwork.Bridge, networkFromState(st), cfg.ManageNetwork)
+		applyVpsNetwork(logger, cfg.VpsNetwork.Bridge, vpsNetwerkVan(st, cfg.VpsNetwork), cfg.ManageNetwork)
 	} else if cfg.EnrollToken != "" {
 		enrollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		resp, err := cp.Enroll(enrollCtx, cfg.EnrollToken, cfg.Hypervisor, cfg.OwnerEmail, transport.VpsNetwork{
@@ -99,7 +99,7 @@ func run(logger *slog.Logger) error {
 		if err := saveState(statePath, st); err != nil {
 			logger.Warn("could not persist enrollment; a restart will need a fresh token", "err", err)
 		}
-		applyVpsNetwork(logger, cfg.VpsNetwork.Bridge, networkFromState(st), cfg.ManageNetwork)
+		applyVpsNetwork(logger, cfg.VpsNetwork.Bridge, vpsNetwerkVan(st, cfg.VpsNetwork), cfg.ManageNetwork)
 		state = st
 	} else {
 		logger.Warn("no enroll token and no persisted state; heartbeats will fail until credentials are set")

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Bunk-Hosting/bunk-fleet/agent/internal/config"
 )
 
 // vpsNetwork is the addressing this node serves its customer VPSes on, as the
@@ -295,8 +297,29 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// networkFromState reads the assigned network back out of persisted state, so a
-// restart reconfigures the same bridge without going near the control plane.
-func networkFromState(st persistedState) vpsNetwork {
-	return vpsNetwork{Gateway: st.VpsGateway, CidrPrefix: st.VpsCidrPrefix}
+// vpsNetwerkVan beantwoordt de vraag "wat is het VPS-netwerk van deze node", en
+// is de enige plek waar dat antwoord vandaan komt.
+//
+// Het stond op twee plekken, met twee verschillende antwoorden. De
+// consolecontrole viel terug van de opgeslagen staat op de eigen configuratie;
+// het instellen van de bridge keek alleen naar de staat. Op een node waar
+// state.json die gegevens niet heeft -- een inschrijving van voor het control
+// plane ze terugstuurde, of een agent die opnieuw is opgezet -- dacht de console
+// dus dat het netwerk bestond terwijl de bridge nooit was ingericht. Twee
+// functies die dezelfde vraag anders beantwoorden is precies het soort verschil
+// dat pas opvalt als er iemand niet bij zijn machine kan.
+//
+// De volgorde is niet willekeurig: wat het control plane bij de inschrijving
+// terugstuurde wint van wat er lokaal is ingetypt. Het CP deelt de blokken uit
+// en weet dus of jouw wens is gehonoreerd of dat je iets anders hebt gekregen.
+func vpsNetwerkVan(st persistedState, cfg config.VpsNetworkConfig) vpsNetwork {
+	for _, kandidaat := range []vpsNetwork{
+		{Gateway: st.VpsGateway, CidrPrefix: st.VpsCidrPrefix},
+		{Gateway: cfg.Gateway, CidrPrefix: cfg.CidrPrefix},
+	} {
+		if kandidaat.Gateway != "" && kandidaat.CidrPrefix > 0 {
+			return kandidaat
+		}
+	}
+	return vpsNetwork{}
 }
