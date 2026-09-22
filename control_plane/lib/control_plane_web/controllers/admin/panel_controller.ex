@@ -664,7 +664,22 @@ defmodule ControlPlaneWeb.Admin.PanelController do
     else
       :not_found -> error(conn, :not_found, "not_found")
       {:error, :not_found} -> error(conn, :not_found, "not_found")
-      {:error, reden} -> error(conn, :conflict, Atom.to_string(reden))
+      # Uitgeschreven in plaats van `Atom.to_string(reden)`, om twee redenen.
+      # Zo staan de codes in de tekst en ziet `tools/foutcodes.py` ze, dus moet
+      # er een zin bij horen. En dit gaat met opzet niet door de foutentabel:
+      # `:has_vpses` betekent hier iets anders dan daar. Bij een gebruiker is
+      # het "die klant heeft nog VPS'en", hier is het "in deze locatie heeft
+      # een VPS gedraaid". Eén tabel kan die twee niet allebei goed vertalen,
+      # dus wint de plek die weet waarover het gaat.
+      #
+      # Geen vangnet eronder, en dat is geen slordigheid: `delete_region/1`
+      # geeft volgens zijn @spec precies deze vier dingen terug, en dialyzer
+      # weigert een clausule die niets kan matchen. Komt er ooit een vijfde
+      # reden bij, dan valt dat om -- in de build, met de reden erbij, en niet
+      # bij een beheerder die een 409 met een onbekende code krijgt.
+      {:error, :has_nodes} -> error(conn, :conflict, "has_nodes")
+      {:error, :has_vpses} -> error(conn, :conflict, "has_vpses")
+      {:error, :has_enroll_tokens} -> error(conn, :conflict, "has_enroll_tokens")
     end
   end
 

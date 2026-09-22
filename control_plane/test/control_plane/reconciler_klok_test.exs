@@ -30,7 +30,14 @@ defmodule ControlPlane.ReconcilerKlokTest do
         meter_interval_ms: 3_600_000,
         last_meter_ms: nil,
         backup_check_interval_ms: 60_000,
-        last_backup_check_ms: nil
+        last_backup_check_ms: nil,
+        # De mollie-stap staat er bewust in en niet weggelaten: zonder deze
+        # sleutels valt hij door naar de clausule die de staat ongemoeid
+        # teruggeeft, en dan loopt de gewone tik hieronder er stilzwijgend
+        # omheen. Op een lege database vindt hij niets en gaat er dus ook geen
+        # verzoek naar Mollie.
+        mollie_interval_ms: 900_000,
+        last_mollie_ms: nil
       },
       overrides
     )

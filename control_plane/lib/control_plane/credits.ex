@@ -517,6 +517,34 @@ defmodule ControlPlane.Credits do
     end
   end
 
+  # Mollie draait sinds dit moment op een live-sleutel. Wat daarvoor is
+  # aangemaakt hoort bij de testmodus: die betaal-ids bestaan niet in de
+  # live-omgeving, dus een verzoening zou ze eindeloos opvragen en eindeloos
+  # niet vinden. Net als `@vps_id_since` hierboven is dit een feit over de
+  # geschiedenis, en de geschiedenis verandert niet.
+  @mollie_live_sinds ~U[2026-09-14 00:00:00.000000Z]
+
+  @doc """
+  Opwaarderingen die nog open staan en waarvan Mollie de uitkomst weet.
+
+  Alleen rijen met een betaal-id: zonder dat id heeft de klant nooit een
+  betaalpagina gezien en kan er ook niets binnenkomen. En alleen rijen die al
+  even staan, zodat een klant die op dit moment bij zijn bank staat niet wordt
+  opgejaagd door een tweede vraag aan Mollie over dezelfde betaling.
+  """
+  @spec openstaande_topups_om_te_verzoenen(non_neg_integer()) :: [TopupRequest.t()]
+  def openstaande_topups_om_te_verzoenen(ouder_dan_seconden) do
+    grens = DateTime.add(DateTime.utc_now(), -ouder_dan_seconden, :second)
+
+    Repo.all(
+      from t in TopupRequest,
+        where:
+          t.status == :pending and not is_nil(t.mollie_payment_id) and
+            t.inserted_at < ^grens and t.inserted_at > ^@mollie_live_sinds,
+        order_by: [asc: t.inserted_at]
+    )
+  end
+
   @doc """
   Marks a pending top-up `:cancelled` by its Mollie id (payment expired/canceled/
   failed). Idempotent and guarded on `:pending`, so it frees the per-user pending

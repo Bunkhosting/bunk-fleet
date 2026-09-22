@@ -12,6 +12,12 @@ defmodule ControlPlane.Fleet.Reconciler do
   active VPS into `usage_records` (see `ControlPlane.Billing.meter_active_vpses/0`),
   which is how we account for the resource-hours our own nodes actually serve.
 
+  Op een ruimere slag vraagt de tik ook aan Mollie wat er is gebeurd met
+  opwaarderingen die blijven openstaan. Dat is het vangnet onder de webhook:
+  zonder die tweede weg hangt het hele geldpad aan één HTTP-verzoek van buiten,
+  en een verzoek dat niet aankomt betekent een klant die betaald heeft en niets
+  gekregen heeft. Zie `ControlPlane.Billing.MollieAfhandeling`.
+
   ## Crash policy
 
   We deliberately wrap each tick in a `try/rescue`: a transient failure (e.g. a
@@ -32,11 +38,13 @@ defmodule ControlPlane.Fleet.Reconciler do
   alias ControlPlane.Accounts
   alias ControlPlane.Backups
   alias ControlPlane.Billing
+  alias ControlPlane.Billing.MollieAfhandeling
   alias ControlPlane.Credits
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.AgentUpdate
   alias ControlPlane.Fleet.Drift
   alias ControlPlane.Fleet.HartslagNaarBuiten
+  alias ControlPlane.Mollie
   alias ControlPlane.Provisioning
   alias ControlPlane.Schijfruimte
   alias ControlPlane.Subscriptions
@@ -72,6 +80,14 @@ defmodule ControlPlane.Fleet.Reconciler do
   # iemand er iets aan kan doen, is een melding die niemand meer leest.
   @default_schijf_interval_ms 6 * 60 * 60 * 1000
 
+  # Elk kwartier vragen wat er met blijvende opwaarderingen is gebeurd. Dat is
+  # het vangnet onder Mollie's webhook: komt die niet aan, dan heeft een klant
+  # betaald en staat er niets op zijn tegoed, en niemand die het merkt. Een
+  # kwartier is kort genoeg om het ruim binnen een werkdag recht te zetten en
+  # ruim genoeg om geen uitgaande aanroep te doen voor iemand die op dit moment
+  # bij zijn bank staat.
+  @default_mollie_interval_ms 15 * 60 * 1000
+
   # Hoogstens één melding per etmaal over de schijf. Een volle schijf is geen
   # gebeurtenis maar een toestand: hij blijft vol tot iemand er iets aan doet, en
   # vier keer per dag hetzelfde zeggen is hoe een melding een ding wordt dat je
@@ -101,6 +117,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     drift_interval_ms = Keyword.get(opts, :drift_interval_ms, @default_drift_interval_ms)
     purge_interval_ms = Keyword.get(opts, :purge_interval_ms, @default_purge_interval_ms)
     schijf_interval_ms = Keyword.get(opts, :schijf_interval_ms, @default_schijf_interval_ms)
+    mollie_interval_ms = Keyword.get(opts, :mollie_interval_ms, @default_mollie_interval_ms)
 
     schedule_tick(interval_ms)
     HartslagNaarBuiten.meld_stand()
@@ -120,6 +137,8 @@ defmodule ControlPlane.Fleet.Reconciler do
        schijf_interval_ms: schijf_interval_ms,
        last_schijf_ms: nil,
        last_schijf_alarm_ms: nil,
+       mollie_interval_ms: mollie_interval_ms,
+       last_mollie_ms: nil,
        last_hartslag_ms: nil
      }}
   end
@@ -155,6 +174,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     state = maybe_purge_commands(state)
     state = maybe_scrub_vpses(state)
     state = maybe_check_schijf(state)
+    state = maybe_verzoen_betalingen(state)
     settle_subscriptions()
     roll_out_agent()
     meld_vastgelopen_commandos()
@@ -276,6 +296,32 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp maybe_check_schijf(state), do: state
+
+  # De webhook blijft de snelle weg; dit is de tweede kans. Zonder eigen rescue
+  # zou een Mollie die er even uit ligt de rest van deze tik meenemen, en daar
+  # hangen back-ups en facturatie aan.
+  defp maybe_verzoen_betalingen(%{mollie_interval_ms: mi, last_mollie_ms: last} = state) do
+    now = System.monotonic_time(:millisecond)
+
+    if is_nil(last) or now - last >= mi do
+      verzoen_betalingen()
+      %{state | last_mollie_ms: now}
+    else
+      state
+    end
+  end
+
+  defp maybe_verzoen_betalingen(state), do: state
+
+  defp verzoen_betalingen do
+    if Mollie.configured?(), do: MollieAfhandeling.verzoen()
+  rescue
+    exception ->
+      Logger.error(
+        "mollie-verzoening faalde: " <> Exception.message(exception),
+        crash_reason: {exception, __STACKTRACE__}
+      )
+  end
 
   defp maybe_piep(%{last_hartslag_ms: last} = state),
     do: %{state | last_hartslag_ms: HartslagNaarBuiten.piep(last)}

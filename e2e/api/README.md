@@ -26,6 +26,7 @@ Er zijn geen afhankelijkheden buiten de standaardbibliotheek.
 | `t8_bestellen.py` | het geldpad: te duur, zonder vinkje, twee keer tegelijk |
 | `t9_levenspad.py` | detail, hernoemen, console-ticket, tien herstarts tegelijk |
 | `t10_console.py` | wie er op de webterminal mag |
+| `t11_foutcontract.py` | de uitgerolde foutcodes: status én code, en er beweegt geen geld |
 
 ## Drie valkuilen die hier al ingebouwd zitten
 

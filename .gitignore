@@ -19,3 +19,6 @@ agent/bunk-agent-new
 
 # Het wachtwoord van het testaccount hoort hier nooit in te staan.
 .testpw
+
+# Het API-harnas importeert harnas.py, en python zet daar bytecode naast.
+__pycache__/

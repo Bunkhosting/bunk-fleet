@@ -58,6 +58,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   not_found: "Niet gevonden.",
   rate_limited: "Te veel pogingen. Probeer het over een minuutje opnieuw.",
   captcha_failed: "De verificatie is niet gelukt. Probeer het opnieuw.",
+  invalid_password: "Het opgegeven wachtwoord klopt niet.",
+  totp_already_enabled: "Tweestapsverificatie staat al aan voor dit account.",
+  challenge_expired: "Dit duurde te lang. Begin opnieuw.",
+  invalid_passkey: "Deze passkey kon niet gelezen worden. Probeer het opnieuw.",
 
   // Een VPS bestellen
   insufficient_credits: "Je tegoed is niet toereikend voor deze VPS.",
@@ -119,6 +123,12 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_role: "Deze rol bestaat niet.",
   unknown_user: "Deze gebruiker bestaat niet.",
   invalid_owner: "Deze eigenaar bestaat niet.",
+  user_not_found: "Deze gebruiker bestaat niet.",
+  invalid_node: "Deze node kan zo niet opgeslagen worden.",
+  invalid_enroll_token: "Deze uitnodiging is ongeldig of al gebruikt.",
+  topup_not_found: "Deze betaling bestaat niet.",
+  not_pending: "Deze betaling staat niet meer open.",
+  invalid_date: "Deze datum kan niet.",
   no_node: "Er is geen node waar dit op kan draaien.",
 
   // Geldt overal: een verzoek dat groter is dan wat we aannemen.
