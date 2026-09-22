@@ -473,4 +473,92 @@ defmodule ControlPlane.BackupsTest do
       assert {:ok, :already_gone} = Backups.forget(Ecto.UUID.generate())
     end
   end
+
+  describe "archieven van verwijderde VPS'en" do
+    # `qm destroy` sloopt de gast en zijn schijf en laat de vzdump-archieven
+    # staan. Een archief is een volledige kopie van diezelfde schijf, en het
+    # verwerkingsregister belooft dat die bij verwijdering vernietigd wordt.
+    # Deze tests leggen vast wat er wél en vooral wat er NIET wordt opgeruimd:
+    # dit is de enige plek in het systeem die uit zichzelf klantgegevens
+    # weggooit, en te ruim is hier erger dan te krap.
+
+    test "het archief van een verwijderde VPS wordt ingepland om te verdwijnen" do
+      r = region()
+      n = node_in(r)
+      weg = vps(r, n, %{status: :deleted})
+      backup(weg, %{status: :done, volid: "local:backup/a.vma.zst", finished_at: ago(300)})
+
+      assert {:ok, 1} = Backups.ruim_wees_archieven_op()
+
+      assert [%Command{kind: :delete_backup, payload: %{"volid" => "local:backup/a.vma.zst"}}] =
+               commands_for(weg.id, :delete_backup)
+    end
+
+    test "het archief van een VPS die nog draait blijft met rust" do
+      r = region()
+      n = node_in(r)
+      levend = vps(r, n)
+      backup(levend, %{status: :done, volid: "local:backup/b.vma.zst", finished_at: ago(300)})
+
+      assert {:ok, 0} = Backups.ruim_wees_archieven_op()
+      assert [] = commands_for(levend.id, :delete_backup)
+    end
+
+    test "twee rondes achter elkaar plannen niet twee keer hetzelfde in" do
+      # Zonder deze bescherming staan er na een uur vier commando's voor één
+      # bestand, en de bewaker op vastgelopen commando's mailt erover.
+      r = region()
+      n = node_in(r)
+      weg = vps(r, n, %{status: :deleted})
+      backup(weg, %{status: :done, volid: "local:backup/c.vma.zst", finished_at: ago(300)})
+
+      assert {:ok, 1} = Backups.ruim_wees_archieven_op()
+      assert {:ok, 0} = Backups.ruim_wees_archieven_op()
+      assert [_een] = commands_for(weg.id, :delete_backup)
+    end
+
+    test "een node die zwijgt krijgt geen opruimwerk" do
+      # Het commando zou blijven staan tot hij terugkomt, en intussen meldt de
+      # bewaker op vastgelopen commando's het als probleem -- een mail over een
+      # machine die gewoon uit staat.
+      r = region()
+      stil = node_in(r)
+      Repo.update!(Ecto.Changeset.change(stil, last_heartbeat_at: ago(3600)))
+      weg = vps(r, stil, %{status: :deleted})
+      backup(weg, %{status: :done, volid: "local:backup/d.vma.zst", finished_at: ago(300)})
+
+      assert {:ok, 0} = Backups.ruim_wees_archieven_op()
+      assert [] = commands_for(weg.id, :delete_backup)
+    end
+
+    test "een back-up zonder archief valt er niet onder" do
+      # Een mislukte of nog lopende back-up heeft geen bestand op de node. Een
+      # verwijderopdracht sturen voor niets levert een commando op dat nergens
+      # over gaat.
+      r = region()
+      n = node_in(r)
+      weg = vps(r, n, %{status: :deleted})
+      backup(weg, %{status: :failed, error: "vzdump viel om", finished_at: ago(300)})
+
+      assert {:ok, 0} = Backups.ruim_wees_archieven_op()
+      assert [] = commands_for(weg.id, :delete_backup)
+    end
+
+    test "de ronde is begrensd" do
+      r = region()
+      n = node_in(r)
+      weg = vps(r, n, %{status: :deleted})
+
+      for i <- 1..5 do
+        backup(weg, %{
+          status: :done,
+          volid: "local:backup/veel-#{i}.vma.zst",
+          finished_at: ago(300 + i)
+        })
+      end
+
+      assert {:ok, 2} = Backups.ruim_wees_archieven_op(2)
+      assert length(commands_for(weg.id, :delete_backup)) == 2
+    end
+  end
 end

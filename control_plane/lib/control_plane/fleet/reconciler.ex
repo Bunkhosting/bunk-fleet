@@ -88,6 +88,12 @@ defmodule ControlPlane.Fleet.Reconciler do
   # bij zijn bank staat.
   @default_mollie_interval_ms 15 * 60 * 1000
 
+  # Elk half uur de archieven opruimen van VPS'en die niet meer bestaan. Dat is
+  # geen schoonmaak maar een belofte: het verwerkingsregister zegt dat de schijf
+  # van een verwijderde VPS vernietigd wordt, en een vzdump-archief is een
+  # volledige kopie van diezelfde schijf. `qm destroy` laat die staan.
+  @default_archief_interval_ms 30 * 60 * 1000
+
   # Hoogstens één melding per etmaal over de schijf. Een volle schijf is geen
   # gebeurtenis maar een toestand: hij blijft vol tot iemand er iets aan doet, en
   # vier keer per dag hetzelfde zeggen is hoe een melding een ding wordt dat je
@@ -118,6 +124,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     purge_interval_ms = Keyword.get(opts, :purge_interval_ms, @default_purge_interval_ms)
     schijf_interval_ms = Keyword.get(opts, :schijf_interval_ms, @default_schijf_interval_ms)
     mollie_interval_ms = Keyword.get(opts, :mollie_interval_ms, @default_mollie_interval_ms)
+    archief_interval_ms = Keyword.get(opts, :archief_interval_ms, @default_archief_interval_ms)
 
     schedule_tick(interval_ms)
     HartslagNaarBuiten.meld_stand()
@@ -139,6 +146,8 @@ defmodule ControlPlane.Fleet.Reconciler do
        last_schijf_alarm_ms: nil,
        mollie_interval_ms: mollie_interval_ms,
        last_mollie_ms: nil,
+       archief_interval_ms: archief_interval_ms,
+       last_archief_ms: nil,
        last_hartslag_ms: nil
      }}
   end
@@ -175,6 +184,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     state = maybe_scrub_vpses(state)
     state = maybe_check_schijf(state)
     state = maybe_verzoen_betalingen(state)
+    state = maybe_ruim_archieven(state)
     settle_subscriptions()
     roll_out_agent()
     meld_vastgelopen_commandos()
@@ -312,6 +322,29 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp maybe_verzoen_betalingen(state), do: state
+
+  defp maybe_ruim_archieven(%{archief_interval_ms: ai, last_archief_ms: last} = state) do
+    now = System.monotonic_time(:millisecond)
+
+    if is_nil(last) or now - last >= ai do
+      ruim_archieven()
+      %{state | last_archief_ms: now}
+    else
+      state
+    end
+  end
+
+  defp maybe_ruim_archieven(state), do: state
+
+  defp ruim_archieven do
+    Backups.ruim_wees_archieven_op()
+  rescue
+    exception ->
+      Logger.error(
+        "opruimen van wees-archieven faalde: " <> Exception.message(exception),
+        crash_reason: {exception, __STACKTRACE__}
+      )
+  end
 
   defp verzoen_betalingen do
     if Mollie.configured?(), do: MollieAfhandeling.verzoen()

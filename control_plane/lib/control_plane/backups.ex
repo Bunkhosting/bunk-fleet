@@ -262,9 +262,15 @@ defmodule ControlPlane.Backups do
       )
 
     # One lookup, not one per stale row: vps_id does not change inside the loop.
-    # A VPS that is already gone queues nothing — the node tore its archives down
-    # with it, and a delete_backup command for a VPS row that no longer exists
-    # cannot be finalised.
+    # Een rij die er niet meer is kan geen commando afronden, dus dan queuet dit
+    # niets.
+    #
+    # Hier stond ooit bij dat een verwijderde VPS zijn archieven meenam. Dat is
+    # niet waar: `qm destroy` sloopt de gast en zijn schijf, en laat de
+    # vzdump-archieven staan. Op de eerste node die dit opviel stonden veertien
+    # gigabyte aan schijfkopieën van machines die niet meer bestonden -- en het
+    # verwerkingsregister belooft dat de schijf bij verwijdering vernietigd
+    # wordt. `ruim_wees_archieven_op/1` doet dat nu.
     queued =
       case Repo.get(Vps, vps_id) do
         nil -> 0
@@ -291,6 +297,78 @@ defmodule ControlPlane.Backups do
       |> Repo.insert()
 
     match?({:ok, _}, result)
+  end
+
+  # Hoeveel archieven per ronde. Elk commando is minuten schijfwerk op de node;
+  # een achterstand van honderd in één keer wegzetten zou een node urenlang
+  # bezig houden met opruimen terwijl er klanten op wachten.
+  @per_ronde 25
+
+  @doc """
+  Queuet de verwijdering van archieven die bij een verwijderde VPS horen.
+
+  `qm destroy` sloopt de gast en zijn schijf, maar laat de vzdump-archieven
+  staan -- en een archief is een volledige kopie van diezelfde schijf. Zonder
+  dit blijft de inhoud van een opgezegde VPS dus op de node liggen, terwijl het
+  verwerkingsregister zegt dat hij bij verwijdering vernietigd wordt.
+
+  Dit is met opzet een ronde en geen haakje aan het verwijderpad: zo haalt hij
+  ook de achterstand op die er al ligt, en hij is herhaalbaar. Een node die net
+  niet praat, komt de volgende ronde weer langs.
+
+  Geeft terug hoeveel verwijderingen zijn ingepland.
+  """
+  @spec ruim_wees_archieven_op(pos_integer()) :: {:ok, non_neg_integer()}
+  def ruim_wees_archieven_op(per_ronde \\ @per_ronde) do
+    # Een node die niet praat, ruimt ook niets op. Commando's zijn duurzaam, dus
+    # ze zouden blijven staan tot hij terugkomt -- maar dan meldt de bewaker op
+    # vastgelopen commando's ze intussen als probleem, en dat is een mail over
+    # een machine die gewoon uit staat.
+    grens = DateTime.add(Clock.now(), -@node_levend_seconds, :second)
+
+    wezen =
+      Repo.all(
+        from b in VpsBackup,
+          join: v in Vps,
+          on: v.id == b.vps_id,
+          join: n in ControlPlane.Fleet.Node,
+          on: n.id == b.node_id,
+          where:
+            v.status == :deleted and b.status == :done and not is_nil(b.volid) and
+              not is_nil(n.last_heartbeat_at) and n.last_heartbeat_at > ^grens,
+          order_by: [asc: b.finished_at],
+          limit: ^per_ronde
+      )
+
+    # Wat al in de rij staat, staat al in de rij. Zonder deze stap queuet elke
+    # ronde dezelfde verwijdering er nog eens bij, en dan staan er na een uur
+    # vier commando's voor één bestand.
+    onderweg = onderweg_backup_ids(Enum.map(wezen, & &1.id))
+
+    ingepland =
+      wezen
+      |> Enum.reject(&(&1.id in onderweg))
+      |> Enum.count(&queue_archive_delete(&1, &1.vps_id))
+
+    if ingepland > 0 do
+      Logger.info("#{ingepland} archief(en) van verwijderde VPS'en ingepland om op te ruimen")
+    end
+
+    {:ok, ingepland}
+  end
+
+  defp onderweg_backup_ids([]), do: MapSet.new()
+
+  defp onderweg_backup_ids(backup_ids) do
+    ids = Enum.map(backup_ids, &to_string/1)
+
+    Repo.all(
+      from c in Command,
+        where: c.kind == :delete_backup and c.status in [:pending, :delivered],
+        where: fragment("?->>'backup_id' = ANY(?)", c.payload, ^ids),
+        select: fragment("?->>'backup_id'", c.payload)
+    )
+    |> MapSet.new()
   end
 
   @doc "Forgets a backup the node has confirmed it deleted."
