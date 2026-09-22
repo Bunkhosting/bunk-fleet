@@ -1,17 +1,29 @@
 import type { Metadata } from "next";
-import { Inter, Manrope } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ObservabilityInit } from "@/components/observability-init";
 
-const inter = Inter({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+// Van schijf en niet van Google. `next/font/google` haalt deze bestanden op
+// tijdens de BUILD -- in productie gaat er niets naar Google, dat is nagemeten --
+// maar daarmee hangt elke uitrol aan het bereikbaar zijn van een derde partij.
+// Dat viel om toen de buildcontainer fonts.googleapis.com naar IPv6 oploste en
+// daar niet bij kon: een uitrol die stilvalt om een reden die niets met de
+// wijziging te maken heeft. Zie fonts/LEESMIJ.md.
+//
+// Eén bestand per familie: het zijn variabele fonts, dus het hele
+// gewichtsbereik zit erin. De acht losse gewichten die Google serveert waren
+// byte voor byte hetzelfde bestand.
+const inter = localFont({
+  src: "./fonts/inter-latin.woff2",
+  weight: "400 700",
+  display: "swap",
   variable: "--font-inter",
 });
-const manrope = Manrope({
-  subsets: ["latin"],
-  weight: ["400", "600", "700", "800"],
+const manrope = localFont({
+  src: "./fonts/manrope-latin.woff2",
+  weight: "400 800",
+  display: "swap",
   variable: "--font-manrope",
 });
 
