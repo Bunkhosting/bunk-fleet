@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Bunk-Hosting/bunk-fleet/agent/internal/provider"
 )
@@ -26,6 +27,10 @@ const backupStorage = "local"
 // more consistent archive at the cost of taking a customer's machine down every
 // night, which is not a trade anyone would accept for a backup they hope never
 // to need.
+// Hoelang we hoogstens nog zoeken naar een archief nadat het wachten is
+// afgebroken. Eén listing; duurt dat langer, dan praat de node niet meer.
+const archiefZoekGrens = 10 * time.Second
+
 func (c *Client) BackupVM(ctx context.Context, id string) (provider.Backup, error) {
 	vmid, err := strconv.Atoi(id)
 	if err != nil {
@@ -45,12 +50,35 @@ func (c *Client) BackupVM(ctx context.Context, id string) (provider.Backup, erro
 		"remove": {"0"},
 	}
 
+	// Het moment waarop dit begon. Een archief dat hierna is ontstaan kan alleen
+	// van deze aanroep zijn; een ouder archief is van een vorige back-up en mag
+	// nooit voor de onze doorgaan.
+	begonnen := time.Now().Unix()
+
 	var task taskResponse
 	path := fmt.Sprintf("/nodes/%s/vzdump", c.cfg.Node)
 	if err := c.doJSON(ctx, http.MethodPost, path, form, &task); err != nil {
 		return provider.Backup{}, fmt.Errorf("proxmox: vzdump vm %d: %w", vmid, err)
 	}
 	if err := c.waitTask(ctx, task.Data); err != nil {
+		// Proxmox werkt door als wij ophouden met kijken. Wordt de agent
+		// herstart terwijl er een back-up loopt, dan valt het commando weg, maar
+		// de vzdump loopt op de node gewoon af en laat een archief achter.
+		//
+		// Melden wij dan enkel "mislukt", dan gebeuren er twee dingen. De klant
+		// leest dat zijn back-up niet is gelukt terwijl hij er wel staat. En
+		// erger: het control plane kent alleen archieven waarvan het de volid
+		// heeft, dus dat bestand heeft vanaf dat moment geen handvat meer en kan
+		// door niemand nog worden opgeruimd. Zo bleef er twee gigabyte staan van
+		// machines die allang weg waren.
+		//
+		// Daarom eerst kijken of er alsnog een archief is verschenen. Zo ja, dan
+		// is de back-up gelukt en melden we dat -- met de volid, zodat hij later
+		// ook weer weg kan.
+		if archief, gevonden := c.archiefSinds(ctx, storage, vmid, begonnen); gevonden {
+			return archief, nil
+		}
+
 		return provider.Backup{}, fmt.Errorf("proxmox: vzdump vm %d: %w", vmid, err)
 	}
 
@@ -99,6 +127,34 @@ type storageContent struct {
 		CTime int64  `json:"ctime"`
 		VMID  any    `json:"vmid"`
 	} `json:"data"`
+}
+
+// archiefSinds zoekt een archief van deze gast dat ná `sinds` is ontstaan.
+//
+// Draait bewust op een LOSSE context: dit wordt aangeroepen juist wanneer de
+// oorspronkelijke is afgebroken, en met die context zou de vraag meteen weer
+// stuklopen. De grens is kort -- het is één listing, en als de node op dit
+// moment niet praat, is er niets meer te redden.
+func (c *Client) archiefSinds(ctx context.Context, storage string, vmid int, sinds int64) (provider.Backup, bool) {
+	los, annuleer := context.WithTimeout(context.WithoutCancel(ctx), archiefZoekGrens)
+	defer annuleer()
+
+	path := fmt.Sprintf("/nodes/%s/storage/%s/content?content=backup&vmid=%d",
+		c.cfg.Node, url.PathEscape(storage), vmid)
+
+	var out storageContent
+	if err := c.doJSON(los, http.MethodGet, path, nil, &out); err != nil {
+		return provider.Backup{}, false
+	}
+
+	sort.Slice(out.Data, func(i, j int) bool { return out.Data[i].CTime > out.Data[j].CTime })
+	for _, kandidaat := range out.Data {
+		if kandidaat.CTime >= sinds {
+			return provider.Backup{VolID: kandidaat.VolID, SizeBytes: kandidaat.Size}, true
+		}
+	}
+
+	return provider.Backup{}, false
 }
 
 func (c *Client) newestBackup(ctx context.Context, storage string, vmid int) (provider.Backup, error) {
