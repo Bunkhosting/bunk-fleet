@@ -83,6 +83,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   unknown_region: "Deze locatie bestaat niet.",
   no_delivery_consent:
     "Bevestig dat je VPS meteen aangemaakt mag worden voordat je bestelt.",
+  order_in_progress:
+    "Je hebt al een bestelling lopen. Wacht tot die klaar is voor je er nog een plaatst.",
 
   // Een bestaande VPS bedienen. invalid_status_* zegt precies welke staat in de
   // weg zit, wat bruikbaarder is dan "dat kan nu niet".
@@ -91,6 +93,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_status_queued: "De VPS wordt nog voorbereid.",
   invalid_status_provisioning: "De VPS wordt nog aangemaakt.",
   invalid_status_restoring: "Er wordt een back-up teruggezet; wacht tot dat klaar is.",
+  invalid_status_deleted: "Deze VPS is verwijderd.",
   already_deleting: "Deze VPS wordt al verwijderd.",
   not_provisioned: "Deze VPS is nog niet klaar.",
   vps_not_active: "Dit kan alleen bij een draaiende VPS.",
@@ -105,6 +108,21 @@ const ERROR_MESSAGES: Record<string, string> = {
   payment_rejected: "De betaling is geweigerd.",
   payment_provider_error: "Betalen lukt nu even niet. Probeer het later opnieuw.",
   payments_unavailable: "Betalen is tijdelijk uitgeschakeld.",
+
+  // Het beheerpaneel. Deze codes zien alleen wij, maar de contextuele zin van
+  // het paneel ("verwijderen is niet gelukt") laat in het midden wat er dan wél
+  // moet gebeuren -- en dat is hier juist het hele antwoord.
+  user_has_vpses: "Deze klant heeft nog VPS'en. Verwijder die eerst.",
+  node_has_vpses: "Op deze node draaien nog VPS'en. Verplaats of verwijder die eerst.",
+  cannot_delete_self: "Je kunt je eigen account niet verwijderen.",
+  cannot_demote_self: "Je kunt je eigen beheerdersrol niet afnemen.",
+  invalid_role: "Deze rol bestaat niet.",
+  unknown_user: "Deze gebruiker bestaat niet.",
+  invalid_owner: "Deze eigenaar bestaat niet.",
+  no_node: "Er is geen node waar dit op kan draaien.",
+
+  // Geldt overal: een verzoek dat groter is dan wat we aannemen.
+  input_too_large: "Wat je verstuurde is te groot.",
 };
 
 /**

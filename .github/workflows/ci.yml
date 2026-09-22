@@ -171,6 +171,16 @@ jobs:
       - name: Shellcheck
         run: shellcheck -S warning *.sh tools/*.sh provisioning/*/*.sh
 
+  # De enige controle die over de grens tussen Elixir en TypeScript heen kijkt.
+  # `mix test` ziet frontend/ niet en de e2e-suite kent de foutentabel niet;
+  # hier staat de hele repo er wel. Kosten: een seconde.
+  foutcodes:
+    name: Foutcodes hebben een zin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/foutcodes.py
+
   # De e2e-suite draait niet in de CI -- hij heeft een live omgeving nodig en
   # die zetten we niet op voor elke push. Wat hier wel kan is kijken of hij nog
   # compileert: een suite die pas stukgaat op het moment dat je hem nodig hebt,
