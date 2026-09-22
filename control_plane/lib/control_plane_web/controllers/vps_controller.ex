@@ -449,7 +449,24 @@ defmodule ControlPlaneWeb.VpsController do
     Application.get_env(:control_plane, :default_template_id, 9000)
   end
 
+  # Wat dit antwoord over een VPS zegt, hangt af van wat de aanroeper toevallig
+  # had geladen. Dat is geen detail: `region`, `public_host`, `ssh_port` en
+  # `port_forwards` vielen allemaal terug op `nil` of `[]` zodra hun associatie
+  # er niet in zat, en dat leest als "deze VPS heeft er geen" in plaats van
+  # "niemand heeft het opgehaald".
+  #
+  # Zichtbaar bij herstellen, verwijderen en hernoemen: die geven de struct door
+  # die de context teruggaf, zonder preload. De regio verdween daar uit het
+  # antwoord. Geen klant heeft het gemerkt omdat het scherm die antwoorden
+  # negeert en opnieuw ophaalt -- maar een antwoord dat afhangt van de weg
+  # erheen is een antwoord waar je niet op kunt bouwen.
+  #
+  # `Repo.preload/2` is gratis voor wat al geladen is, dus de paden die het goed
+  # deden betalen hier niets voor. `package_json/1` deed dit al op zijn eigen
+  # manier; nu doet de rest het ook.
   defp vps_json(%Vps{} = vps) do
+    vps = Repo.preload(vps, [:region, :node, :port_forwards])
+
     %{
       id: vps.id,
       name: vps.name,
