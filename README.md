@@ -118,7 +118,7 @@ voordat je commit.
   faalmodi en de gefaseerde roadmap.
 - [`docs/protocol.md`](docs/protocol.md) — het contract tussen agent en control
   plane (Enroll, Heartbeat, Command, CommandResult), transport en beveiliging.
-- [`docs/runbooks/`](docs/runbooks/) — een node toevoegen, back-up en herstel.
+- [`docs/runbooks/`](docs/runbooks/) — een node toevoegen, back-up en herstel, een betaling die niet aankwam.
 - [`docs/security/`](docs/security/) — securitybeoordeling en het
   misuse-caseregister.
 - [`docs/privacy/`](docs/privacy/) — de AVG-beoordeling.
