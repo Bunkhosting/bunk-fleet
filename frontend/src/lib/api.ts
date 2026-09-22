@@ -63,6 +63,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   insufficient_credits: "Je tegoed is niet toereikend voor deze VPS.",
   quota_exceeded: "Je hebt het maximum aantal VPS'en bereikt.",
   no_capacity: "Er is op dit moment geen capaciteit vrij in deze regio.",
+  port_pool_exhausted:
+    "Deze machine heeft geen vrije poorten meer voor nieuwe VPS'en. Probeer een andere locatie.",
 
   // Een locatie verwijderen. Drie redenen waarom het niet kan, en ze vragen om
   // iets anders van degene die het probeert.

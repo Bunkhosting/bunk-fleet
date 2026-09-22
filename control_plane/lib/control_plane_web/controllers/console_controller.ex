@@ -13,6 +13,7 @@ defmodule ControlPlaneWeb.ConsoleController do
   alias ControlPlane.Console
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Vps
+  alias ControlPlaneWeb.Fouten
 
   def create_ticket(conn, %{"id" => id}) do
     user = conn.assigns.current_user
@@ -22,10 +23,12 @@ defmodule ControlPlaneWeb.ConsoleController do
          true <- is_binary(ip) and ip != "" do
       json(conn, %{ticket: Console.Tickets.mint(uuid, user.id)})
     else
-      :error -> error(conn, :not_found, "not_found")
-      nil -> error(conn, :not_found, "not_found")
+      # Deze twee zijn geen foutredenen maar uitkomsten van de `with` zelf: een
+      # VPS die bestaat maar niet draait, en een VPS zonder adres. Ze blijven
+      # hier staan omdat ze hier iets betekenen.
       %Vps{} -> error(conn, :conflict, "vps_not_active")
       false -> error(conn, :conflict, "console_unavailable")
+      anders -> Fouten.fout(conn, anders)
     end
   end
 

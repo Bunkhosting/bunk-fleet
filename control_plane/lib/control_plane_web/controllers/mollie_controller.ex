@@ -11,11 +11,11 @@ defmodule ControlPlaneWeb.MollieController do
       retrying; the credit work is safe to repeat.
   """
   use ControlPlaneWeb, :controller
-  import ControlPlaneWeb.ApiResponse
   require Logger
 
   alias ControlPlane.Credits
   alias ControlPlane.Mollie
+  alias ControlPlaneWeb.Fouten
 
   # Mollie states that mean the money will never arrive. Anything else is either
   # paid or still in flight, and a topup in flight stays pending.
@@ -46,15 +46,6 @@ defmodule ControlPlaneWeb.MollieController do
          {:ok, _} <- Credits.attach_mollie_payment(tr, payment.id) do
       json(conn, %{checkout_url: payment.checkout_url, payment_id: payment.id})
     else
-      {:error, :invalid_amount} ->
-        error(conn, :unprocessable_entity, "invalid_amount")
-
-      {:error, :too_many_pending} ->
-        error(conn, :too_many_requests, "too_many_pending_topups")
-
-      {:error, :not_configured} ->
-        error(conn, :service_unavailable, "payments_unavailable")
-
       {:error, {:mollie_http, status, body}} when status in 400..499 ->
         # A 4xx from Mollie is a rejected request (e.g. an unregistered redirect
         # domain), not a gateway outage — surface the reason as 422 so it reaches
@@ -66,9 +57,13 @@ defmodule ControlPlaneWeb.MollieController do
         |> put_status(:unprocessable_entity)
         |> json(%{error: "payment_rejected", detail: detail})
 
-      {:error, reason} ->
-        Logger.warning("topup failed: #{inspect(reason)}")
-        error(conn, :bad_gateway, "payment_provider_error")
+      # Alles wat hierna komt is ofwel een reden die de tabel kent (een te klein
+      # bedrag, te veel openstaande opwaarderingen, geen sleutel ingesteld),
+      # ofwel iets onverwachts van de provider. Dat laatste is geen gat in onze
+      # tabel maar een partij die iets anders doet dan afgesproken, en dan is 502
+      # het eerlijke antwoord.
+      anders ->
+        Fouten.fout(conn, anders, onbekend: {:bad_gateway, "payment_provider_error"})
     end
   end
 

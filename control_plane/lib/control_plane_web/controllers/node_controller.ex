@@ -13,6 +13,7 @@ defmodule ControlPlaneWeb.NodeController do
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
+  alias ControlPlaneWeb.Fouten
 
   @doc """
   De nodes van de ingelogde gebruiker, met de locaties waar hij ze heen kan zetten.
@@ -45,13 +46,7 @@ defmodule ControlPlaneWeb.NodeController do
            Fleet.update_node_settings(node_id, conn.assigns.current_user, settings(params)) do
       json(conn, %{node: node_json(node)})
     else
-      {:error, %Ecto.Changeset{} = changeset} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "invalid_settings", details: errors(changeset)})
-
-      _ ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      anders -> Fouten.fout(conn, anders, changeset_code: "invalid_settings")
     end
   end
 
@@ -59,14 +54,6 @@ defmodule ControlPlaneWeb.NodeController do
   # rest ook weigeren, maar een allow-list hier maakt zichtbaar wat er bedoeld is.
   defp settings(params) do
     Map.take(params, Enum.map(Node.settings_fields(), &Atom.to_string/1))
-  end
-
-  defp errors(changeset) do
-    Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {k, v}, acc ->
-        String.replace(acc, "%{#{k}}", to_string(v))
-      end)
-    end)
   end
 
   @doc """
@@ -83,16 +70,9 @@ defmodule ControlPlaneWeb.NodeController do
          {:ok, node} <- Fleet.assign_node_owner(node_id, conn.assigns.current_user, owner_id) do
       json(conn, %{node: node_json(node)})
     else
-      {:error, :unknown_user} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "unknown_user"})
-
-      {:error, :invalid_owner} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_owner"})
-
-      # Ook bij :forbidden een 404: dat een node bestaat is zelf al iets wat een
-      # vreemde niet hoeft te weten.
-      _ ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      # Dat `:forbidden` hier een 404 wordt -- een node die van een ander is mag
+      # niet eens blijken te bestaan -- staat in ControlPlaneWeb.Fouten.
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
@@ -134,14 +114,7 @@ defmodule ControlPlaneWeb.NodeController do
            Fleet.move_node_to_named_region(node_id, conn.assigns.current_user, naam) do
       json(conn, %{node: node_json(node)})
     else
-      {:error, :invalid_region} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_region"})
-
-      {:error, %Ecto.Changeset{}} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_region"})
-
-      _ ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      anders -> Fouten.fout(conn, anders, changeset_code: "invalid_region")
     end
   end
 
@@ -151,13 +124,7 @@ defmodule ControlPlaneWeb.NodeController do
          {:ok, node} <- Fleet.move_node_to_region(node_id, conn.assigns.current_user, target) do
       json(conn, %{node: node_json(node)})
     else
-      {:error, :unknown_region} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "unknown_region"})
-
-      # Alles wat overblijft is "bestaat niet of is niet van jou", en dat verschil
-      # hoort een vreemde niet te leren kennen.
-      _ ->
-        conn |> put_status(:not_found) |> json(%{error: "not_found"})
+      anders -> Fouten.fout(conn, anders)
     end
   end
 

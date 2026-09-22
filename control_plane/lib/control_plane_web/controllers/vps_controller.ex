@@ -136,29 +136,14 @@ defmodule ControlPlaneWeb.VpsController do
 
       {:gelukt, antwoord, vps.id}
     else
+      # `nil` betekent hier iets anders dan overal elders: niet "bestaat niet"
+      # maar "er is geen pakket dat bij deze specificaties hoort". Vandaar een
+      # eigen tak vóór de algemene afhandeling, die er een 404 van zou maken.
       nil ->
         {:mislukt, error(conn, :unprocessable_entity, "no_matching_package")}
 
-      {:error, :input_too_large} ->
-        {:mislukt, error(conn, :unprocessable_entity, "input_too_large")}
-
-      {:error, :no_delivery_consent} ->
-        {:mislukt, error(conn, :unprocessable_entity, "no_delivery_consent")}
-
-      {:error, :region_not_found} ->
-        {:mislukt, error(conn, :unprocessable_entity, "region_not_found")}
-
-      {:error, :insufficient_credits} ->
-        {:mislukt, error(conn, :payment_required, "insufficient_credits")}
-
-      {:error, :quota_exceeded} ->
-        {:mislukt, error(conn, :too_many_requests, "quota_exceeded")}
-
-      {:error, :no_capacity} ->
-        {:mislukt, error(conn, :conflict, "no_capacity")}
-
-      {:error, _reason} ->
-        {:mislukt, error(conn, :unprocessable_entity, "invalid_vps")}
+      anders ->
+        {:mislukt, Fouten.fout(conn, anders, changeset_code: "invalid_vps")}
     end
   end
 
@@ -306,10 +291,7 @@ defmodule ControlPlaneWeb.VpsController do
          {:ok, hernoemd} <- Fleet.rename_vps(vps, naam) do
       json(conn, %{vps: vps_json(hernoemd)})
     else
-      {:error, :invalid_status} -> error(conn, :conflict, "invalid_status_deleted")
-      {:error, %Ecto.Changeset{}} -> error(conn, :unprocessable_entity, "invalid_vps")
-      nil -> not_found(conn)
-      :error -> not_found(conn)
+      anders -> Fouten.fout(conn, anders, changeset_code: "invalid_vps")
     end
   end
 
@@ -330,11 +312,7 @@ defmodule ControlPlaneWeb.VpsController do
          {:ok, _} <- transition.(id) do
       json(conn, %{detail: "ok"})
     else
-      {:error, {:invalid_status, status}} -> error(conn, :conflict, "invalid_status_#{status}")
-      {:error, reason} -> error(conn, :unprocessable_entity, to_string(reason))
-      nil -> not_found(conn)
-      :error -> not_found(conn)
-      anders -> not_found(conn, anders)
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
@@ -553,23 +531,4 @@ defmodule ControlPlaneWeb.VpsController do
 
   defp region_code(%Vps{region: %{code: code}}), do: code
   defp region_code(%Vps{}), do: nil
-
-  # 404 is hier een bewuste keuze en geen verlegenheid: wie niet de eigenaar is
-  # hoort niet te kunnen zien dát iets bestaat. De twee verwachte manieren om
-  # hier te komen -- een id dat geen UUID is (`:error`) en een VPS die niet van
-  # deze klant is (`nil`) -- zijn stil.
-  defp not_found(conn), do: error(conn, :not_found, "not_found")
-
-  # Alles wat híér komt is niet voorzien: een nieuwe weigeringsreden die een
-  # context erbij heeft gekregen zonder dat deze clausule is meegegroeid. Het
-  # antwoord blijft 404 (de klant hoort niets over de binnenkant), maar het mag
-  # niet stil zijn -- anders is het een knop die niets doet, en dat is het soort
-  # melding waar niemand een oorzaak bij kan vinden.
-  defp not_found(conn, onverwacht) do
-    Logger.warning(
-      "#{conn.method} #{conn.request_path}: onverwachte uitkomst #{inspect(onverwacht)}, beantwoord als 404"
-    )
-
-    not_found(conn)
-  end
 end

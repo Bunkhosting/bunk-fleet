@@ -18,6 +18,7 @@ defmodule ControlPlaneWeb.AuthController do
   use ControlPlaneWeb, :controller
 
   alias ControlPlane.Accounts
+  alias ControlPlaneWeb.Fouten
   alias ControlPlaneWeb.Plugs.Bearer
 
   # 7-day HttpOnly session cookie (matches the token's own lifetime).
@@ -404,13 +405,14 @@ defmodule ControlPlaneWeb.AuthController do
       {:error, :challenge_expired} ->
         conn |> put_status(:unprocessable_entity) |> json(%{error: "challenge_expired"})
 
-      {:error, %Ecto.Changeset{} = cs} ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: "invalid_passkey", details: changeset_errors(cs)})
-
-      _ ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_passkey"})
+      # Alles wat hier verder uit komt is één ding: deze passkey deugt niet. Dat
+      # is geen gat in de tabel maar de betekenis van dit endpoint, en daarom
+      # zegt de aanroeper dat hier in plaats van dat er een 500 uit rolt.
+      anders ->
+        Fouten.fout(conn, anders,
+          changeset_code: "invalid_passkey",
+          onbekend: {:unprocessable_entity, "invalid_passkey"}
+        )
     end
   end
 

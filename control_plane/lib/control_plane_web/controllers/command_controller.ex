@@ -21,6 +21,7 @@ defmodule ControlPlaneWeb.CommandController do
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Provisioning
   alias ControlPlane.Repo
+  alias ControlPlaneWeb.Fouten
 
   def index(conn, _params) do
     node = conn.assigns.current_node
@@ -75,10 +76,7 @@ defmodule ControlPlaneWeb.CommandController do
           |> json(%{error: error_message(reason)})
       end
     else
-      _ ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "not_found"})
+      anders -> Fouten.fout(conn, anders)
     end
   end
 
