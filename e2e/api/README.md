@@ -27,6 +27,8 @@ Er zijn geen afhankelijkheden buiten de standaardbibliotheek.
 | `t9_levenspad.py` | detail, hernoemen, console-ticket, tien herstarts tegelijk |
 | `t10_console.py` | wie er op de webterminal mag |
 | `t11_foutcontract.py` | de uitgerolde foutcodes: status én code, en er beweegt geen geld |
+| `t12_terminal.py` | de webterminal: opent hij, en legt een mislukking uit |
+| `webterminal.py` | kale WebSocket-client; geen test maar het gereedschap van t12 |
 
 ## Drie valkuilen die hier al ingebouwd zitten
 
