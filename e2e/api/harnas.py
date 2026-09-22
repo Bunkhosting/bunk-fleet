@@ -143,6 +143,21 @@ def lijst_uit(body):
     return []
 
 
+def mag_bestellen(wat="deze reeks"):
+    """Stopt een test die geld uitgeeft of iets achterlaat, tenzij het mag.
+
+    De regel stond in de moduledoc van dit bestand en werd door niets
+    afgedwongen -- een belofte in commentaar is geen grens. Wie een van deze
+    tests per ongeluk aanzet, koopt een VPS van iemands echte tegoed.
+
+    Zet MAG_BESTELLEN=1 in de omgeving om hem te draaien.
+    """
+    if os.environ.get("MAG_BESTELLEN") == "1":
+        return True
+    print(f"  overgeslagen: {wat} geeft geld uit. Zet MAG_BESTELLEN=1 als dat mag.")
+    return False
+
+
 def inloggen():
     status, body, _, _ = roep("POST", "/auth/login", {"email": EMAIL, "password": PW})
     if status != 200:
