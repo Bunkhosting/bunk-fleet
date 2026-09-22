@@ -1,5 +1,5 @@
 import { test, expect } from "../lib/fixtures";
-import { collectProblems, summarize } from "../lib/collect";
+import { collectProblems, schoon, summarize, verwachtSchoon } from "../lib/collect";
 import { APP, WWW, APP_PUBLIC_PATHS } from "../lib/targets";
 import { ga } from "../lib/navigatie";
 
@@ -30,17 +30,9 @@ for (const { name, url } of PAGES) {
       contentType: "image/png",
     });
 
-    expect.soft(problems.pageErrors, `onafgevangen JS-excepties op ${url}`).toEqual([]);
-    expect.soft(problems.consoleErrors, `console-errors op ${url}`).toEqual([]);
-    expect.soft(problems.failedRequests, `mislukte requests op ${url}`).toEqual([]);
-    expect.soft(problems.badStatus, `4xx/5xx subresources op ${url}`).toEqual([]);
-    expect.soft(problems.mixedContent, `mixed content op ${url}`).toEqual([]);
+    verwachtSchoon(problems, url);
 
-    if (
-      problems.consoleErrors.length ||
-      problems.badStatus.length ||
-      problems.failedRequests.length
-    ) {
+    if (!schoon(problems)) {
       testInfo.attach("problems.json", { body: summarize(problems), contentType: "application/json" });
     }
   });

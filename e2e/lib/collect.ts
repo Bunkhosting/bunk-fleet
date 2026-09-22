@@ -1,3 +1,4 @@
+import { expect } from "@playwright/test";
 import type { Page, Response, ConsoleMessage, Request } from "@playwright/test";
 
 export type PageProblems = {
@@ -79,6 +80,32 @@ export function collectProblems(page: Page): PageProblems {
   });
 
   return problems;
+}
+
+/**
+ * Legt vast dat een pagina niets vertoont wat een bezoeker niet hoort te zien.
+ *
+ * Dit staat hier en niet in de tests, om twee redenen. De vijf regels stonden
+ * woordelijk in public-pages.spec.ts en waren op weg naar een derde bestand.
+ * En belangrijker: `summarize` hieronder is een MELDING, geen oordeel -- die
+ * dumpt altijd het hele object, ook als er niets in zit. Wie hem als
+ * `toBe("")` gebruikt krijgt een volstrekt schone pagina rood terug. Dat
+ * gebeurde, op vier pagina's tegelijk, en het zag eruit als kapotte app.
+ *
+ * Alles soft: bij een pagina met drie problemen wil je ze alle drie zien, niet
+ * de eerste en daarna het donker.
+ */
+export function verwachtSchoon(p: PageProblems, waar: string): void {
+  expect.soft(p.pageErrors, `onafgevangen JS-excepties op ${waar}`).toEqual([]);
+  expect.soft(p.consoleErrors, `console-errors op ${waar}`).toEqual([]);
+  expect.soft(p.failedRequests, `mislukte requests op ${waar}`).toEqual([]);
+  expect.soft(p.badStatus, `4xx/5xx subresources op ${waar}`).toEqual([]);
+  expect.soft(p.mixedContent, `mixed content op ${waar}`).toEqual([]);
+}
+
+/** True als er niets te melden valt; bepaalt of een bijlage zin heeft. */
+export function schoon(p: PageProblems): boolean {
+  return Object.values(p).every((v) => v.length === 0);
 }
 
 /** Leesbare samenvatting voor in een assertion-melding. */
