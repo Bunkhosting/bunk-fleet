@@ -18,6 +18,7 @@ defmodule ControlPlane.MollieVerzoeningTest do
   use ControlPlane.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias ControlPlane.Accounts
   alias ControlPlane.Billing.MollieAfhandeling
@@ -174,5 +175,31 @@ defmodule ControlPlane.MollieVerzoeningTest do
     assert MollieAfhandeling.verzoen(900) == 1
     assert Credits.balance_cents(user.id) == voor
     assert stand(tr) == :pending
+  end
+
+  test "een betaling die de webhook al afhandelde levert geen vals alarm op", %{user: user} do
+    # De race: de verzoening haalt de rij op, en vóórdat hij bij Mollie is
+    # geweest handelt de webhook hem alsnog af. Dat de tweede bijschrijving niet
+    # doorgaat is elders vastgelegd (`mark_topup_paid` zit achter FOR UPDATE).
+    # Hier gaat het om de logregel.
+    #
+    # "alsnog bijgeschreven -- de webhook is nooit aangekomen" is geen
+    # kleurwoord: het is het enige signaal dat zegt dat Mollie ons niet kan
+    # bereiken. Zou de verzoening dat roepen bij een webhook die juist wél
+    # werkte, dan gaat iemand de tunnel zitten onderzoeken die niets mankeert --
+    # en erger, dan is de regel niets meer waard op de dag dat hij klopt.
+    id = "tr_#{System.unique_integer([:positive])}"
+    openstaand(user, 2500, id)
+    betaald = %{status: "paid", amount: %{"value" => "25.00", "currency" => "EUR"}}
+
+    # De webhook was eerst.
+    MollieAfhandeling.afhandelen(id, {:ok, betaald}, "webhook")
+    na_webhook = Credits.balance_cents(user.id)
+
+    log =
+      capture_log(fn -> MollieAfhandeling.afhandelen(id, {:ok, betaald}, "verzoening") end)
+
+    refute log =~ "alsnog bijgeschreven"
+    assert Credits.balance_cents(user.id) == na_webhook
   end
 end
