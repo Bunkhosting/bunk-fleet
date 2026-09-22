@@ -561,13 +561,26 @@ func (c *Client) magBridgeGebruiken(ctx context.Context) error {
 		}
 	}
 	// Kort genoeg om heel in het paneel te belanden: het control plane kapt een
-	// reden af, en juist het commando is het deel dat iemand nodig heeft. Het
-	// token-id staat er bewust niet in -- dat weet de eigenaar, en het hoeft niet
-	// in een database te belanden waar het niet thuishoort.
+	// reden af, en juist het commando is het deel dat iemand nodig heeft. Twee
+	// dingen die uit de praktijk kwamen toen iemand hiermee vastliep:
+	//
+	// Er stond `--tokens JOUW-TOKEN-ID`, en dat is een commando dat je niet kunt
+	// plakken -- je moet eerst ergens anders gaan zoeken, en dat is precies het
+	// moment waarop iemand afhaakt. De regel zoekt het id nu zelf op, en werkt
+	// of de node nu via de installer (bunk-worker) of met de hand (bunk-agent)
+	// is opgezet.
+	//
+	// En er werd een eigen rol aangemaakt terwijl Proxmox `PVESDNUser` al
+	// meelevert, met precies SDN.Audit en SDN.Use. Een tweede rol die hetzelfde
+	// doet is een tweede ding dat op elke node apart bestaat en bij een upgrade
+	// uit de pas kan gaan lopen.
+	//
+	// Het geheel past binnen de 240 tekens die een capaciteitsreden mag zijn, en
+	// dat is geen toeval: bij de vorige versie sneuvelde juist het commando.
 	return fmt.Errorf(
-		"proxmox: token mag geen kaart aan bridge %s hangen; SDN.Use ontbreekt. Op de host: "+
-			"pveum role add BunkSDNUse -privs SDN.Use && pveum acl modify "+
-			"/sdn/zones/localnetwork --tokens JOUW-TOKEN-ID --roles BunkSDNUse",
+		"proxmox: bridge %s mag niet van dit token (SDN.Use ontbreekt). Als root op de host: "+
+			"pveum acl modify /sdn/zones/localnetwork --roles PVESDNUser --tokens "+
+			"$(grep -h TOKEN_ID /etc/bunk-*/agent.env|cut -d= -f2)",
 		bridge)
 }
 

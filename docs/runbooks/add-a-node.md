@@ -26,9 +26,13 @@ browser console are all the agent dialling out over HTTPS.
   hand it is:
 
   ```sh
-  pveum role add BunkSDNUse -privs SDN.Use
-  pveum acl modify /sdn/zones/localnetwork --tokens 'user@realm!tokenid' --roles BunkSDNUse
+  pveum acl modify /sdn/zones/localnetwork --roles PVESDNUser --tokens 'user@realm!tokenid'
   ```
+
+  `PVESDNUser` ships with Proxmox and carries exactly `SDN.Audit` + `SDN.Use`.
+  An earlier version of this runbook told you to create a role of your own,
+  which did the same thing — but as a second role that exists separately on
+  every node and can drift apart on an upgrade.
 - **A cloud-init template** to clone. On a Proxmox host the installer builds one
   for you if the VMID the control plane provisions with does not exist yet: it
   pulls Ubuntu's own cloud image, verifies its published checksum, and turns it

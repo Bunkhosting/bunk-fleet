@@ -462,17 +462,17 @@ defmodule ControlPlaneWeb.WorkerInstallController do
       case "$SDNOK" in
         n|N)
           echo "  -> Overgeslagen. Draai dit zelf voordat je bestellingen verwacht:"
-          echo "     pveum role add BunkSDNUse -privs SDN.Use"
-          echo "     pveum acl modify /sdn/zones/localnetwork --tokens '$PXTID' --roles BunkSDNUse"
+          echo "     pveum acl modify /sdn/zones/localnetwork --roles PVESDNUser --tokens '$PXTID'"
           ;;
         *)
-          pveum role add BunkSDNUse -privs "SDN.Use" >/dev/null 2>&1 || true
-          if pveum acl modify /sdn/zones/localnetwork --tokens "$PXTID" --roles BunkSDNUse >/dev/null 2>&1; then
+          # PVESDNUser levert Proxmox zelf mee (SDN.Audit + SDN.Use). Een eigen
+          # rol aanmaken deed hetzelfde, maar dan als tweede ding dat op elke
+          # node apart bestaat en bij een upgrade uit de pas kan lopen.
+          if pveum acl modify /sdn/zones/localnetwork --roles PVESDNUser --tokens "$PXTID" >/dev/null 2>&1; then
             echo "  -> SDN.Use toegekend op /sdn/zones/localnetwork."
           else
             echo "  !! Toekennen lukte niet. Draai dit zelf:"
-            echo "     pveum role add BunkSDNUse -privs SDN.Use"
-            echo "     pveum acl modify /sdn/zones/localnetwork --tokens '$PXTID' --roles BunkSDNUse"
+            echo "     pveum acl modify /sdn/zones/localnetwork --roles PVESDNUser --tokens '$PXTID'"
           fi
           ;;
       esac
