@@ -419,22 +419,43 @@ defmodule ControlPlaneWeb.VpsController do
 
   defp resolve_region_id(%{"region_id" => region_id}, _attrs) when is_binary(region_id) do
     case valid_id(region_id) do
-      {:ok, id} -> {:ok, id}
+      {:ok, id} -> open_regio(Repo.get(Region, id))
       :error -> {:error, :region_not_found}
     end
   end
 
   defp resolve_region_id(%{"region_code" => region_code}, _attrs) when is_binary(region_code) do
-    case Fleet.region_by_code(region_code) do
-      %Region{id: id} -> {:ok, id}
-      nil -> {:error, :region_not_found}
-    end
+    open_regio(Fleet.region_by_code(region_code))
   end
 
   # No preference: Bunk picks. A named region that does not exist is still an
   # error — only the *absence* of one means "anywhere", so a typo'd region code
   # cannot quietly land a customer on the other side of the country.
   defp resolve_region_id(_params, attrs), do: Fleet.auto_region_id(attrs)
+
+  # Een gesloten locatie staat niet in de lijst die de klant te zien krijgt,
+  # maar dat is geen slot. Wie de code zelf meestuurt -- een oud tabblad, een
+  # script, iemands eigen client -- kwam er gewoon langs, en kreeg een draaiende
+  # machine in een regio die bewust dicht stond.
+  #
+  # Het wrange was welke kant beschermd was: `Fleet.auto_region_id/1` slaat een
+  # uitgeschakelde regio wél over, met een comment erbij waarom. Alleen de
+  # BEWUSTE keuze van een klant ging er ongehinderd langs. Gemeten op productie
+  # op 23 september: ehv stond dicht, en een bestelling met `region_code: "ehv"`
+  # gaf 201 en een provisionende VPS.
+  #
+  # Het beheerpad (`Admin.VpsController`) houdt dit bewust niet tegen: een
+  # locatie sluiten betekent "geen nieuwe klantbestellingen", niet "personeel
+  # kan er niets meer neerzetten".
+  # De reden heet naar de kolom (`enabled`), de code naar wat de klant leest.
+  # Dat onderscheid staat in de tabel zelf ook zo -- `:already_running` heet
+  # naar buiten `backup_already_running` -- en toen ik het hier door elkaar
+  # haalde gaf het systeem een 500 met "voeg hem toe aan ControlPlaneWeb.Fouten"
+  # in plaats van er stilletjes iets van te maken. Precies waarvoor die tabel er
+  # is.
+  defp open_regio(%Region{enabled: true, id: id}), do: {:ok, id}
+  defp open_regio(%Region{}), do: {:error, :region_disabled}
+  defp open_regio(nil), do: {:error, :region_not_found}
 
   defp valid_id(id) when is_binary(id) do
     case Ecto.UUID.cast(id) do

@@ -66,6 +66,11 @@ defmodule ControlPlaneWeb.Fouten do
     in_flight: {:conflict, "order_in_progress"},
     invalid_status: {:conflict, "invalid_status_deleted"},
     no_capacity: {:conflict, "no_capacity"},
+    # De locatie bestaat wel, maar neemt niets nieuws aan. Een conflict en geen
+    # 422: aan het verzoek mankeert niets, aan de toestand wel -- net als
+    # `no_capacity` hierboven. Hem verzwijgen als `not_found` zou de klant laten
+    # zoeken naar een tikfout die er niet is.
+    region_disabled: {:conflict, "region_closed"},
     # De node heeft geen vrije doorgestuurde poort meer. Dat is capaciteit aan
     # onze kant en geen fout van de besteller, dus 409 en niet 422 -- het oude
     # gedrag ving dit in een catch-all en noemde het "invalid_vps", wat de klant

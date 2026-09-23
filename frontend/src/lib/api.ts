@@ -85,6 +85,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_region_code: "Een code mag alleen kleine letters, cijfers en koppeltekens bevatten.",
   invalid_region: "Vul een plaatsnaam in van twee tot zestig tekens.",
   unknown_region: "Deze locatie bestaat niet.",
+  region_closed: "Deze locatie neemt op dit moment geen nieuwe VPS'en aan. Kies een andere.",
   no_delivery_consent:
     "Bevestig dat je VPS meteen aangemaakt mag worden voordat je bestelt.",
   order_in_progress:
