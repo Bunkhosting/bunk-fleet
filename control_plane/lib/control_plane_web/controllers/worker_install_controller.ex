@@ -438,6 +438,9 @@ defmodule ControlPlaneWeb.WorkerInstallController do
       fi
       echo "  Je beheert het netwerk zelf. Geef op welk subnet de VPS'en krijgen --"
       echo "  de gateway hieronder moet echt bestaan en verkeer doorlaten."
+      echo "  De webterminal loopt via deze agent. Draait die op de Proxmox-host zelf, geef de"
+      echo "  host dan ook een vrij adres in dit subnet op de bridge (bv. .254, buiten het"
+      echo "  bereik hieronder); anders sluit elke terminalsessie na een paar seconden."
       read -r -p "  Gateway voor VPS'en (bv. 192.168.1.1): " VPS_GW </dev/tty
       read -r -p "  Subnet-prefix (bv. 24): " VPS_CIDR </dev/tty
       read -r -p "  Eerste bruikbare IP (bv. 192.168.1.100): " VPS_RSTART </dev/tty
@@ -650,6 +653,9 @@ defmodule ControlPlaneWeb.WorkerInstallController do
     else
       echo "Let op: je beheert het netwerk zelf. VPS'en krijgen gateway $VPS_GW --"
       echo "zonder werkende gateway en NAT hebben ze geen verbinding."
+      echo "Webterminal: staat de agent op de Proxmox-host, dan heeft die host zelf een adres"
+      echo "in dat subnet nodig op de bridge, anders komt hij niet bij de VPS'en. Het"
+      echo "dashboard meldt dat bij de node als het ontbreekt."
     fi
     echo "Status:  systemctl status bunk-worker"
     echo "Logs:    journalctl -u bunk-worker -f"

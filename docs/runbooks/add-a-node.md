@@ -42,8 +42,11 @@ browser console are all the agent dialling out over HTTPS.
   import with, so you build it by hand. Without a template the node enrols and
   heartbeats happily and every provision fails.
 - **A bridge for customer traffic.** Node → Network → Create → Linux Bridge, no
-  ports, no address. `vmbr2` by convention. It must exist before the install: the
-  agent will address a bridge, never create one.
+  ports. `vmbr2` by convention. It must exist before the install: the agent will
+  address a bridge, never create one. Whether the host gets an address on it is
+  decided by the gateway question below -- it used to say "no address" here
+  without that qualification, and that is how a node ended up online, healthy and
+  unable to open a single terminal.
 
 - **A forwarded port range**, if customers on this node should be reachable from
   the internet. Pick something well clear of anything the hypervisor uses —
@@ -61,6 +64,34 @@ Decide one thing up front: **who owns the gateway on that bridge.**
 The first node in the fleet is the second case — the OpenWRT VM holds
 `10.10.0.1`. If Bunk also claimed that address the network would go down, not up,
 which is why the default is off and the installer asks.
+
+**Either way, the agent has to be able to reach the VPSes.** The web terminal is
+the only way into a VPS, and it runs through the agent: the agent dials each VPS
+on its private address. Who owns the gateway says nothing about that.
+
+- `BUNK_MANAGE_NETWORK=1`: the agent puts the gateway on the bridge itself, which
+  also gives the host a route into the subnet. Nothing more to do.
+- `BUNK_MANAGE_NETWORK=0` and the agent runs on a helper VM that routes via the
+  router (the first node): the route through the router does it.
+- `BUNK_MANAGE_NETWORK=0` and the agent runs **on the Proxmox host itself**, with
+  a router VM holding the gateway: **give the host its own free address in the
+  VPS subnet on that bridge**, outside the VPS range -- `.254` of the /24 works
+  -- and make it permanent under `vmbr2` in `/etc/network/interfaces`:
+
+  ```sh
+  ip addr add 172.16.22.254/24 dev vmbr2
+  ```
+
+  Leave this out and the host's route to the subnet leaves through its uplink
+  instead of the bridge. Provisioning still works, the VPS boots, its SSH port is
+  open, the node heartbeats and shows capacity -- and every terminal session
+  closes after about thirteen seconds. Nothing looks wrong from outside, which is
+  why the agent now says so itself: the node card in the dashboard shows
+  *"bridge vmbr2 heeft geen adres in 172.16.22.0/24"* and the note goes away on
+  the next heartbeat once the address is there.
+
+Never do the reverse -- set `BUNK_MANAGE_NETWORK=1` on a node where a router
+already holds the gateway. That puts two machines on one address.
 
 ---
 
@@ -328,6 +359,13 @@ a node that has none.
 assigned `.1`, `sysctl net.ipv4.ip_forward` should be 1, and
 `iptables -t nat -S POSTROUTING` should have a MASQUERADE line naming the node's
 subnet. With `0`, that is all the operator's to check.
+
+**Console closes after about thirteen seconds, and the node looks healthy.** Look
+at the node card in the dashboard first: the agent reports why it cannot reach its
+own VPSes ("Het VPS-netwerk van deze machine"). Thirteen seconds is the agent's
+own dial window (twelve) running out before it phones back to say it could not
+reach the VPS. The usual cause is a bridge without an address on the host --
+see "Either way, the agent has to be able to reach the VPSes" above.
 
 **Console spins and gives up.** The agent's log says whether it ever saw the
 request (`console session open`) and whether it could reach the VPS. If the
