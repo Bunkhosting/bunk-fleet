@@ -155,6 +155,7 @@ defmodule ControlPlaneWeb.NodeController do
       reported_avail_disk_gb: n.reported_avail_disk_gb,
       agent_version: n.agent_version,
       capacity_error: n.capacity_error,
+      network_note: n.network_note,
       drain_reason: n.drain_reason,
       last_heartbeat_at: n.last_heartbeat_at && DateTime.to_iso8601(n.last_heartbeat_at),
       region_id: n.region_id,

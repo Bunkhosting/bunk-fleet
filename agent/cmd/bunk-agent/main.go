@@ -72,7 +72,6 @@ func run(logger *slog.Logger) error {
 		state = st
 		cp.SetCredentials(st.NodeID, st.AgentToken)
 		logger.Info("loaded persisted enrollment", "node_id", st.NodeID)
-		applyVpsNetwork(logger, cfg.VpsNetwork.Bridge, vpsNetwerkVan(st, cfg.VpsNetwork), cfg.ManageNetwork)
 	} else if cfg.EnrollToken != "" {
 		enrollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		resp, err := cp.Enroll(enrollCtx, cfg.EnrollToken, cfg.Hypervisor, cfg.OwnerEmail, transport.VpsNetwork{
@@ -99,10 +98,25 @@ func run(logger *slog.Logger) error {
 		if err := saveState(statePath, st); err != nil {
 			logger.Warn("could not persist enrollment; a restart will need a fresh token", "err", err)
 		}
-		applyVpsNetwork(logger, cfg.VpsNetwork.Bridge, vpsNetwerkVan(st, cfg.VpsNetwork), cfg.ManageNetwork)
 		state = st
 	} else {
 		logger.Warn("no enroll token and no persisted state; heartbeats will fail until credentials are set")
+	}
+
+	// Het VPS-netwerk van deze node. Eén beheerder voor het toepassen, het
+	// bijhouden van wat er van terechtkwam en het oordeel dat de hartslag meeneemt.
+	//
+	// Bij het opstarten wordt alleen toegepast als de bridge al in de omgeving
+	// staat. Staat hij er niet, dan komt hij uit het dashboard, en dat antwoord
+	// komt pas met de eerste hartslag. Nu al toepassen zou de eerste hartslag een
+	// "geen bridge ingesteld" laten melden voor een node die zijn bridge één
+	// seconde later krijgt.
+	var netwerk *netwerkBeheer
+	if cp.NodeID() != "" {
+		netwerk = nieuwNetwerkBeheer(cfg.VpsNetwork, cfg.ManageNetwork, state)
+		if !cfg.ManageNetwork || cfg.VpsNetwork.Bridge != "" {
+			netwerk.pasToe(logger, cfg.VpsNetwork.Bridge)
+		}
 	}
 
 	// Command consumer: long-poll the control plane for provision/delete
@@ -133,7 +147,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("starting heartbeat loop", "interval", cfg.HeartbeatInterval.String())
 
 	// Send an immediate first heartbeat, then on each tick.
-	sendHeartbeat(ctx, logger, prov, cp, offer)
+	sendHeartbeat(ctx, logger, prov, cp, offer, netwerk)
 
 	for {
 		select {
@@ -141,7 +155,7 @@ func run(logger *slog.Logger) error {
 			logger.Info("shutdown signal received, stopping")
 			return nil
 		case <-ticker.C:
-			sendHeartbeat(ctx, logger, prov, cp, offer)
+			sendHeartbeat(ctx, logger, prov, cp, offer, netwerk)
 		}
 	}
 }
@@ -284,7 +298,7 @@ func kies(vanCP, lokaal int) int {
 // sendHeartbeat collects capacity from the provider and reports it to the
 // control plane. Errors are logged but never fatal: a single failed heartbeat
 // must not take the agent down.
-func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, offer *offerHolder) {
+func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, offer *offerHolder, netwerk *netwerkBeheer) {
 	hbCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -314,11 +328,29 @@ func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provi
 		hb.AvailDiskGB = capacity.AvailDiskGB
 	}
 
+	// Het oordeel over het VPS-netwerk gaat mee in dezelfde hartslag. Een
+	// vaststelling -- de operator vroeg om beheer en dat mislukte -- werkt als een
+	// capaciteitsfout: de node blijft zichtbaar en krijgt geen nieuwe VPS'en. Alles
+	// wat een vermoeden is, blijft een notitie.
+	//
+	// Een capaciteitsfout van de hypervisor gaat voor: die is al de reden dat deze
+	// node niets krijgt, en twee redenen in één veld is er één te veel.
+	oordeel := netwerk.oordeel()
+	hb.NetworkNote = afkappen(oordeel.Notitie)
+	if oordeel.Blokkerend && hb.CapacityError == "" {
+		hb.CapacityError = afkappen(oordeel.Notitie)
+	}
+
 	settings, err := cp.SendHeartbeat(hbCtx, hb)
 	if err != nil {
 		logger.Error("heartbeat send failed", "err", err)
+		// Ook zonder antwoord van het control plane moet het netwerk een kans
+		// krijgen met wat de omgeving zegt; anders blijft een node die het
+		// dashboard niet bereikt zonder netwerk tot de volgende herstart.
+		netwerk.bijwerken(logger, transport.NodeSettings{})
 		return
 	}
+	netwerk.bijwerken(logger, settings)
 
 	// Wat de eigenaar in het dashboard heeft gezet, toegepast op de volgende
 	// ronde. Het antwoord komt elke keer mee, dus een wijziging landt binnen een
@@ -339,15 +371,20 @@ func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provi
 // in the panel. It is trimmed because the column is bounded and a wall of text
 // is not more useful than its first line -- the agent's own log has the rest.
 func capacityReason(err error) string {
+	reason := strings.TrimSpace(err.Error())
+	if reason == "" {
+		reason = "onbekende fout bij het opvragen van de capaciteit"
+	}
+	return afkappen(reason)
+}
+
+// afkappen brengt een tekst terug tot wat de kolom in het control plane aankan.
+func afkappen(reason string) string {
 	// Ruim onder de kolombreedte in het control plane. Een reden die daar niet
 	// in past laat de hele heartbeat afketsen, en dan staat de node dood in het
 	// paneel om een foutmelding die te lang was.
 	const maxLen = 240
 
-	reason := strings.TrimSpace(err.Error())
-	if reason == "" {
-		reason = "onbekende fout bij het opvragen van de capaciteit"
-	}
 	if len(reason) > maxLen {
 		// Op een tekengrens en niet op een byte. Een afgesneden rune is geen
 		// geldige UTF-8 meer, en Postgres weigert dat -- waarmee dezelfde

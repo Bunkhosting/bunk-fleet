@@ -83,7 +83,7 @@ func collect(t *testing.T, prov provider.Provider) *transport.Heartbeat {
 	cp.SetCredentials("node-1", "token-1")
 
 	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
-	sendHeartbeat(context.Background(), logger, prov, cp, &offerHolder{v: config.OfferConfig{}})
+	sendHeartbeat(context.Background(), logger, prov, cp, &offerHolder{v: config.OfferConfig{}}, nil)
 
 	return got
 }

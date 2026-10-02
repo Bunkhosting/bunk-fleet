@@ -211,8 +211,24 @@ function NodeKaart({
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <div>
-              <p className="font-medium">De agent kan de hypervisor niet bevragen</p>
+              {/* De reden kan de hypervisor zijn, maar ook het VPS-netwerk van deze
+                  machine. Een kop die er één van noemt, wijst bij de ander de
+                  verkeerde kant op. */}
+              <p className="font-medium">Deze node neemt op dit moment niets nieuws aan</p>
               <p className="mt-0.5 break-words text-muted-foreground">{node.capacity_error}</p>
+            </div>
+          </div>
+        )}
+        {node.network_note && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-xs">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <p className="font-medium">Het VPS-netwerk van deze machine</p>
+              <p className="mt-0.5 break-words text-muted-foreground">{node.network_note}</p>
+              <p className="mt-1 text-muted-foreground">
+                De node blijft te bestellen. Verdwijnt deze melding niet vanzelf nadat je dit hebt
+                aangepast, dan komt de webterminal nog niet bij je VPS&apos;en.
+              </p>
             </div>
           </div>
         )}

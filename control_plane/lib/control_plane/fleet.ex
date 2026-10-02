@@ -757,11 +757,17 @@ defmodule ControlPlane.Fleet do
         :total_disk_gb,
         :agent_version,
         :capacity_error,
+        :network_note,
         :reported_avail_vcpu,
         :reported_avail_ram_mb,
         :reported_avail_disk_gb
       ])
       |> without_capacity_when_unknown()
+      # Een heartbeat zonder notitie wist een eerdere. De agent laat het veld weg
+      # als er niets te melden valt, dus afwezig betekent "het is rechtgezet" --
+      # anders bleef een notitie voor een probleem dat al weg is tot in
+      # eeuwigheid in het paneel staan.
+      |> Map.put_new(:network_note, nil)
 
     basis = Map.put(totals, :last_heartbeat_at, Clock.now())
 

@@ -815,6 +815,12 @@ export interface MyNode {
   reported_avail_disk_gb: number | null;
   agent_version: string | null;
   capacity_error: string | null;
+  /**
+   * Iets over het VPS-netwerk van deze node dat de eigenaar wil weten: de agent
+   * komt niet bij de VPS'en die hij zelf draait, dus de webterminal valt dicht.
+   * Een vermoeden, geen vaststelling -- de node blijft gewoon te bestellen.
+   */
+  network_note: string | null;
   drain_reason: string | null;
   last_heartbeat_at: string | null;
   /** De locatie waar deze machine staat; bepaalt waar klanten hem kunnen kiezen. */
@@ -909,6 +915,8 @@ export interface AdminNode {
   // Gevuld als de agent leeft maar zijn hypervisor niet kan bevragen. Dan is
   // de node online zonder capaciteit, en dit zegt waarom.
   capacity_error: string | null;
+  /** Zie `network_note` bij de eigenaarsweergave: een notitie, geen blokkade. */
+  network_note: string | null;
   /**
    * Waarom deze node dicht staat, als het systeem hem zelf heeft afgesloten na
    * een mislukte bestelling. Leeg bij een node die met de hand is gesloten.

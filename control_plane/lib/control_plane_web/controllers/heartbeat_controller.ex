@@ -27,7 +27,8 @@ defmodule ControlPlaneWeb.HeartbeatController do
           "total_ram_mb",
           "total_disk_gb",
           "agent_version",
-          "capacity_error"
+          "capacity_error",
+          "network_note"
         ])
         |> Map.merge(%{
           "reported_avail_vcpu" => params["avail_vcpu"],

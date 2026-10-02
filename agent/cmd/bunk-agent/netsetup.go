@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -184,59 +185,49 @@ func isPositie(arg string) bool {
 // the fleet does — and a second machine claiming that same address would take the
 // network down rather than bring it up. Taking over an operator's networking is
 // something to be asked for, never assumed.
-func applyVpsNetwork(logger *slog.Logger, bridge string, n vpsNetwork, manage bool) {
+func applyVpsNetwork(logger *slog.Logger, bridge string, n vpsNetwork, manage bool) error {
 	if !manage {
 		logger.Info("vps network: not managed (BUNK_MANAGE_NETWORK=0); configure the bridge yourself",
 			"bridge", bridge, "gateway", n.Gateway, "prefix", n.CidrPrefix)
-		return
+		return nil
 	}
 	if n.Gateway == "" {
-		logger.Warn("vps network: control plane assigned no gateway; customer VPSes will have no network")
-		return
+		return netwerkMislukt(logger, errors.New("het control plane heeft geen gateway toegewezen"))
 	}
 	if bridge == "" {
-		logger.Warn("vps network: no bridge configured; set BUNK_VPS_BRIDGE (e.g. vmbr2) " +
-			"so the agent knows which bridge to put the customer gateway on")
-		return
+		return netwerkMislukt(logger, errors.New("geen VPS-bridge ingesteld; zet er een in het dashboard of in BUNK_VPS_BRIDGE (bijvoorbeeld vmbr2)"))
 	}
 	if !ifaceName.MatchString(bridge) {
-		logger.Warn("vps network: refusing to configure an implausible bridge name", "bridge", bridge)
-		return
+		return netwerkMislukt(logger, fmt.Errorf("de bridgenaam %q is niet toegestaan", bridge))
 	}
 	subnet, err := n.subnet()
 	if err != nil {
-		logger.Warn("vps network: rejecting malformed parameters from control plane", "err", err)
-		return
+		return netwerkMislukt(logger, fmt.Errorf("ongeldige netwerkgegevens van het control plane: %w", err))
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := ensureBridge(ctx, bridge); err != nil {
-		logger.Warn("vps network: cannot bring up bridge", "bridge", bridge, "err", err)
-		return
+		return netwerkMislukt(logger, err)
 	}
 
 	addr := fmt.Sprintf("%s/%d", n.Gateway, n.CidrPrefix)
 	if out, err := runCmd(ctx, "ip", "addr", "replace", addr, "dev", bridge); err != nil {
-		logger.Warn("vps network: cannot set gateway address", "addr", addr, "err", err, "detail", out)
-		return
+		return netwerkMislukt(logger, fmt.Errorf("kan gateway-adres %s niet op %s zetten: %s", addr, bridge, uitleg(out, err)))
 	}
 
 	if out, err := runCmd(ctx, "sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
-		logger.Warn("vps network: cannot enable IPv4 forwarding", "err", err, "detail", out)
-		return
+		return netwerkMislukt(logger, fmt.Errorf("kan IPv4-forwarding niet aanzetten: %s", uitleg(out, err)))
 	}
 
 	routes, err := runCmd(ctx, "ip", "-4", "route", "show", "default")
 	if err != nil {
-		logger.Warn("vps network: cannot read routing table", "err", err, "detail", routes)
-		return
+		return netwerkMislukt(logger, fmt.Errorf("kan de routetabel niet lezen: %s", uitleg(routes, err)))
 	}
 	uplink, err := uplinkFromRoutes(routes)
 	if err != nil {
-		logger.Warn("vps network: no uplink for customer traffic", "err", err)
-		return
+		return netwerkMislukt(logger, fmt.Errorf("geen uplink gevonden voor klantverkeer: %w", err))
 	}
 
 	// Eerst wat niet mag, daarna wat wel mag. De deny-regels worden bovenaan
@@ -262,14 +253,34 @@ func applyVpsNetwork(logger *slog.Logger, bridge string, n vpsNetwork, manage bo
 			continue // already present
 		}
 		if out, err := runCmd(ctx, "iptables", rule...); err != nil {
-			logger.Warn("vps network: cannot install firewall rule",
-				"rule", strings.Join(rule, " "), "err", err, "detail", out)
-			return
+			return netwerkMislukt(logger, fmt.Errorf("kan firewallregel niet plaatsen (%s): %s",
+				strings.Join(rule, " "), uitleg(out, err)))
 		}
 	}
 
 	logger.Info("vps network ready",
 		"bridge", bridge, "gateway", addr, "subnet", subnet.String(), "uplink", uplink)
+	return nil
+}
+
+// netwerkMislukt logt een mislukte stap en geeft dezelfde fout terug.
+//
+// Tot nu toe was het logboek het enige dat dit wist. De agent zette zijn
+// heartbeat gewoon voort, het control plane zag een gezonde node, en de
+// webterminal bleef zonder uitleg dichtvallen -- terwijl op de machine zelf een
+// regel stond die precies zei wat er ontbrak. De fout gaat nu óók mee naar het
+// paneel.
+func netwerkMislukt(logger *slog.Logger, err error) error {
+	logger.Warn("vps network: " + err.Error())
+	return err
+}
+
+// uitleg geeft wat een commando erover zei, met de fout als dat leeg is.
+func uitleg(uitvoer string, err error) string {
+	if uitvoer != "" {
+		return uitvoer
+	}
+	return err.Error()
 }
 
 // ensureBridge brings up a bridge that already exists. It deliberately does NOT

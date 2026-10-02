@@ -813,6 +813,7 @@ defmodule ControlPlaneWeb.Admin.PanelController do
       last_heartbeat_at: n.last_heartbeat_at && DateTime.to_iso8601(n.last_heartbeat_at),
       agent_version: n.agent_version,
       capacity_error: n.capacity_error,
+      network_note: n.network_note,
       drain_reason: n.drain_reason,
       owner_id: n.owner_id,
       owner: owner_label(n),

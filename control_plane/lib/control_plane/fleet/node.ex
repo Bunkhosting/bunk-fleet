@@ -55,6 +55,12 @@ defmodule ControlPlane.Fleet.Node do
     # hij niet bij zijn hypervisor -- en plaatst de scheduler er niets.
     field :capacity_error, :string
 
+    # Iets over het VPS-netwerk van deze node dat een operator wil weten, in de
+    # woorden van de agent. Anders dan `capacity_error` houdt dit de node niet
+    # uit de verkoop: het is een vermoeden, geen vaststelling. Leeg is het
+    # normale geval, en de agent haalt hem zelf weg zodra het is rechtgezet.
+    field :network_note, :string
+
     # Waarom deze node dicht staat voor nieuwe VPS'en, als het systeem hem zelf
     # heeft afgesloten. Leeg bij een node die een beheerder met de hand sloot:
     # die weet zelf waarom.
@@ -527,6 +533,7 @@ defmodule ControlPlane.Fleet.Node do
       :last_heartbeat_at,
       :agent_version,
       :capacity_error,
+      :network_note,
       :drain_reason,
       :reported_avail_vcpu,
       :reported_avail_ram_mb,
@@ -534,6 +541,7 @@ defmodule ControlPlane.Fleet.Node do
     ])
     |> clamp_capacity()
     |> trim_agent_version()
+    |> trim_network_note()
     |> validate_required([:last_heartbeat_at])
   end
 
@@ -560,6 +568,7 @@ defmodule ControlPlane.Fleet.Node do
       :last_heartbeat_at,
       :agent_version,
       :capacity_error,
+      :network_note,
       :drain_reason,
       :reported_avail_vcpu,
       :reported_avail_ram_mb,
@@ -568,6 +577,7 @@ defmodule ControlPlane.Fleet.Node do
     ])
     |> clamp_capacity()
     |> trim_agent_version()
+    |> trim_network_note()
     |> validate_required([:last_heartbeat_at, :status])
   end
 
@@ -576,6 +586,34 @@ defmodule ControlPlane.Fleet.Node do
   # belandt wel in het dashboard, dus hij wordt begrensd en ontdaan van
   # controltekens in plaats van ongezien doorgegeven.
   @max_agent_version 64
+
+  # De kolom is 255 tekens, en een agent is de minst betrouwbare invoer die dit
+  # systeem kent. Een te lange notitie laat anders de hele heartbeat afketsen, en
+  # dan staat de node dood in het paneel om een melding die te lang was -- precies
+  # de fout die `capacity_error` in zijn commentaar beschrijft. Hier wordt hij
+  # ingekort in plaats van geweigerd, en controletekens gaan eruit.
+  @max_network_note 240
+
+  defp trim_network_note(changeset) do
+    case get_change(changeset, :network_note) do
+      nil ->
+        changeset
+
+      value when is_binary(value) ->
+        schoon =
+          value
+          |> String.replace(~r/[[:cntrl:]]/u, " ")
+          |> String.slice(0, @max_network_note)
+          |> String.trim()
+
+        if schoon == "",
+          do: delete_change(changeset, :network_note),
+          else: put_change(changeset, :network_note, schoon)
+
+      _ ->
+        changeset
+    end
+  end
 
   defp trim_agent_version(changeset) do
     case get_change(changeset, :agent_version) do

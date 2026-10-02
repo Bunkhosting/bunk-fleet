@@ -342,10 +342,26 @@ function NodesInner() {
                   <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
                     <div className="text-xs">
-                      <p className="font-medium">Agent draait, maar kan de hypervisor niet bevragen</p>
+                      <p className="font-medium">Agent draait, maar deze node neemt niets nieuws aan</p>
                       <p className="mt-0.5 break-words text-muted-foreground">{n.capacity_error}</p>
                       <p className="mt-1 text-muted-foreground">
                         Er wordt niets nieuws op deze node geplaatst zolang dit er staat.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {n.network_note && (
+                  // Een vermoeden, geen vaststelling: de node blijft te bestellen. Het
+                  // staat hier omdat een node die zijn eigen VPS'en niet bereikt er van
+                  // buiten volkomen gezond uitziet, terwijl de webterminal dichtvalt.
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                    <div className="text-xs">
+                      <p className="font-medium">Het VPS-netwerk van deze node</p>
+                      <p className="mt-0.5 break-words text-muted-foreground">{n.network_note}</p>
+                      <p className="mt-1 text-muted-foreground">
+                        Dit houdt de node niet uit de verkoop. De melding verdwijnt zodra de agent
+                        zijn VPS&apos;en weer bereikt.
                       </p>
                     </div>
                   </div>

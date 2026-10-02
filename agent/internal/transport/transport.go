@@ -149,6 +149,12 @@ type Heartbeat struct {
 	// offline, which looks exactly like a machine that is switched off and hides
 	// the one fact the operator needs. Empty on a normal heartbeat.
 	CapacityError string `json:"capacity_error,omitempty"`
+	// NetworkNote is iets over het VPS-netwerk van deze node dat een operator wil
+	// weten maar dat de node niet uit de verkoop haalt: een vermoeden, geen
+	// vaststelling. Leeg als er niets te melden valt, en dan haalt het control
+	// plane een eerdere notitie weg -- hij verdwijnt dus vanzelf zodra het is
+	// rechtgezet. Een vaststelling gaat in CapacityError.
+	NetworkNote string `json:"network_note,omitempty"`
 }
 
 // Command is a single instruction dispatched by the control plane.
