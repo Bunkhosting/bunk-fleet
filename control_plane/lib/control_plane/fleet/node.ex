@@ -61,6 +61,11 @@ defmodule ControlPlane.Fleet.Node do
     # normale geval, en de agent haalt hem zelf weg zodra het is rechtgezet.
     field :network_note, :string
 
+    # Wanneer er voor de huidige uitval een melding naar de operator is gegaan.
+    # Leeg zolang de node online is of de uitval nog geen melding heeft gekregen;
+    # een heartbeat zet hem terug, zodat de volgende uitval opnieuw meldt.
+    field :offline_notified_at, :utc_datetime
+
     # Waarom deze node dicht staat voor nieuwe VPS'en, als het systeem hem zelf
     # heeft afgesloten. Leeg bij een node die een beheerder met de hand sloot:
     # die weet zelf waarom.
@@ -569,6 +574,7 @@ defmodule ControlPlane.Fleet.Node do
       :agent_version,
       :capacity_error,
       :network_note,
+      :offline_notified_at,
       :drain_reason,
       :reported_avail_vcpu,
       :reported_avail_ram_mb,

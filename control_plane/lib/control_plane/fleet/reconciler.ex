@@ -44,6 +44,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   alias ControlPlane.Fleet.AgentUpdate
   alias ControlPlane.Fleet.Drift
   alias ControlPlane.Fleet.HartslagNaarBuiten
+  alias ControlPlane.Fleet.StilleNodes
   alias ControlPlane.Mollie
   alias ControlPlane.Provisioning
   alias ControlPlane.Schijfruimte
@@ -94,6 +95,13 @@ defmodule ControlPlane.Fleet.Reconciler do
   # volledige kopie van diezelfde schijf. `qm destroy` laat die staan.
   @default_archief_interval_ms 30 * 60 * 1000
 
+  # Elke vijf minuten kijken of er een node is weggevallen waarvoor nog niet is
+  # gemeld. De respijttijd van tien minuten zit in `StilleNodes`; dit is hoe vaak
+  # we kijken. Niet elke tik: een mislukte mail zou dan elke dertig seconden
+  # opnieuw worden geprobeerd, en een mailserver die even weg is verdient geen
+  # honderdtwintig pogingen per uur.
+  @default_stil_interval_ms 5 * 60 * 1000
+
   # Hoogstens één melding per etmaal over de schijf. Een volle schijf is geen
   # gebeurtenis maar een toestand: hij blijft vol tot iemand er iets aan doet, en
   # vier keer per dag hetzelfde zeggen is hoe een melding een ding wordt dat je
@@ -125,6 +133,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     schijf_interval_ms = Keyword.get(opts, :schijf_interval_ms, @default_schijf_interval_ms)
     mollie_interval_ms = Keyword.get(opts, :mollie_interval_ms, @default_mollie_interval_ms)
     archief_interval_ms = Keyword.get(opts, :archief_interval_ms, @default_archief_interval_ms)
+    stil_interval_ms = Keyword.get(opts, :stil_interval_ms, @default_stil_interval_ms)
 
     schedule_tick(interval_ms)
     HartslagNaarBuiten.meld_stand()
@@ -148,6 +157,8 @@ defmodule ControlPlane.Fleet.Reconciler do
        last_mollie_ms: nil,
        archief_interval_ms: archief_interval_ms,
        last_archief_ms: nil,
+       stil_interval_ms: stil_interval_ms,
+       last_stil_ms: nil,
        last_hartslag_ms: nil
      }}
   end
@@ -185,6 +196,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     state = maybe_check_schijf(state)
     state = maybe_verzoen_betalingen(state)
     state = maybe_ruim_archieven(state)
+    state = maybe_meld_stille_nodes(state)
     settle_subscriptions()
     roll_out_agent()
     meld_vastgelopen_commandos()
@@ -335,6 +347,32 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp maybe_ruim_archieven(state), do: state
+
+  defp maybe_meld_stille_nodes(%{stil_interval_ms: si, last_stil_ms: last} = state) do
+    now = System.monotonic_time(:millisecond)
+
+    if is_nil(last) or now - last >= si do
+      meld_stille_nodes()
+      %{state | last_stil_ms: now}
+    else
+      state
+    end
+  end
+
+  defp maybe_meld_stille_nodes(state), do: state
+
+  defp meld_stille_nodes do
+    case StilleNodes.melden() do
+      0 -> :ok
+      n -> Logger.warning("#{n} node(s) gemeld die niet meer reageren")
+    end
+  rescue
+    exception ->
+      Logger.error(
+        "melden van stille nodes faalde: " <> Exception.message(exception),
+        crash_reason: {exception, __STACKTRACE__}
+      )
+  end
 
   defp ruim_archieven do
     Backups.ruim_wees_archieven_op()

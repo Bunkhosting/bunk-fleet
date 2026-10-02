@@ -769,7 +769,13 @@ defmodule ControlPlane.Fleet do
       # eeuwigheid in het paneel staan.
       |> Map.put_new(:network_note, nil)
 
-    basis = Map.put(totals, :last_heartbeat_at, Clock.now())
+    # Een hartslag betekent dat de uitval voorbij is, dus de volgende begint met
+    # een schone lei. Dit zit hier en niet in de agent-gevulde `totals`: de agent
+    # mag niet bepalen of er gemeld wordt.
+    basis =
+      totals
+      |> Map.put(:last_heartbeat_at, Clock.now())
+      |> Map.put(:offline_notified_at, nil)
 
     # PERF: only a real status transition (offline/pending -> online) or the
     # first heartbeat (which seeds available_*) is UI-relevant. A routine
