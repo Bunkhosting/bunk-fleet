@@ -19,12 +19,24 @@ type MfaState = { totp: boolean; passkey: PasskeyChallenge | null };
 
 function safeNext(raw: string | null): string {
   if (!raw) return "/dashboard";
-  // Sta alleen relatieve paden toe die beginnen met één slash.
-  // Dit blokkeert open redirects naar externe URLs (//, https://, etc.).
-  // Reject protocol-relative (//), backslash tricks (some browsers normalize
-  // "/\\" to "//"), and anything not starting with a single slash.
-  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/dashboard";
-  return raw;
+  // Sta alleen een pad op deze site toe. Tekenreeksen vergelijken was niet
+  // genoeg: "/\t/evil.example" begint met één slash en bevat geen "//", maar de
+  // URL-parser van de browser gooit tabs en regeleindes weg en maakt er
+  // "//evil.example" van -- een andere site, direct na een geslaagde login. Dus
+  // laten we de browser zelf parsen en kijken waar het uitkomt.
+  const stuurteken = [...raw].some((c) => c.charCodeAt(0) < 0x20);
+  if (!raw.startsWith("/") || stuurteken || raw.includes("\\")) return "/dashboard";
+  // Een vaste basis in plaats van window.location: dan werkt dit ook als het
+  // ooit tijdens het renderen op de server wordt aangeroepen. Het gaat alleen om
+  // de vraag of het pad ergens anders uitkomt dan op deze basis.
+  const basis = "https://bunk.invalid";
+  try {
+    const url = new URL(raw, basis);
+    if (url.origin !== basis) return "/dashboard";
+    return url.pathname + url.search + url.hash;
+  } catch {
+    return "/dashboard";
+  }
 }
 
 function LoginForm() {
