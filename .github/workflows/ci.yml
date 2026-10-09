@@ -23,13 +23,9 @@ jobs:
   # ooit in een commit stond, staat op internet. Over de hele geschiedenis, niet
   # alleen de laatste commit -- een sleutel die in een latere commit is
   # weggehaald, is daarmee niet weg.
-  #
-  # Eerst niet-blokkerend: de geschiedenis op GitHub gaat verder terug dan wat
-  # lokaal gescand is. Blijkt hij schoon, dan gaat continue-on-error eraf.
   geheimen:
     name: Geheimen (gitleaks)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
