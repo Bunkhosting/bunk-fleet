@@ -35,6 +35,9 @@ jobs:
           # speaks TLS to the control plane, so its standard library is part of
           # the attack surface. See the note in go.mod.
           go-version: "1.26"
+          # Zonder dit neemt de runner de patchversie uit zijn cache, en die
+          # loopt achter: 1.26.8 terwijl de beveiligingsfixes in 1.26.9 zitten.
+          check-latest: true
           cache-dependency-path: agent/go.sum
 
       - name: Formatting
