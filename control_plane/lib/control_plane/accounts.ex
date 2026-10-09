@@ -484,11 +484,30 @@ defmodule ControlPlane.Accounts do
   Generates a new session token for `user`, persists its hash, and returns the raw
   token (the only copy ever returned to the caller).
   """
-  def generate_user_session_token(user) do
-    {token, user_token} = UserToken.build_session_token(user)
+  def generate_user_session_token(user, opts \\ []) do
+    {token, user_token} = UserToken.build_session_token(user, Keyword.get(opts, :mfa, false))
     Repo.insert!(user_token)
     token
   end
+
+  @doc """
+  Of de sessie bij `token` haar tweede factor heeft laten zien.
+
+  Iets anders dan `has_second_factor?/1`: dat zegt of het ACCOUNT er een heeft.
+  Een sessie die met alleen een wachtwoord begon, blijft dat, ook als de
+  gebruiker daarna in die sessie 2FA aanzet.
+  """
+  @spec session_mfa?(binary()) :: boolean()
+  def session_mfa?(token) when is_binary(token) do
+    hashed = UserToken.hashed(token)
+
+    Repo.exists?(
+      from t in UserToken,
+        where: t.token == ^hashed and t.context == "session" and not is_nil(t.mfa_at)
+    )
+  end
+
+  def session_mfa?(_token), do: false
 
   @doc """
   Verwijdert een account, of anonimiseert het als er een administratie aan hangt.

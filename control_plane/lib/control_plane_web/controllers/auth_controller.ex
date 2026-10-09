@@ -18,6 +18,7 @@ defmodule ControlPlaneWeb.AuthController do
   use ControlPlaneWeb, :controller
 
   alias ControlPlane.Accounts
+  alias ControlPlane.Accounts.LoginThrottle
   alias ControlPlaneWeb.Fouten
   alias ControlPlaneWeb.Plugs.Bearer
 
@@ -77,7 +78,10 @@ defmodule ControlPlaneWeb.AuthController do
 
         case second_factor(user, totp, params) do
           :ok ->
-            issue_session(conn, user)
+            # Heeft het account een tweede factor, dan heeft second_factor/3 die
+            # zojuist gezien -- anders was het geen :ok. De sessie onthoudt dat;
+            # het beheerpaneel vraagt erom.
+            issue_session(conn, user, mfa: totp or Accounts.passkeys_active?(user))
 
           :prompt ->
             conn |> put_status(:ok) |> json(mfa_prompt(user, totp, nil))
@@ -99,8 +103,8 @@ defmodule ControlPlaneWeb.AuthController do
     |> json(%{error: "missing_credentials", detail: "email and password are required"})
   end
 
-  defp issue_session(conn, user) do
-    token = Accounts.generate_user_session_token(user)
+  defp issue_session(conn, user, opts) do
+    token = Accounts.generate_user_session_token(user, opts)
 
     conn
     |> put_session_cookie(token)
@@ -109,7 +113,14 @@ defmodule ControlPlaneWeb.AuthController do
   end
 
   def me(conn, _params) do
-    json(conn, %{user: user_json(conn.assigns.current_user)})
+    user =
+      conn.assigns.current_user
+      |> user_json()
+      # Of DEZE sessie met een tweede factor begon. Het dashboard gebruikt het om
+      # een beheerder uit te leggen waarom het paneel om een nieuwe login vraagt.
+      |> Map.put(:session_mfa, Accounts.session_mfa?(conn.assigns[:current_session_token]))
+
+    json(conn, %{user: user})
   end
 
   @doc """
@@ -315,9 +326,47 @@ defmodule ControlPlaneWeb.AuthController do
   # Bij een mislukte passkey gaat er een nieuwe challenge mee terug (zie
   # mfa_prompt/3): de oude is verbruikt en zonder nieuwe is een volgende poging
   # kansloos.
+  #
+  # Foute tweede factoren tellen per account, net als foute wachtwoorden, maar
+  # in een eigen teller die een goed wachtwoord NIET wist. Eerst was er alleen de
+  # limiet per IP-adres: met een gelekt wachtwoord en genoeg adressen was een
+  # zescijferige code in een half uur te raden, want elk goed wachtwoord zette de
+  # wachtwoordteller terug. Na 20 missers is het één poging per half uur.
   defp second_factor(user, totp, params) do
+    sleutel = "2fa:" <> user.email
+
     cond do
-      not totp and not Accounts.passkeys_active?(user) -> :ok
+      not totp and not Accounts.passkeys_active?(user) ->
+        :ok
+
+      poging?(params) and LoginThrottle.blocked?(sleutel) ->
+        # Zelfde antwoord als een foute code: een herkenbare "geblokkeerd" zegt
+        # een aanvaller dat hij het juiste wachtwoord heeft.
+        {:error, poging_fout(params)}
+
+      true ->
+        case tweede_factor(user, totp, params) do
+          :ok ->
+            LoginThrottle.clear(sleutel)
+            :ok
+
+          {:error, _} = fout ->
+            LoginThrottle.note_failure(sleutel)
+            fout
+
+          :prompt ->
+            :prompt
+        end
+    end
+  end
+
+  defp poging?(params), do: is_binary(params["code"]) or is_map(params["passkey"])
+
+  defp poging_fout(%{"passkey" => %{}}), do: "invalid_passkey"
+  defp poging_fout(_params), do: "invalid_code"
+
+  defp tweede_factor(user, totp, params) do
+    cond do
       totp_ok?(user, totp, params["code"]) -> :ok
       # Geen aparte passkeys_active?-check: een assertie voor een account
       # zonder passkeys strandt in finish_passkey_login op de opzoeking, met

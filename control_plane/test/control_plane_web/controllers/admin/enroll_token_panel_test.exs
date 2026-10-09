@@ -26,7 +26,9 @@ defmodule ControlPlaneWeb.Admin.EnrollTokenPanelTest do
   end
 
   defp authed(conn, %User{} = user) do
-    token = user |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
+    token =
+      user |> Accounts.generate_user_session_token(mfa: true) |> Base.url_encode64(padding: false)
+
     put_req_header(conn, "authorization", "Bearer " <> token)
   end
 

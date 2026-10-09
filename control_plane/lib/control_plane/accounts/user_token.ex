@@ -47,6 +47,9 @@ defmodule ControlPlane.Accounts.UserToken do
     field :token, :binary
     field :context, :string
     field :last_used_at, :utc_datetime
+    # Wanneer deze sessie haar tweede factor liet zien; nil = nooit. Zie
+    # Plugs.RequireAdminMfa.
+    field :mfa_at, :utc_datetime
 
     belongs_to :user, User
 
@@ -70,16 +73,18 @@ defmodule ControlPlane.Accounts.UserToken do
   Returns `{raw_token, user_token}` where `raw_token` is the value handed to the
   client and `user_token.token` is its SHA-256 hash, ready to be inserted.
   """
-  def build_session_token(user) do
+  def build_session_token(user, mfa? \\ false) do
     token = :crypto.strong_rand_bytes(@rand_size)
     hashed_token = :crypto.hash(@hash_algorithm, token)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     {token,
      %UserToken{
        token: hashed_token,
        context: "session",
        user_id: user.id,
-       last_used_at: DateTime.utc_now() |> DateTime.truncate(:second)
+       last_used_at: now,
+       mfa_at: if(mfa?, do: now)
      }}
   end
 

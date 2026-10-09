@@ -20,7 +20,9 @@ defmodule ControlPlaneWeb.Admin.PanelRegionsTest do
     email = "beheer-#{System.unique_integer([:positive])}@bunk.test"
     {:ok, u} = Accounts.register_user(%{email: email, password: "Str0ngPassphrase!42"})
     u = u |> Ecto.Changeset.change(%{role: :admin}) |> Repo.update!() |> with_second_factor()
-    token = u |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
+
+    token =
+      u |> Accounts.generate_user_session_token(mfa: true) |> Base.url_encode64(padding: false)
 
     %{conn: put_req_header(conn, "authorization", "Bearer " <> token)}
   end

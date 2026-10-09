@@ -55,6 +55,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   // nog een TOTP-code volgen). Deze code heeft daarom een eigen naam.
   admin_mfa_required:
     "Het beheerpaneel vraagt een tweede factor. Zet een authenticator-app of een passkey aan onder Beveiliging.",
+  admin_reauth_required: "Log opnieuw in met je tweede factor om het beheerpaneel te openen.",
   not_found: "Niet gevonden.",
   rate_limited: "Te veel pogingen. Probeer het over een minuutje opnieuw.",
   captcha_failed: "De verificatie is niet gelukt. Probeer het opnieuw.",
@@ -341,6 +342,7 @@ interface BunkUser {
   inserted_at?: string;
   totp_enabled?: boolean;
   passkeys_enabled?: boolean;
+  session_mfa?: boolean;
   owns_nodes?: boolean;
   confirmed_at?: string | null;
 }
@@ -355,6 +357,7 @@ function transformUser(u: BunkUser): User {
     is_active: true,
     totp_enabled: Boolean(u.totp_enabled),
     passkeys_enabled: Boolean(u.passkeys_enabled),
+    session_mfa: Boolean(u.session_mfa),
     owns_nodes: Boolean(u.owns_nodes),
     confirmed_at: u.confirmed_at ?? null,
   };

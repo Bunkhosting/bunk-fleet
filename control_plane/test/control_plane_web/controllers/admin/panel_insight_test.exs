@@ -34,7 +34,9 @@ defmodule ControlPlaneWeb.Admin.PanelInsightTest do
   end
 
   defp als(conn, u) do
-    token = u |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
+    token =
+      u |> Accounts.generate_user_session_token(mfa: true) |> Base.url_encode64(padding: false)
+
     put_req_header(conn, "authorization", "Bearer " <> token)
   end
 

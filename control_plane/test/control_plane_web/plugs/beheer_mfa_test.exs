@@ -19,7 +19,18 @@ defmodule ControlPlaneWeb.BeheerMfaTest do
     u |> Ecto.Changeset.change(%{role: rol}) |> Repo.update!()
   end
 
+  # Een sessie zoals de login hem uitgeeft: met tweede factor als het account er
+  # een heeft. Zie de tests onderaan voor een sessie die er nooit een liet zien.
   defp ingelogd(conn, user) do
+    token =
+      user
+      |> Accounts.generate_user_session_token(mfa: Accounts.has_second_factor?(user))
+      |> Base.url_encode64(padding: false)
+
+    put_req_header(conn, "authorization", "Bearer " <> token)
+  end
+
+  defp zonder_tweede_factor_ingelogd(conn, user) do
     token = user |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
     put_req_header(conn, "authorization", "Bearer " <> token)
   end
@@ -84,5 +95,67 @@ defmodule ControlPlaneWeb.BeheerMfaTest do
     |> ingelogd(beheerder)
     |> post(~p"/api/v1/beheer/users/#{slachtoffer.id}/credit", %{"amount_cents" => 10_000})
     |> json_response(403)
+  end
+
+  describe "een sessie die alleen met een wachtwoord begon" do
+    # De aanval: het wachtwoord van een beheerder zonder 2FA, inloggen, in die
+    # sessie zelf een authenticator aanzetten, en het paneel staat open. Het
+    # ACCOUNT heeft dan een tweede factor; de SESSIE heeft hem nooit laten zien.
+    test "komt niet in het paneel, ook als het account inmiddels 2FA heeft", %{conn: conn} do
+      beheerder = gebruiker(:admin) |> met_totp()
+
+      resp =
+        conn
+        |> zonder_tweede_factor_ingelogd(beheerder)
+        |> get(~p"/api/v1/beheer/stats")
+        |> json_response(403)
+
+      assert resp["error"] == "admin_reauth_required"
+    end
+
+    test "/auth/me zegt het, zodat het dashboard het kan uitleggen", %{conn: conn} do
+      beheerder = gebruiker(:admin) |> met_totp()
+
+      refute conn
+             |> zonder_tweede_factor_ingelogd(beheerder)
+             |> get(~p"/api/v1/auth/me")
+             |> json_response(200)
+             |> get_in(["user", "session_mfa"])
+
+      assert build_conn()
+             |> ingelogd(beheerder)
+             |> get(~p"/api/v1/auth/me")
+             |> json_response(200)
+             |> get_in(["user", "session_mfa"])
+    end
+
+    test "een echte login met de code geeft een sessie die wel binnenkomt" do
+      # Door de echte login heen, niet via de fixture: dat is de weg waarlangs
+      # een beheerder zijn sessie krijgt.
+      geheim = NimbleTOTP.secret()
+
+      beheerder =
+        gebruiker(:admin)
+        |> Ecto.Changeset.change(%{
+          totp_secret: geheim,
+          totp_confirmed_at: DateTime.utc_now() |> DateTime.truncate(:second),
+          confirmed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+        |> Repo.update!()
+
+      %{"token" => token} =
+        build_conn()
+        |> post(~p"/api/v1/auth/login", %{
+          "email" => beheerder.email,
+          "password" => "Str0ngPassphrase!42",
+          "code" => NimbleTOTP.verification_code(geheim)
+        })
+        |> json_response(200)
+
+      assert build_conn()
+             |> put_req_header("authorization", "Bearer " <> token)
+             |> get(~p"/api/v1/beheer/stats")
+             |> json_response(200)
+    end
   end
 end

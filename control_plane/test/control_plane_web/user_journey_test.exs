@@ -239,7 +239,11 @@ defmodule ControlPlaneWeb.UserJourneyTest do
       admin =
         admin |> Ecto.Changeset.change(role: :admin) |> Repo.update!() |> with_second_factor()
 
-      token = admin |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
+      token =
+        admin
+        |> Accounts.generate_user_session_token(mfa: true)
+        |> Base.url_encode64(padding: false)
+
       %{conn: conn, admin: admin, admin_token: token}
     end
 

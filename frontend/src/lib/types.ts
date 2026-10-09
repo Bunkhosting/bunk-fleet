@@ -8,6 +8,12 @@ export interface User {
   vps_count?: number;
   totp_enabled: boolean;
   passkeys_enabled: boolean;
+  /**
+   * Of DEZE sessie met een tweede factor begon. Het beheerpaneel eist dat; een
+   * sessie die met alleen een wachtwoord begon, komt er niet in, ook als de
+   * gebruiker daarna 2FA aanzette.
+   */
+  session_mfa: boolean;
   /** Of deze gebruiker hardware beheert; bepaalt of het nodescherm in het menu staat. */
   owns_nodes: boolean;
   /** null until the user clicks the link in their confirmation email. */

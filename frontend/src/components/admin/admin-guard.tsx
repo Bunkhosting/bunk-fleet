@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Loader2, ShieldAlert, ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUser } from "@/contexts/UserContext";
+import { authApi } from "@/lib/api";
 
 /**
  * Client-side gate for the admin section. The real authorization is enforced by
@@ -45,8 +46,8 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
           <p className="font-medium">Het beheerpaneel vraagt een tweede factor</p>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
             Hierachter staat elk klantaccount, elke VPS en de knop die tegoed bijboekt. Eén
-            wachtwoord is daar te weinig voor. Zet een authenticator-app of een passkey aan;
-            daarna kun je hier meteen verder.
+            wachtwoord is daar te weinig voor. Zet een authenticator-app of een passkey aan en
+            log daarna opnieuw in.
           </p>
         </div>
         <Link href="/dashboard/beveiliging">
@@ -56,5 +57,34 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Het account heeft een tweede factor, maar deze sessie begon zonder. Zo kon
+  // iemand met alleen een wachtwoord in zijn eigen sessie 2FA aanzetten en dan
+  // het paneel openen; de API weigert dat nu, en dit legt uit waarom.
+  if (!user.session_mfa) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+        <ShieldAlert className="h-10 w-10 text-muted-foreground" />
+        <div>
+          <p className="font-medium">Log opnieuw in om het beheerpaneel te openen</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+            Deze sessie begon zonder je tweede factor. Het beheerpaneel vraagt een sessie die
+            er wel mee begon.
+          </p>
+        </div>
+        <Button onClick={opnieuwInloggen}>Opnieuw inloggen</Button>
+      </div>
+    );
+  }
+
   return <>{children}</>;
+}
+
+async function opnieuwInloggen() {
+  try {
+    await authApi.logout();
+  } catch {
+    // Uitloggen mislukt is geen reden om te blijven staan: de nieuwe login
+    // vervangt de sessie toch.
+  }
+  window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
 }

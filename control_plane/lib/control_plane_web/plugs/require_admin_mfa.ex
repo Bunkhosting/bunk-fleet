@@ -30,22 +30,36 @@ defmodule ControlPlaneWeb.Plugs.RequireAdminMfa do
 
   @impl true
   def call(%Plug.Conn{assigns: %{current_user: user}} = conn, _opts) do
-    if Accounts.has_second_factor?(user) do
-      conn
-    else
-      conn
-      |> put_status(:forbidden)
-      |> json(%{
-        error: "admin_mfa_required",
-        detail:
+    cond do
+      not Accounts.has_second_factor?(user) ->
+        weiger(
+          conn,
+          "admin_mfa_required",
           "Het beheerpaneel vraagt een tweede factor. Zet een authenticator-app " <>
             "of een passkey aan onder Beveiliging."
-      })
-      |> halt()
+        )
+
+      # Het account heeft er een, maar deze sessie heeft hem nooit laten zien.
+      # Wie alleen het wachtwoord had, kon in zijn eigen sessie een
+      # authenticator aanzetten en stond dan binnen. De vraag is dus niet "heeft
+      # dit account 2FA" maar "is deze sessie ermee begonnen".
+      not Accounts.session_mfa?(conn.assigns[:current_session_token]) ->
+        weiger(
+          conn,
+          "admin_reauth_required",
+          "Log opnieuw in met je tweede factor om het beheerpaneel te openen."
+        )
+
+      true ->
+        conn
     end
   end
 
   def call(conn, _opts) do
     conn |> put_status(:forbidden) |> json(%{error: "forbidden"}) |> halt()
+  end
+
+  defp weiger(conn, code, detail) do
+    conn |> put_status(:forbidden) |> json(%{error: code, detail: detail}) |> halt()
   end
 end

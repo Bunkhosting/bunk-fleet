@@ -26,7 +26,10 @@ defmodule ControlPlaneWeb.Admin.MetricsTest do
     admin =
       user |> Ecto.Changeset.change(%{role: :admin}) |> Repo.update!() |> with_second_factor()
 
-    token = admin |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
+    token =
+      admin
+      |> Accounts.generate_user_session_token(mfa: true)
+      |> Base.url_encode64(padding: false)
 
     {put_req_header(conn, "authorization", "Bearer " <> token), admin}
   end
@@ -66,7 +69,9 @@ defmodule ControlPlaneWeb.Admin.MetricsTest do
   test "a customer cannot read it", %{conn: conn} do
     email = "metrics-user-#{System.unique_integer([:positive])}@example.com"
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
-    token = user |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
+
+    token =
+      user |> Accounts.generate_user_session_token(mfa: true) |> Base.url_encode64(padding: false)
 
     assert conn
            |> put_req_header("authorization", "Bearer " <> token)
