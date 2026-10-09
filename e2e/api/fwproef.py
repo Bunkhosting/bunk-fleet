@@ -4,6 +4,7 @@ Gebruik (op VM102, waar het control plane rechtstreeks bereikbaar is):
 
     python3 fwproef.py bestel <regiocode>   -> drukt het id van een nieuwe test-VPS af
     python3 fwproef.py proef <vps_id> <buur_ip>
+    python3 fwproef.py stil <vps_id> <seconden>  -> leeft een stille terminal nog?
     python3 fwproef.py weg <vps_id>
 
 `proef` opent de webterminal van de test-VPS en kijkt drie dingen na: komt hij
@@ -70,6 +71,17 @@ def proef(vid, buur):
     print(" ".join(regels) or "geen uitkomst; ruwe uitvoer:\n" + uit[-400:])
 
 
+def stil(vid, seconden):
+    """Opent een sessie, doet `seconden` niets, en kijkt of hij nog leeft."""
+    token = inloggen()
+    status, body, _, _ = roep("POST", f"/vpses/{vid}/console-ticket", {}, token=token)
+    if status != 200:
+        sys.exit(f"geen ticket: {status} {body}")
+    pad = f"/ws/console/{vid}/?ticket={urllib.parse.quote(body['ticket'])}"
+    uit = sessie(CP_HOST, CP_POORT, pad, ["echo UIT=LEEFT"], eerste_wacht=float(seconden), per_opdracht=8.0)
+    print("UIT=LEEFT" if "UIT=LEEFT" in uit else "DICHT na stilte; staart: " + uit[-200:].replace("\n", " "))
+
+
 def weg(vid):
     token = inloggen()
     status, body, _, _ = roep("DELETE", f"/vpses/{vid}", token=token)
@@ -85,4 +97,5 @@ def weg(vid):
 
 if __name__ == "__main__":
     {"bestel": lambda: bestel(sys.argv[2]), "proef": lambda: proef(sys.argv[2], sys.argv[3]),
+     "stil": lambda: stil(sys.argv[2], sys.argv[3]),
      "weg": lambda: weg(sys.argv[2])}[sys.argv[1]]()

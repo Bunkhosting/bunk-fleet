@@ -16,12 +16,14 @@ defmodule ControlPlaneWeb.ConsoleRelaySocket do
   require Logger
 
   alias ControlPlane.Console.Relay
+  alias ControlPlaneWeb.WsKeepalive
 
   @impl true
   def init(%{token: token, node_id: node_id}) do
     case Relay.attach(token, node_id, self()) do
       {:ok, pid} ->
         Process.monitor(pid)
+        WsKeepalive.plan()
         {:ok, %{relay: pid}}
 
       :error ->
@@ -45,6 +47,13 @@ defmodule ControlPlaneWeb.ConsoleRelaySocket do
   def handle_info({:relay_out, data}, state), do: {:push, {:binary, data}, state}
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:stop, :normal, state}
+
+  # Zie WsKeepalive: zonder dit sloot een stille sessie na een minuut, ook aan
+  # deze kant.
+  def handle_info(:ws_ping, state) do
+    WsKeepalive.plan()
+    {:push, {:ping, ""}, state}
+  end
 
   def handle_info(_message, state), do: {:ok, state}
 

@@ -73,6 +73,9 @@ def _lees(s, staart: bytes, seconden: float):
             staart = staart[i + lengte :]
             if b1 & 0x0F in (0x1, 0x2):
                 uit += lading
+            elif b1 & 0x0F == 0x9:
+                # Een ping beantwoorden, zoals elke browser vanzelf doet.
+                _stuur(s, lading, opcode=0xA)
             elif b1 & 0x0F == 0x8:
                 return uit + b"\n[verbinding gesloten door de server]", staart
     return uit, staart

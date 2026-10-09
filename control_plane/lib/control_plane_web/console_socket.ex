@@ -9,6 +9,7 @@ defmodule ControlPlaneWeb.ConsoleSocket do
   @behaviour WebSock
   require Logger
   alias ControlPlane.Console.Session
+  alias ControlPlaneWeb.WsKeepalive
 
   # Each live session is a GenServer holding a real SSH connection to a VPS. Cap
   # how many a single user may hold at once so a scripted client can't exhaust
@@ -36,6 +37,7 @@ defmodule ControlPlaneWeb.ConsoleSocket do
              vps_id: state.vps_id
            }) do
         {:ok, pid} ->
+          WsKeepalive.plan()
           {:ok, Map.put(state, :session, pid)}
 
         {:error, reason} ->
@@ -78,6 +80,11 @@ defmodule ControlPlaneWeb.ConsoleSocket do
   # sentence needs no protocol — only a frame.
   def handle_info({:console_closed, reason}, state) do
     {:push, {:binary, closing_message(reason)}, {:stop, :normal, state}}
+  end
+
+  def handle_info(:ws_ping, state) do
+    WsKeepalive.plan()
+    {:push, {:ping, ""}, state}
   end
 
   def handle_info(_msg, state), do: {:ok, state}
