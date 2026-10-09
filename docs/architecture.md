@@ -21,7 +21,7 @@ region and a package, and the control plane decides which of our nodes runs it.
 | Concern               | Choice                          | Why                                                              |
 | --------------------- | ------------------------------- | --------------------------------------------------------------- |
 | Control plane         | **Elixir / Phoenix (OTP)**      | Many concurrent flaky-agent connections, realtime console mux, supervision/fault-tolerance. |
-| Worker agent          | **Go (stdlib-only)**            | Single static binary, trivial to ship to a new node.            |
+| Worker agent          | **Go (few deps: govmomi, websocket)** | Single static binary, trivial to ship to a new node.            |
 | Hypervisors           | **Proxmox** + **ESXi/vCenter**  | What our nodes actually run.                                    |
 | Reaching a VPS        | **Relayed through its node's agent** | The agent already dials out; nothing has to reach in.      |
 | Persistence           | **Postgres** (via Ecto)         | Authoritative inventory, placement, and billing state.          |

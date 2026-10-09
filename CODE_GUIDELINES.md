@@ -207,8 +207,8 @@ A change is done when every line is true:
 ## Project specifics
 
 ```
-Stack:            Elixir 1.17 / Phoenix 1.7 / Ecto (control_plane), Go 1.25 (agent),
-                  Next.js 14 / React 18 / TypeScript (frontend), PostgreSQL 16.
+Stack:            Elixir 1.17 / Phoenix 1.7 / Ecto (control_plane), Go 1.26 (agent),
+                  Next.js 16 / React 18 / TypeScript (frontend), PostgreSQL 16.
 
 Run locally:      There is no local toolchain. Everything runs in containers on the
                   platform VM. Author here, sync, run there.
@@ -216,10 +216,12 @@ Run locally:      There is no local toolchain. Everything runs in containers on 
 Run tests:        bash tools/check.sh            (format, compile, credo, deps.audit,
                                                   mix test, gofmt, vet, go test)
                   bash tools/check.sh elixir|go  (one component)
-                  Needs BUNK_DB_PASSWORD; tests use control_plane_test on bf-prod-pg.
+                  Tests run against a throwaway Postgres (bf-test-pg, tmpfs) that
+                  tools/check.sh starts itself; never against production.
 
 Lint / format:    Included in tools/check.sh. CI additionally runs Dialyzer,
-                  staticcheck, govulncheck, npm audit, tsc and next lint.
+                  staticcheck, govulncheck, npm audit, tsc and eslint, gitleaks over the full
+                  history, and every migration rolled back and re-applied.
 
 Build:            bash build-prod.sh && bash deploy-prod.sh        (control plane)
                   bash deploy-frontend.sh                          (frontend + edge)

@@ -15,8 +15,8 @@ heeft daardoor geen inkomende poort nodig.
 | Pad              | Wat het is                                                                   |
 | ---------------- | ---------------------------------------------------------------------------- |
 | `control_plane/` | Phoenix 1.7-app (OTP-app `:control_plane`), Elixir ~> 1.14, Postgres via Ecto. |
-| `agent/`         | Go 1.25-module `github.com/Bunk-Hosting/bunk-fleet/agent`, statisch gebouwd.   |
-| `frontend/`      | Klantendashboard, Next.js 14 / TypeScript.                                    |
+| `agent/`         | Go 1.26-module `github.com/Bunk-Hosting/bunk-fleet/agent`, statisch gebouwd.   |
+| `frontend/`      | Klantendashboard, Next.js 16 / TypeScript.                                    |
 | `provisioning/`  | Wat er op een nieuwe VPS terechtkomt (o.a. het welkomstscherm).               |
 | `tools/`         | De kwaliteitspoort en de back-up-/herstelscripts.                            |
 | `docs/`          | Protocol, architectuur, runbooks, security- en privacyreviews.                |
@@ -62,7 +62,8 @@ result).
 - **Agent (`bunk-agent`)** — één per node. Meldt zich aan met een eenmalig
   token, stuurt periodiek capaciteit door, haalt werk op met long-polling, voert
   provision-, delete-, power- en consolecommando's uit tegen de lokale
-  hypervisor. Go zonder externe afhankelijkheden, één statische binary.
+  hypervisor. Go met weinig afhankelijkheden (govmomi voor ESXi, een
+  WebSocket-bibliotheek), één statische binary.
 - **Providers** — de hypervisorkant van de agent: **Proxmox** en
   **ESXi/vCenter**. De control plane kent maar één commandovocabulaire.
 - **Scheduler** (`control_plane/lib/control_plane/fleet/scheduler.ex`) — de klant

@@ -1,179 +1,135 @@
-# Agent ⇄ Control-Plane Protocol
+# Protocol tussen agent en control plane
 
-This document is the contract between the Go **bunk-agent** running on each
-worker node and the Elixir **control plane**. It defines the transport, the
-message set, and the security model.
+Wat een node (de agent, `agent/`) en het control plane (`control_plane/`) tegen
+elkaar zeggen. De bron van waarheid is de code: `agent/internal/transport/transport.go`
+aan de kant van de agent, `control_plane/lib/control_plane_web/router.ex` (scope
+`/v1`) en de controllers daarachter aan de andere kant. Wijkt dit document daarvan
+af, dan klopt de code en is dit document verouderd.
 
-> **Status: partly aspirational.** The message *set* below matches the
-> implementation, but the transport and identity sections describe a design we
-> have not built. What actually ships today: enrollment and steady state both
-> run over plain **HTTPS request/response**, steady state is a **long-poll** for
-> commands plus a periodic heartbeat (not a persistent bidirectional stream),
-> and a node authenticates with a **per-node bearer token** minted at enrollment
-> — there is no mTLS, no CSR, and no CA bundle. Sections marked *(designed)*
-> are not in the code. Do not assume mTLS exists.
+Waarom het zo is opgezet en niet met mTLS of een permanente verbinding: zie
+[ADR 0001](adr/0001-agent-praat-via-https-long-poll.md).
 
-## Transport
+## Verbinding en authenticatie
 
-- **Agents dial OUT.** Worker nodes may live behind NAT/firewalls and are
-  never dialed *into*. The agent always initiates the connection to the control
-  plane, which keeps the protocol NAT-friendly with no inbound ports.
-- **Enrollment** happens once, over **HTTPS** (request/response), using a
-  one-time enrollment token. It returns the node's durable identity.
-- **Steady state** runs over a single **persistent, authenticated, bidirectional
-  channel** — either **gRPC streaming** or a **WebSocket** — carrying heartbeats
-  (agent→cp), commands (cp→agent), and command results (agent→cp) multiplexed
-  together, plus console byte streams.
-- **Reconnect** is mandatory and continuous: on disconnect the agent retries
-  with exponential backoff + jitter and re-establishes the channel using its
-  durable mTLS identity (no re-enrollment). The control plane treats a node as
-  online only while its channel is live and heartbeats are fresh.
+- Alles over HTTPS. Plain HTTP alleen naar een privé-adres (`config.go`).
+- Inschrijven met een eenmalig enroll-token. Daarna draagt elke aanvraag
+  `Authorization: Bearer <agent_token>`. Elke `/v1`-route is gebonden aan de node
+  van dat token: een node ziet en beantwoordt alleen zijn eigen commando's.
+- De agent maakt alle verbindingen; het control plane belt nooit een node.
 
-### Direction legend
+## Endpoints
 
-- `agent→cp` : sent by the agent to the control plane.
-- `cp→agent` : sent by the control plane to the agent.
+| Methode en pad | Wie | Wat |
+|---|---|---|
+| `POST /v1/enroll` | agent, met enroll-token | Inschrijven; levert `node_id` en `agent_token` |
+| `POST /v1/heartbeat` | agent | Capaciteit en meldingen heen, instellingen terug |
+| `GET /v1/commands?node_id=…` | agent | Long-poll: commando's die deze node moet uitvoeren |
+| `POST /v1/commands/:id/result` | agent | Uitkomst van één commando |
+| `GET /v1/port-forwards` | agent | De gewenste port forwards, als volledige set |
+| `GET /v1/console-relay` | agent (WebSocket) | De SSH-stroom van een webterminal |
 
----
+## Inschrijven
 
-## Messages
+Verzoek (`EnrollRequest`):
 
-### `Enroll` — bootstrap a new node (HTTPS, one-time)
+| Veld | Betekenis |
+|---|---|
+| `token` | Het eenmalige enroll-token uit het dashboard |
+| `hypervisor` | `proxmox` of `esxi` |
+| `agent_version` | De build van de agent |
+| `vps_gateway`, `vps_cidr_prefix`, `vps_range_start`, `vps_range_end` | Optioneel: het VPS-netwerk dat de operator lokaal heeft ingesteld |
+| `owner_email` | Optioneel: de eigenaar (het token wint als het er ook een noemt) |
 
-**Request — `agent→cp`**
+Antwoord (`EnrollResponse`): `node_id`, `agent_token`, en `vps_network`
+(`gateway`, `cidr_prefix`, `range_start`, `range_end`) zoals het control plane het
+heeft toegekend. De agent bewaart dit in `state.json` (0600) en begint daar na een
+herstart mee.
 
-| Field             | Type     | Notes                                              |
-| ----------------- | -------- | -------------------------------------------------- |
-| `enrollment_token`| string   | One-time token minted by an admin. Single-use.     |
-| `hostname`        | string   | Agent-reported node hostname.                      |
-| `hypervisor`      | enum     | `proxmox` \| `esxi`.                               |
-| `agent_version`   | string   | bunk-agent build version.                          |
-| `advertised_region`| string  | Region the agent claims for this node.             |
-| `csr`             | bytes    | *(designed)* PEM CSR; key never leaves the node.   |
+## Hartslag
 
-**Response — `cp→agent`**
+Elke 30 seconden. Verzoek (`Heartbeat`):
 
-| Field             | Type     | Notes                                              |
-| ----------------- | -------- | -------------------------------------------------- |
-| `node_id`         | uuid     | Durable control-plane identity for this node.      |
-| `client_cert`     | bytes    | *(designed)* Signed mTLS client cert. Today: a per-node bearer `agent_token`. |
-| `ca_bundle`       | bytes    | *(designed)* CA chain for verifying the control plane.|
-| `assigned_region` | string   | Authoritative region assignment.                   |
-| `channel_endpoint`| string   | URL/host:port for the persistent channel.          |
+| Veld | Betekenis |
+|---|---|
+| `node_id`, `at` | Wie en wanneer |
+| `total_vcpu`, `avail_vcpu`, `total_ram_mb`, `avail_ram_mb`, `total_disk_gb`, `avail_disk_gb` | Capaciteit, al afgetopt op wat de eigenaar aanbiedt |
+| `agent_version` | De draaiende build; de update-golf leest hieraan af wie bij is |
+| `capacity_error` | Gezet als de agent zijn hypervisor niet kon bevragen, of als netwerkbeheer aantoonbaar mislukte. De node blijft zichtbaar maar krijgt geen nieuwe VPS'en |
+| `network_note` | Een vermoeden dat niets blokkeert: de agent komt mogelijk niet bij zijn VPS'en, of klanten zijn niet van elkaar afgeschermd. Weggelaten = opgelost |
 
-After a successful `Enroll`, the one-time token is burned and the node uses its
-per-node agent token (bearer) for all subsequent calls. Only the token's hash is
-stored control-plane side.
+Antwoord: `{"settings": {...}}` (`NodeSettings`). Elk veld is `null` als het niet is
+ingesteld; de agent houdt dan zijn eigen waarde. Zo landt een wijziging uit het
+dashboard binnen één hartslag op de node.
 
----
+| Veld | Betekenis |
+|---|---|
+| `offer_vcpu`, `offer_ram_mb`, `offer_disk_gb` | Hoeveel van de machine naar de VPS-pool gaat |
+| `vmid_min`, `vmid_max` | Het VMID-blok dat van Bunk is |
+| `vcpu_oversubscribe` | vCPU's per fysieke core |
+| `vps_bridge`, `vps_vlan` | Waar de netwerkkaart van een nieuwe VPS aan hangt |
+| `vps_gateway`, `vps_cidr_prefix` | Het VPS-netwerk zelf. De agent neemt een nieuw netwerk live over en bewaart het in `state.json`; een half of ongeldig antwoord laat het bestaande staan |
 
-### `Heartbeat` — capacity & liveness (channel, every N seconds)
+## Commando's
 
-**`agent→cp`** — emitted on a fixed interval (default every N seconds).
+`GET /v1/commands` geeft een lijst (`Command`): `id`, `kind`, `vps_id` (leeg voor een
+commando over de node zelf) en `payload`. Er zitten ook verzoeken voor de
+webterminal tussen (`console_connect`); die zijn geen rij in de database en worden
+nooit opnieuw afgeleverd.
 
-| Field                 | Type   | Notes                                          |
-| --------------------- | ------ | ---------------------------------------------- |
-| `node_id`             | uuid   | Identity of the reporting node.                |
-| `seq`                 | uint64 | Monotonic sequence number.                     |
-| `hypervisor`          | enum   | `proxmox` \| `esxi`.                          |
-| `capacity_total`      | object | `{ vcpu, ram_mb, disk_gb }` — physical totals. |
-| `capacity_available`  | object | `{ vcpu, ram_mb, disk_gb }` — schedulable now. |
-| `capacity_error`      | string | Why this heartbeat carries no measured capacity. Absent when all is well. |
-| `health`              | enum   | `healthy` \| `degraded` \| `draining`.         |
-| `running_vms`         | uint   | Count of active VMs (sanity/reconciliation).   |
+| `kind` | Wat |
+|---|---|
+| `provision` | VPS aanmaken. Payload: `name`, `vcpu`, `ram_mb`, `disk_gb`, `template_id`, `cloud_init` (`user`, `password`), `ssh_keys`, `ip_config`, `rate_mbit` |
+| `delete` | VM verwijderen. Payload: `vm_id`; de agent weigert als de VM bij een andere VPS hoort |
+| `start`, `stop`, `pause`, `resume`, `reboot` | Aan/uit |
+| `backup`, `delete_backup`, `restore_backup` | Back-ups maken, weggooien en terugzetten |
+| `inventory` | Lijst van alle gasten op de node, voor het vergelijken met de administratie |
+| `update` | De agent werkt zichzelf bij en herstart |
+| `console_connect` | Open een webterminal naar het privé-adres van een VPS |
 
-Missed heartbeats (channel down or stale `seq`) mark the node offline and
-trigger drain/reschedule (see `architecture.md`). Capacity from the latest
-heartbeat is the scheduler's input for placement.
+### Afleveren en herleveren
 
-**`capacity_error` exists because silence is ambiguous.** An agent that cannot
-reach its hypervisor used to send nothing at all, so the node went offline after
-the heartbeat TTL — indistinguishable from a machine that is switched off, and
-missing the one fact needed to fix it. Such an agent now heartbeats anyway and
-says why it has no numbers. The control plane keeps the last known totals (the
-zeroes in that message are the absence of a measurement, not a measurement of
-zero), sets what the node reports as free to zero so nothing is placed there, and
-clears the field on the next healthy heartbeat.
+- Een commando gaat van `pending` naar `delivered` zodra de agent het ophaalt.
+  Alleen wat werkelijk als afgeleverd gemarkeerd werd, gaat mee; een commando dat
+  tussendoor geannuleerd werd, niet.
+- Komt er geen resultaat, dan wordt het opnieuw uitgedeeld: na 90 seconden, en
+  na 15 minuten voor `backup` en `restore_backup`. Na vijf keer nog maar eens per
+  half uur, en het wordt één keer gemeld aan de operator.
+- De agent voert een commando één keer uit en meldt het resultaat zo vaak als
+  erom gevraagd wordt (`memo.go`). Een commando dat nog loopt, krijgt geen
+  antwoord.
+- Commando's voor verschillende VPS'en lopen naast elkaar (standaard vier),
+  commando's voor dezelfde VPS achter elkaar.
+- Bij SIGTERM haalt de agent niets nieuws meer op en krijgt lopend werk 75
+  seconden om af te ronden.
 
-**Available vCPU is oversubscribed, available RAM is not.** Hand out more RAM
-than exists and something gets killed; a vCPU is a share of time. The agent
-reports `cores × BUNK_VCPU_OVERSUBSCRIBE − assigned` (default factor 3) as
-available, while `capacity_total.vcpu` stays the honest physical count.
+### Resultaat
 
----
+`POST /v1/commands/:id/result` met `CommandResult`:
 
-### `Command` — control-plane → agent instruction (channel)
+| Veld | Betekenis |
+|---|---|
+| `status` | `done` of `failed` |
+| `vm_id` | Het id van de VM op de hypervisor. Ook bij een mislukking, als de VM al bestond, zodat het control plane hem kan opruimen |
+| `ip` | Gemeld adres; het control plane houdt het adres dat het zelf toekende |
+| `error` | Uitleg bij `failed` |
+| `volid`, `size_bytes` | Bij een back-up |
+| `guests` | Bij `inventory` |
 
-**`cp→agent`** — each command carries a `command_id` (uuid) the agent echoes in
-its `CommandResult`, plus a `vps_id` (uuid, or absent for a command about the
-node itself such as `inventory` and `update`). The agent uses `vps_id` only to
-decide what may run next to what: commands for different VPSes run in parallel,
-commands for one VPS strictly in the order they were delivered. An agent that
-does not see the field falls back to running everything one at a time, which is
-correct but slow, so an old agent against a new control plane keeps working.
-How many VPSes one agent works on at once is `BUNK_MAX_PARALLEL_COMMANDS`
-(default 4; set it to 1 on slow storage to get the strictly-sequential behaviour
-back). One of the following payloads:
+Een resultaat voor een commando dat al afgerond is, verandert niets. Uitzondering:
+meldt een `provision` zich als `done` nadat hij al als mislukt was afgeschreven,
+dan volgt een `delete` voor die VM.
 
-#### `provision`
+## Port forwards
 
-| Field         | Type   | Notes                                               |
-| ------------- | ------ | --------------------------------------------------- |
-| `name`        | string | Guest name on the hypervisor.                        |
-| `vcpu` / `ram_mb` / `disk_gb` | int | The requested spec.                     |
-| `template_id` | int    | Template to clone.                                   |
-| `cloud_init`  | object | cloud-init data rendered by the control plane.       |
-| `ssh_keys`    | []string| Authorized public keys, plus the console key.       |
-| `ip_config`   | string | Provider-native addressing: `ip=A.B.C.D/prefix,gw=…`, allocated from the node's own subnet. |
+`GET /v1/port-forwards` geeft de volledige gewenste set (`public_port`,
+`target_ip`, `target_port`, `protocol`). Een agent die zijn netwerk beheert, zet
+dat in iptables om; anders logt hij wat er zou moeten staan. Op dit moment heeft
+geen node een publiek adres, dus de set is leeg (zie
+[ADR 0002](adr/0002-de-webterminal-is-de-enige-ingang.md)).
 
-#### `delete`
+## Webterminal
 
-| Field    | Type   | Notes                                |
-| -------- | ------ | ------------------------------------ |
-| `vm_id`  | string | Hypervisor-local VM identifier.      |
-
-#### `console_connect`
-
-Not a command in the usual sense: it changes nothing, reports no result, and is
-never redelivered. It rides the command poll because that is the channel the
-agent already holds open.
-
-| Field      | Type   | Notes                                                  |
-| ---------- | ------ | ------------------------------------------------------ |
-| `token`    | string | Single-use relay token. The agent presents it on `GET /v1/console-relay`, which upgrades to a WebSocket carrying raw SSH bytes. |
-| `vps_id`   | uuid   | The VPS this console is for.                           |
-| `host`     | string | Address to open TCP to, on the node's own network. The agent refuses anything that is not private, and outside its assigned subnet where it knows one. |
-| `port`     | int    | Usually 22.                                            |
-
----
-
-### `CommandResult` — agent → control-plane outcome (channel)
-
-**`agent→cp`** — one per executed `Command`, correlated by `command_id`.
-
-| Field         | Type   | Notes                                                  |
-| ------------- | ------ | ------------------------------------------------------ |
-| `status`      | enum   | `done` \| `failed`.                                    |
-| `vm_id`       | string | Hypervisor-local VM id (on provision).                 |
-| `ip`          | string | The guest's primary IPv4, when known. The control plane keeps its own allocation when the two disagree — the console binds to the address it assigned. |
-| `error`       | string | Human-readable failure reason when `status = failed`.  |
-
----
-
-## Security
-
-- **mTLS identity per node.** Each node holds a unique client certificate issued
-  at enrollment; the agent's private key never leaves the node. The control
-  plane authenticates every HTTPS call by bearer token today, binding it to a
-  `node_id`; certificate identity is *(designed)*, not built.
-- **One-time enrollment tokens.** Tokens are single-use and short-lived; they
-  bootstrap identity only and grant no standing access.
-- **Least privilege.** A node may only act on VMs/VPS instances the control
-  plane has assigned to it. Commands are scoped to that node; an agent cannot
-  enumerate or affect other nodes' workloads.
-- **Control-plane authentication.** The agent verifies the control plane against
-  the `ca_bundle` from enrollment, preventing impersonation of the orchestrator.
-- **No node trust tiers.** Every node is Bunk's own hardware, so there is no
-  untrusted class of node to fence off. The boundary that matters is between
-  *tenants*, and it is enforced in the control plane (owner-scoped queries,
-  server-set VPS ownership, CP-allocated console IPs), not by node class.
+Op een `console_connect` belt de agent het privé-adres van de VPS (poort 22),
+alleen binnen het VPS-net van zijn node, en opent een WebSocket naar
+`/v1/console-relay`. Het control plane koppelt die aan de browser van de klant.
+Een sessie duurt maximaal vier uur.

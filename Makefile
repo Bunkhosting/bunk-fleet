@@ -12,7 +12,7 @@ all: build
 
 ## check: full verification gate (format + compile + tests, both components) in containers.
 ##        Works without a local Elixir/Go toolchain — unlike the `test` target below.
-##        Needs BUNK_DB_PASSWORD for the Elixir suite. Run this before pushing.
+##        Runs against a throwaway Postgres (bf-test-pg). Run this before pushing.
 check:
 	bash tools/check.sh
 
