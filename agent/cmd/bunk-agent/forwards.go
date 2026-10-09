@@ -96,7 +96,7 @@ func fingerprint(forwards []transport.PortForward) string {
 }
 
 // syncForwards polls the control plane and keeps the firewall matching it.
-func syncForwards(ctx context.Context, logger *slog.Logger, cp *transport.Client, subnet *net.IPNet, manage bool) {
+func syncForwards(ctx context.Context, logger *slog.Logger, cp *transport.Client, subnet func() *net.IPNet, manage bool) {
 	if !manage {
 		// Still poll. An operator running their own networking has to install
 		// these by hand, and telling them nothing would leave them to guess which
@@ -111,16 +111,19 @@ func syncForwards(ctx context.Context, logger *slog.Logger, cp *transport.Client
 
 	for {
 		forwards, err := cp.PortForwards(ctx)
+		// Het net hoort in de vingerafdruk: de regels beperken de bron tot dit
+		// net, dus na een verhuizing moeten ze opnieuw, ook als de lijst gelijk is.
+		huidig := subnet()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			logger.Warn("port forwards: cannot read desired state", "err", err)
-		} else if want := fingerprint(forwards); want != applied {
+		} else if want := fingerprint(forwards) + "|" + huidig.String(); want != applied {
 			if !manage {
 				describeForwards(logger, forwards)
 				applied = want
-			} else if err := applyForwards(ctx, logger, forwards, subnet); err != nil {
+			} else if err := applyForwards(ctx, logger, forwards, huidig); err != nil {
 				logger.Warn("port forwards: could not apply", "err", err)
 			} else {
 				logger.Info("port forwards applied", "count", len(forwards))

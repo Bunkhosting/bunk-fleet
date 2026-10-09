@@ -8,8 +8,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Bunk-Hosting/bunk-fleet/agent/internal/config"
 	"github.com/Bunk-Hosting/bunk-fleet/agent/internal/provider"
@@ -239,7 +241,7 @@ func TestEersteGastIpSlaatDeGatewayOver(t *testing.T) {
 func beheerVoor(manage bool, bridge string) *netwerkBeheer {
 	return nieuwNetwerkBeheer(
 		config.VpsNetworkConfig{Bridge: bridge, Gateway: "172.16.22.1", CidrPrefix: 24},
-		manage, persistedState{})
+		manage, persistedState{}, "")
 }
 
 // De bridge staat alleen in het paneel en het paneel antwoordt pas bij de eerste
@@ -389,5 +391,93 @@ func TestEenGezondeNodeMeldtGeenNetwerknotitie(t *testing.T) {
 
 	if hb.NetworkNote != "" || hb.CapacityError != "" {
 		t.Errorf("een node zonder netwerkbeheer meldde iets: %+v", hb)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// Eindhoven verhuisde van 172.16.22.0/24 naar 172.16.2.0/24. Het control plane
+// wist het; de agent hield het net van zijn inschrijving vast en weigerde elke
+// terminal naar het nieuwe net tot iemand hem herstartte.
+func TestEenNieuwNetwerkUitHetControlPlaneGeldtMeteen(t *testing.T) {
+	pad := filepath.Join(t.TempDir(), "state.json")
+	st := persistedState{NodeID: "node-1", AgentToken: "tok", VpsGateway: "172.16.22.1", VpsCidrPrefix: 24}
+	b := nieuwNetwerkBeheer(config.VpsNetworkConfig{}, false, st, pad)
+	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+
+	if got := b.subnet().String(); got != "172.16.22.0/24" {
+		t.Fatalf("vooraf: kreeg %s", got)
+	}
+
+	b.bijwerken(logger, transport.NodeSettings{VpsGateway: ptr("172.16.2.1"), VpsCidrPrefix: ptr(24)})
+
+	if got := b.subnet().String(); got != "172.16.2.0/24" {
+		t.Fatalf("het nieuwe net is niet overgenomen: %s", got)
+	}
+	if err := allowedConsoleTarget("172.16.2.20", b.subnet()); err != nil {
+		t.Errorf("de console weigert een adres in het nieuwe net: %v", err)
+	}
+	if err := allowedConsoleTarget("172.16.22.20", b.subnet()); err == nil {
+		t.Error("de console laat nog een adres in het oude net toe")
+	}
+
+	// Na een herstart begint de agent met wat er bewaard is -- en dat moet de
+	// inschrijving nog bevatten, anders verliest de node zijn identiteit.
+	bewaard, ok := loadState(pad)
+	if !ok {
+		t.Fatal("het nieuwe netwerk is niet bewaard")
+	}
+	if bewaard.VpsGateway != "172.16.2.1" || bewaard.VpsCidrPrefix != 24 {
+		t.Errorf("bewaard netwerk: %s/%d", bewaard.VpsGateway, bewaard.VpsCidrPrefix)
+	}
+	if bewaard.NodeID != "node-1" || bewaard.AgentToken != "tok" {
+		t.Errorf("de inschrijving ging verloren bij het bewaren: %+v", bewaard)
+	}
+}
+
+// Een half of ongeldig antwoord mag een werkende node niet zijn net afnemen:
+// een nil-net betekent voor de console "alles weigeren".
+func TestEenOnvolledigNetwerkLaatHetBestaandeStaan(t *testing.T) {
+	pad := filepath.Join(t.TempDir(), "state.json")
+	st := persistedState{NodeID: "n", AgentToken: "t", VpsGateway: "10.10.0.1", VpsCidrPrefix: 22}
+	b := nieuwNetwerkBeheer(config.VpsNetworkConfig{}, false, st, pad)
+	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+
+	for _, s := range []transport.NodeSettings{
+		{},
+		{VpsGateway: ptr("172.16.2.1")},
+		{VpsCidrPrefix: ptr(24)},
+		{VpsGateway: ptr("geen-adres"), VpsCidrPrefix: ptr(24)},
+		{VpsGateway: ptr("172.16.2.1"), VpsCidrPrefix: ptr(0)},
+		{VpsGateway: ptr("172.16.2.1"), VpsCidrPrefix: ptr(33)},
+	} {
+		b.bijwerken(logger, s)
+		if got := b.subnet().String(); got != "10.10.0.0/22" {
+			t.Fatalf("na %+v: net werd %s", s, got)
+		}
+	}
+	if _, ok := loadState(pad); ok {
+		t.Error("er is iets bewaard terwijl er niets veranderde")
+	}
+}
+
+// Een node die zijn netwerk laat beheren moet het nieuwe net ook opzetten, niet
+// alleen kennen.
+func TestEenBeheerdeNodePastEenNieuwNetwerkToe(t *testing.T) {
+	b := beheerVoor(true, "bunktest9")
+	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+	b.bijwerken(logger, transport.NodeSettings{})
+	eerste := b.laatstePog
+
+	// Zonder wijziging, en binnen de wachttijd: geen nieuwe poging.
+	b.bijwerken(logger, transport.NodeSettings{})
+	if !b.laatstePog.Equal(eerste) {
+		t.Fatal("een ongewijzigd netwerk werd opnieuw toegepast")
+	}
+
+	b.laatstePog = time.Time{}
+	b.bijwerken(logger, transport.NodeSettings{VpsGateway: ptr("172.16.2.1"), VpsCidrPrefix: ptr(24)})
+	if b.laatstePog.IsZero() {
+		t.Error("een nieuw netwerk werd niet toegepast")
 	}
 }

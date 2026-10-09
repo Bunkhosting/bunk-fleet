@@ -113,7 +113,7 @@ func run(logger *slog.Logger) error {
 	// seconde later krijgt.
 	var netwerk *netwerkBeheer
 	if cp.NodeID() != "" {
-		netwerk = nieuwNetwerkBeheer(cfg.VpsNetwork, cfg.ManageNetwork, state)
+		netwerk = nieuwNetwerkBeheer(cfg.VpsNetwork, cfg.ManageNetwork, state, statePath)
 		if !cfg.ManageNetwork || cfg.VpsNetwork.Bridge != "" {
 			netwerk.pasToe(logger, cfg.VpsNetwork.Bridge)
 		}
@@ -127,7 +127,9 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		subnet := assignedSubnet(state, cfg.VpsNetwork)
+		// Het net wordt bij elk gebruik opgevraagd, niet hier vastgelegd: het
+		// control plane kan het wijzigen terwijl de agent draait.
+		subnet := netwerk.subnet
 		go consumeCommands(ctx, logger, prov, cp, cmds, subnet, cfg.ParallelCommands())
 		logger.Info("command consumer started")
 
@@ -402,7 +404,7 @@ func afkappen(reason string) string {
 // consumeCommands drains the command channel until it is closed (on context
 // cancellation or a fatal poll error) and dispatches each command. A panic or
 // failure handling one command must not stop the loop.
-func consumeCommands(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, cmds <-chan transport.Command, assigned *net.IPNet, parallel int) {
+func consumeCommands(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, cmds <-chan transport.Command, assigned func() *net.IPNet, parallel int) {
 	// Replay protection. A MITM on a cleartext channel (or a buggy CP) could
 	// re-deliver a previously-seen command — e.g. replay a delete{vm_id} after
 	// that VMID has been reassigned to another tenant. Each Command.ID is executed
@@ -453,7 +455,7 @@ func consumeCommands(ctx context.Context, logger *slog.Logger, prov provider.Pro
 			// reported, and it must not sit inside handleCommand's 15-minute
 			// budget while a person waits for a terminal.
 			if cmd.Kind == transport.CmdConsoleConnect {
-				handleConsoleConnect(ctx, logger, cp, assigned, cmd.Payload)
+				handleConsoleConnect(ctx, logger, cp, assigned(), cmd.Payload)
 				continue
 			}
 

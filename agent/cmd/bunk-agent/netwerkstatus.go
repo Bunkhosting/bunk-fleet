@@ -191,11 +191,12 @@ func bronAdresNaar(doel net.IP) net.IP {
 
 // netwerkBeheer past het VPS-netwerk toe en houdt bij wat daar van terechtkwam.
 type netwerkBeheer struct {
-	cfg    config.VpsNetworkConfig
-	manage bool
-	state  persistedState
+	cfg      config.VpsNetworkConfig
+	manage   bool
+	statePad string // waar een nieuw netwerk wordt bewaard; leeg = niet bewaren
 
 	mu           sync.Mutex
+	state        persistedState         // bevat het netwerk, dat live kan veranderen
 	instellingen transport.NodeSettings // wat het control plane het laatst stuurde
 	geprobeerd   bool
 	toegepast    string // de bridge waarvoor het laatst een poging is gedaan
@@ -208,8 +209,57 @@ type netwerkBeheer struct {
 // waarschuwing en dat elke dertig seconden doen zou de log vullen met één regel.
 const herhaalNetwerkNa = 5 * time.Minute
 
-func nieuwNetwerkBeheer(cfg config.VpsNetworkConfig, manage bool, st persistedState) *netwerkBeheer {
-	return &netwerkBeheer{cfg: cfg, manage: manage, state: st}
+func nieuwNetwerkBeheer(cfg config.VpsNetworkConfig, manage bool, st persistedState, statePad string) *netwerkBeheer {
+	return &netwerkBeheer{cfg: cfg, manage: manage, state: st, statePad: statePad}
+}
+
+// subnet is het VPS-net van dit moment. De console en de port-forwards vragen
+// het bij elk gebruik opnieuw, in plaats van één keer bij het opstarten: een
+// node die naar een ander net verhuist, moet niet tot de volgende herstart elke
+// terminal weigeren.
+func (b *netwerkBeheer) subnet() *net.IPNet {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return assignedSubnet(b.state, b.cfg)
+}
+
+// neemNetwerkOver verwerkt het netwerk dat het control plane meestuurt. Het
+// geeft true terug als het anders is dan wat de agent had.
+//
+// Alleen een volledig en geldig netwerk telt. Een half antwoord, of een
+// gateway die geen IPv4-adres is, zou de console op nil zetten -- en nil
+// betekent daar "alles weigeren" voor een node die gewoon werkte.
+//
+// Het nieuwe netwerk gaat naar state.json, want daar begint de agent na een
+// herstart mee. Lukt dat schrijven niet, dan geldt het toch tot de herstart, en
+// stuurt het control plane het daarna opnieuw.
+func (b *netwerkBeheer) neemNetwerkOver(logger *slog.Logger, s transport.NodeSettings) bool {
+	if s.VpsGateway == nil || s.VpsCidrPrefix == nil {
+		return false
+	}
+	nieuw := vpsNetwork{Gateway: *s.VpsGateway, CidrPrefix: *s.VpsCidrPrefix}
+	if _, err := nieuw.subnet(); err != nil {
+		logger.Warn("vps network: ongeldig netwerk van het control plane genegeerd", "err", err)
+		return false
+	}
+	if b.state.VpsGateway == nieuw.Gateway && b.state.VpsCidrPrefix == nieuw.CidrPrefix {
+		return false
+	}
+
+	logger.Info("vps network: nieuw netwerk van het control plane",
+		"van", fmt.Sprintf("%s/%d", b.state.VpsGateway, b.state.VpsCidrPrefix),
+		"naar", fmt.Sprintf("%s/%d", nieuw.Gateway, nieuw.CidrPrefix))
+	b.state.VpsGateway = nieuw.Gateway
+	b.state.VpsCidrPrefix = nieuw.CidrPrefix
+	if b.statePad != "" {
+		if err := saveState(b.statePad, b.state); err != nil {
+			logger.Warn("vps network: kon het nieuwe netwerk niet bewaren; het geldt tot de volgende herstart", "err", err)
+		}
+	}
+	return true
 }
 
 // pasToe zet het netwerk op voor `bridge`, als de operator daarom heeft gevraagd.
@@ -240,8 +290,9 @@ func (b *netwerkBeheer) bijwerken(logger *slog.Logger, s transport.NodeSettings)
 	}
 	b.mu.Lock()
 	b.instellingen = s
+	netwerkAnders := b.neemNetwerkOver(logger, s)
 	bridge := effectieveBridge(b.cfg.Bridge, s)
-	gewijzigd := !b.geprobeerd || bridge != b.toegepast
+	gewijzigd := !b.geprobeerd || bridge != b.toegepast || netwerkAnders
 	opnieuw := b.fout != "" && time.Since(b.laatstePog) >= herhaalNetwerkNa
 	b.mu.Unlock()
 
@@ -263,16 +314,16 @@ func (b *netwerkBeheer) oordeel() netwerkOordeel {
 	if b == nil {
 		return netwerkOordeel{}
 	}
+	b.mu.Lock()
 	n := vpsNetwerkVan(b.state, b.cfg)
+	fout := b.fout
+	s := b.instellingen
+	b.mu.Unlock()
+
 	subnet, err := n.subnet()
 	if err != nil {
 		return netwerkOordeel{}
 	}
-
-	b.mu.Lock()
-	fout := b.fout
-	s := b.instellingen
-	b.mu.Unlock()
 
 	f := netwerkFeiten{
 		Bridge:      effectieveBridge(b.cfg.Bridge, s),

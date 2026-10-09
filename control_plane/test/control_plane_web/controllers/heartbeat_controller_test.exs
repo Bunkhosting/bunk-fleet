@@ -187,6 +187,31 @@ defmodule ControlPlaneWeb.HeartbeatControllerTest do
       refute Map.has_key?(instellingen, "guest_name_pattern")
     end
 
+    test "het antwoord draagt het VPS-netwerk van de node", %{conn: conn, region: region} do
+      # Eindhoven verhuisde naar een ander net. Dat ging alleen bij de
+      # inschrijving mee, dus de draaiende agent weigerde elke terminal naar het
+      # nieuwe net tot iemand hem herstartte.
+      %{node: node, agent_token: agent_token} = enroll_node(region)
+
+      node
+      |> Ecto.Changeset.change(%{
+        vps_gateway: "172.16.2.1",
+        vps_cidr_prefix: 24,
+        vps_range_start: "172.16.2.20",
+        vps_range_end: "172.16.2.99"
+      })
+      |> Repo.update!()
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> agent_token)
+        |> post(~p"/v1/heartbeat", %{"node_id" => node.id, "total_vcpu" => 4})
+
+      assert %{"settings" => instellingen} = json_response(conn, 200)
+      assert instellingen["vps_gateway"] == "172.16.2.1"
+      assert instellingen["vps_cidr_prefix"] == 24
+    end
+
     test "een node zonder instellingen krijgt lege waarden terug", %{conn: conn, region: region} do
       # Null betekent "niet ingesteld"; de agent houdt dan wat er lokaal staat.
       %{node: node, agent_token: agent_token} = enroll_node(region)
@@ -199,6 +224,9 @@ defmodule ControlPlaneWeb.HeartbeatControllerTest do
       assert %{"settings" => instellingen} = json_response(conn, 200)
       assert is_nil(instellingen["offer_ram_mb"])
       assert is_nil(instellingen["vmid_min"])
+      # De sleutel moet er zijn en null zijn: de agent leest null als "laat je
+      # eigen net staan". Ontbrak hij, dan las een oudere parser het als leeg.
+      assert Map.has_key?(instellingen, "vps_gateway")
     end
 
     test "missing bearer returns 401", %{conn: conn, region: region} do

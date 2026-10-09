@@ -78,7 +78,13 @@ defmodule ControlPlaneWeb.HeartbeatController do
       # "niet ingesteld" kunnen onderscheiden van allebei, anders overschrijft
       # een node die niemand heeft aangeraakt zijn eigen config met niets.
       vps_bridge: node.vps_bridge,
-      vps_vlan: node.vps_vlan
+      vps_vlan: node.vps_vlan,
+      # Het VPS-netwerk zelf. Ging alleen bij de inschrijving mee, waardoor een
+      # node die naar een ander net verhuisde elke terminal bleef weigeren tot
+      # iemand de agent herstartte. null = niet ingesteld; de agent houdt dan
+      # wat hij heeft.
+      vps_gateway: node.vps_gateway,
+      vps_cidr_prefix: node.vps_cidr_prefix
     }
   end
 end

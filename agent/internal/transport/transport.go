@@ -332,6 +332,12 @@ type NodeSettings struct {
 	// mag "laat mijn eigen config staan" betekenen.
 	Bridge *string `json:"vps_bridge"`
 	VLAN   *int    `json:"vps_vlan"`
+	// Het VPS-netwerk zelf. Kwam alleen bij de inschrijving mee, zodat een
+	// wijziging in het control plane een draaiende agent nooit bereikte: de
+	// console weigerde dan elk adres in het nieuwe net. Null betekent "niet
+	// ingesteld" en laat staan wat de agent al heeft.
+	VpsGateway    *string `json:"vps_gateway"`
+	VpsCidrPrefix *int    `json:"vps_cidr_prefix"`
 }
 
 // HeartbeatResponse is the control plane's answer to a heartbeat.
