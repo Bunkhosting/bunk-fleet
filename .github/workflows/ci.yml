@@ -34,7 +34,7 @@ jobs:
           # Kept current on purpose: the agent runs on hardware we do not own and
           # speaks TLS to the control plane, so its standard library is part of
           # the attack surface. See the note in go.mod.
-          go-version: "1.25"
+          go-version: "1.26"
           cache-dependency-path: agent/go.sum
 
       - name: Formatting

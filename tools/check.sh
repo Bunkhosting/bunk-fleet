@@ -123,7 +123,7 @@ check_go() {
     -v "$ROOT/agent":/src -w /src \
     -v bunk-gocache:/gocache \
     -e GOMODCACHE=/gocache/mod -e GOCACHE=/gocache/build \
-    golang:1.25-alpine sh -eu -c '
+    golang:1.26-alpine sh -eu -c '
       echo "--- gofmt ---"
       unformatted=$(gofmt -l .)
       [ -z "$unformatted" ] || { echo "unformatted files:"; echo "$unformatted"; exit 1; }

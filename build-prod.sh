@@ -35,7 +35,7 @@ docker run --rm \
   -v bunk-gocache:/gocache \
   -e GOMODCACHE=/gocache/mod -e GOCACHE=/gocache/build \
   -e AGENT_VERSION="$AGENT_VERSION" \
-  -w /src golang:1.25-alpine \
+  -w /src golang:1.26-alpine \
   sh -c 'CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.version=$AGENT_VERSION" -o /out/bunk-worker ./cmd/bunk-agent \
     && cd /out && sha256sum bunk-worker > bunk-worker.sha256'
 ls -la "$ROOT/control_plane/priv/static/dist/bunk-worker" "$ROOT/control_plane/priv/static/dist/bunk-worker.sha256"
