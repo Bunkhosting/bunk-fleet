@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { Loader2, ShieldAlert, ShieldOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUser } from "@/contexts/UserContext";
@@ -18,6 +19,18 @@ import { authApi } from "@/lib/api";
  */
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useUser();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const opnieuwInloggen = async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Uitloggen mislukt is geen reden om te blijven staan: de nieuwe login
+      // vervangt de sessie toch.
+    }
+    router.push("/login?next=" + encodeURIComponent(pathname));
+  };
 
   if (loading) {
     return (
@@ -77,14 +90,4 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
-}
-
-async function opnieuwInloggen() {
-  try {
-    await authApi.logout();
-  } catch {
-    // Uitloggen mislukt is geen reden om te blijven staan: de nieuwe login
-    // vervangt de sessie toch.
-  }
-  window.location.href = "/login?next=" + encodeURIComponent(window.location.pathname);
 }
