@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Bunk-Hosting/bunk-fleet/agent/internal/provider"
 )
@@ -583,5 +585,99 @@ func TestAfschermingMeldtEenUitgeschakeldeDatacenterFirewall(t *testing.T) {
 				t.Errorf("notitie = %q, melding verwacht: %v", n, tc.melding)
 			}
 		})
+	}
+}
+
+// Twee bestellingen tegelijk op één node kozen hetzelfde laagste vrije VMID: de
+// keuze en de clone die het nummer claimt stonden los van elkaar. De tweede
+// clone faalde op "bestaat al". Deze fake laat een clone pas zien in de lijst
+// met gasten nadat hij is aangenomen, net als Proxmox.
+func TestGelijktijdigeUitrollenKiezenElkEenEigenVMID(t *testing.T) {
+	r := newRecorder(t)
+	var mu sync.Mutex
+	bezet := []int{}
+
+	r.handlers["GET /cluster/resources"] = func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		items := []string{}
+		for _, id := range bezet {
+			items = append(items, fmt.Sprintf(`{"vmid":%d}`, id))
+		}
+		_, _ = w.Write([]byte(`{"data":[` + strings.Join(items, ",") + `]}`))
+	}
+	r.handlers["POST /nodes/pve/qemu/9000/clone"] = func(w http.ResponseWriter, req *http.Request) {
+		// Even nadenken, zoals een echte node: dit is het venster waarin een
+		// tweede uitrol hetzelfde nummer kon kiezen.
+		time.Sleep(50 * time.Millisecond)
+		id, _ := strconv.Atoi(req.PostForm.Get("newid"))
+		mu.Lock()
+		bezet = append(bezet, id)
+		mu.Unlock()
+		_, _ = w.Write([]byte(okTask))
+	}
+	r.taskSucceeds()
+	for _, id := range []string{"300", "301"} {
+		r.on("PUT /nodes/pve/qemu/"+id+"/resize", okTask)
+		r.on("POST /nodes/pve/qemu/"+id+"/config", `{"data":null}`)
+		r.on("POST /nodes/pve/qemu/"+id+"/status/start", okTask)
+	}
+
+	c := r.client(t, func(cfg *Config) { cfg.VMIDMin = 300; cfg.VMIDMax = 399 })
+
+	var wg sync.WaitGroup
+	ids := make([]string, 2)
+	fouten := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			st, err := c.CreateVM(context.Background(), provider.VMSpec{Name: fmt.Sprintf("v%d", i), TemplateID: 9000, DiskGB: 20})
+			ids[i], fouten[i] = st.ID, err
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range fouten {
+		if err != nil {
+			t.Fatalf("uitrol %d: %v", i, err)
+		}
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("beide uitrollen kregen VMID %s", ids[0])
+	}
+}
+
+// Eén haperende statusvraag liet een hele uitrol mislukken, terwijl de clone
+// gewoon doorliep.
+func TestEenHaperendeStatusvraagLaatDeUitrolNietMislukken(t *testing.T) {
+	r := newRecorder(t)
+	r.on("GET /cluster/nextid", `{"data":"170"}`)
+	r.on("POST /nodes/pve/qemu/9000/clone", okTask)
+	r.on("PUT /nodes/pve/qemu/170/resize", okTask)
+	r.on("POST /nodes/pve/qemu/170/config", `{"data":null}`)
+	r.on("POST /nodes/pve/qemu/170/status/start", okTask)
+
+	var mu sync.Mutex
+	vragen := 0
+	r.handlers["GET /nodes/pve/tasks/UPID:pve:0000:OK::task/status"] = func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		vragen++
+		eerste := vragen == 1
+		mu.Unlock()
+		if eerste {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"errors":"pveproxy restarting"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"status":"stopped","exitstatus":"OK"}}`))
+	}
+
+	got, err := r.client(t).CreateVM(context.Background(), provider.VMSpec{Name: "x", TemplateID: 9000, DiskGB: 20})
+	if err != nil {
+		t.Fatalf("CreateVM faalde op één haperende statusvraag: %v", err)
+	}
+	if got.ID != "170" {
+		t.Errorf("ID = %q", got.ID)
 	}
 }

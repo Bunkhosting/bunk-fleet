@@ -92,6 +92,13 @@ type Client struct {
 
 	mu       sync.RWMutex
 	settings provider.Settings
+
+	// Houdt "kies een vrij VMID" en "claim het met een clone" bij elkaar. De
+	// agent rolt tot vier VPS'en tegelijk uit; zonder dit kozen twee gelijktijdige
+	// bestellingen hetzelfde laagste vrije nummer, en faalde de tweede clone op
+	// "VM bestaat al" -- een mislukte bestelling, geld terug, bij precies de
+	// drukte waar het om gaat.
+	vmidMu sync.Mutex
 }
 
 // ApplySettings takes the knobs the owner configured in the dashboard. A zero
@@ -637,6 +644,11 @@ func (c *Client) waitTask(ctx context.Context, upid string) error {
 	node := url.PathEscape(c.cfg.Node)
 	statusPath := fmt.Sprintf("/nodes/%s/tasks/%s/status", node, url.PathEscape(upid))
 
+	// Eén haperende statusvraag -- pveproxy die herstart, een time-out van
+	// dertig seconden -- liet het hele commando mislukken, terwijl de taak zelf
+	// gewoon doorliep. Een paar missers achter elkaar is pas een antwoord.
+	missers := 0
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("proxmox: wait for task %s: %w", upid, err)
@@ -644,8 +656,18 @@ func (c *Client) waitTask(ctx context.Context, upid string) error {
 
 		var ts taskStatus
 		if err := c.doJSON(ctx, http.MethodGet, statusPath, nil, &ts); err != nil {
-			return fmt.Errorf("proxmox: poll task %s: %w", upid, err)
+			missers++
+			if missers >= maxTaakPollMissers || ctx.Err() != nil {
+				return fmt.Errorf("proxmox: poll task %s: %w", upid, err)
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("proxmox: wait for task %s: %w", upid, ctx.Err())
+			case <-time.After(taskPollInterval):
+			}
+			continue
 		}
+		missers = 0
 
 		switch state, exit := evalTaskStatus(ts); state {
 		case taskOK:
@@ -662,6 +684,10 @@ func (c *Client) waitTask(ctx context.Context, upid string) error {
 		}
 	}
 }
+
+// Hoeveel statusvragen achter elkaar mogen mislukken voordat het wachten op een
+// taak opgeeft.
+const maxTaakPollMissers = 5
 
 // nextVMID picks the id for a new guest.
 //
@@ -751,25 +777,41 @@ func (c *Client) CreateVM(ctx context.Context, spec provider.VMSpec) (provider.V
 		return provider.VMStatus{}, errors.New("proxmox: CreateVM requires a non-zero TemplateID")
 	}
 
-	newID, err := c.nextVMID(ctx)
-	if err != nil {
-		return provider.VMStatus{}, err
-	}
-
 	node := url.PathEscape(c.cfg.Node)
 
 	// 1. Clone the template into the new VMID, then wait for the clone task.
+	//
+	// Kiezen en claimen onder één slot: zie vmidMu. Het slot gaat los zodra de
+	// clone-opdracht is aangenomen; vanaf dan staat het nummer op de node en
+	// ziet de volgende het als bezet. Het wachten op de clone zelf gebeurt
+	// buiten het slot, anders lopen gelijktijdige uitrollen alsnog achter elkaar.
+	c.vmidMu.Lock()
+	newID, err := c.nextVMID(ctx)
+	if err != nil {
+		c.vmidMu.Unlock()
+		return provider.VMStatus{}, err
+	}
 	cloneForm := url.Values{}
 	cloneForm.Set("newid", strconv.Itoa(newID))
 	cloneForm.Set("name", spec.Name)
 	cloneForm.Set("full", "1")
 	var cloneTask taskResponse
 	clonePath := fmt.Sprintf("/nodes/%s/qemu/%d/clone", node, spec.TemplateID)
-	if err := c.doJSON(ctx, http.MethodPost, clonePath, cloneForm, &cloneTask); err != nil {
+	err = c.doJSON(ctx, http.MethodPost, clonePath, cloneForm, &cloneTask)
+	c.vmidMu.Unlock()
+	if err != nil {
 		return provider.VMStatus{}, fmt.Errorf("proxmox: clone template %d: %w", spec.TemplateID, err)
 	}
 	if err := c.waitTask(ctx, cloneTask.Data); err != nil {
-		return provider.VMStatus{}, fmt.Errorf("proxmox: clone template %d into %d: %w", spec.TemplateID, newID, err)
+		// De clone-opdracht is aangenomen, dus de gast bestaat -- of wordt nog
+		// gemaakt. Eerst stond hier een kale fout zonder VM-nummer: het control
+		// plane gaf het IP-adres vrij en wist niet dat er iets op te ruimen viel,
+		// en de clone liep daarna gewoon af tot een draaiende wees op een adres
+		// dat inmiddels aan een ander kon zijn gegeven. Nu: laten aflopen,
+		// terugdraaien, en lukt dat niet, dan het nummer meegeven zodat het
+		// control plane hem opruimt.
+		return c.ruimMislukteCloneOp(newID, cloneTask.Data, spec.VPSID,
+			fmt.Errorf("proxmox: clone template %d into %d: %w", spec.TemplateID, newID, err))
 	}
 
 	// From here the VM physically exists on the hypervisor. Any later failure
@@ -788,6 +830,22 @@ func (c *Client) CreateVM(ctx context.Context, spec provider.VMSpec) (provider.V
 		return provider.VMStatus{}, err
 	}
 	return status, nil
+}
+
+// ruimMislukteCloneOp breekt een clone af waarvan het wachten mislukte. Op een
+// losgekoppelde context: de context van het commando is op dit punt vaak juist
+// verlopen. Eerst de clonetaak laten aflopen, want een gast midden in een clone
+// is vergrendeld en laat zich niet verwijderen.
+func (c *Client) ruimMislukteCloneOp(vmid int, upid, vpsID string, oorzaak error) (provider.VMStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	_ = c.waitTask(ctx, upid)
+	if derr := c.DeleteVM(ctx, strconv.Itoa(vmid), vpsID); derr != nil {
+		return provider.VMStatus{ID: strconv.Itoa(vmid), State: "error"},
+			fmt.Errorf("%w (rollback of vm %d failed: %v)", oorzaak, vmid, derr)
+	}
+	return provider.VMStatus{}, oorzaak
 }
 
 // configureAndStart performs the post-clone steps (resize, config, start) on an
