@@ -122,6 +122,10 @@ func run(logger *slog.Logger) error {
 	// Command consumer: long-poll the control plane for provision/delete
 	// commands and execute them concurrently with the heartbeat loop. Requires
 	// credentials, so it is only started once enrolled.
+	// Gezet als de commando-consument draait; zie het afsluiten onderaan.
+	var consumentKlaar chan struct{}
+	afbreken := func() {}
+
 	if cp.NodeID() != "" {
 		cmds, err := cp.Commands(ctx)
 		if err != nil {
@@ -130,7 +134,20 @@ func run(logger *slog.Logger) error {
 		// Het net wordt bij elk gebruik opgevraagd, niet hier vastgelegd: het
 		// control plane kan het wijzigen terwijl de agent draait.
 		subnet := netwerk.subnet
-		go consumeCommands(ctx, logger, prov, cp, cmds, subnet, cfg.ParallelCommands())
+
+		// Het werk zelf loopt op een context die het stopsignaal NIET erft. Een
+		// SIGTERM (een update, een herstart) stopt het ophalen van nieuwe
+		// commando's, maar laat wat al loopt afmaken -- tot de wachttijd om is.
+		// Zonder dit brak elke update een uitrol halverwege af: een clone zonder
+		// configuratie, een mislukte bestelling, geld terug naar de klant.
+		werkCtx, stopWerk := context.WithCancel(context.WithoutCancel(ctx))
+		defer stopWerk()
+		consumentKlaar = make(chan struct{})
+		go func() {
+			defer close(consumentKlaar)
+			consumeCommands(ctx, werkCtx, logger, prov, cp, cmds, subnet, cfg.ParallelCommands())
+		}()
+		afbreken = stopWerk
 		logger.Info("command consumer started")
 
 		// Inbound access for this node's customers. Its own loop rather than a
@@ -156,6 +173,7 @@ func run(logger *slog.Logger) error {
 		select {
 		case <-ctx.Done():
 			logger.Info("shutdown signal received, stopping")
+			wachtOpLopendWerk(logger, consumentKlaar, afbreken, afsluitWachttijd)
 			return nil
 		case <-ticker.C:
 			sendHeartbeat(ctx, logger, prov, cp, offer, netwerk, afscherming)
@@ -402,10 +420,40 @@ func afkappen(reason string) string {
 	return reason
 }
 
+// Hoe lang een herstart wacht op lopend werk. Onder de 90 seconden waarna
+// systemd standaard SIGKILL stuurt, met ruimte om daarna nog een resultaat te
+// melden. Een clone duurt meestal korter; wat langer duurt, wordt afgebroken en
+// als mislukt gemeld, net als voorheen.
+const afsluitWachttijd = 75 * time.Second
+
+// wachtOpLopendWerk laat de consument uitlopen. Is de wachttijd om, dan wordt
+// het werk afgebroken; elk commando meldt dan zelf dat het mislukte, en daar
+// krijgt het nog even de tijd voor.
+func wachtOpLopendWerk(logger *slog.Logger, klaar <-chan struct{}, afbreken func(), wachttijd time.Duration) {
+	if klaar == nil {
+		return
+	}
+	select {
+	case <-klaar:
+		return
+	case <-time.After(wachttijd):
+		logger.Warn("lopend werk niet op tijd klaar bij het afsluiten; het wordt afgebroken",
+			"wachttijd", wachttijd.String())
+		afbreken()
+	}
+	select {
+	case <-klaar:
+	case <-time.After(10 * time.Second):
+	}
+}
+
 // consumeCommands drains the command channel until it is closed (on context
 // cancellation or a fatal poll error) and dispatches each command. A panic or
 // failure handling one command must not stop the loop.
-func consumeCommands(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, cmds <-chan transport.Command, assigned func() *net.IPNet, parallel int) {
+//
+// `ctx` stopt het ophalen; `werkCtx` is de context waarop commando's draaien.
+// Die zijn bewust verschillend: zie run().
+func consumeCommands(ctx, werkCtx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, cmds <-chan transport.Command, assigned func() *net.IPNet, parallel int) {
 	// Replay protection. A MITM on a cleartext channel (or a buggy CP) could
 	// re-deliver a previously-seen command — e.g. replay a delete{vm_id} after
 	// that VMID has been reassigned to another tenant. Each Command.ID is executed
@@ -419,13 +467,12 @@ func consumeCommands(ctx context.Context, logger *slog.Logger, prov provider.Pro
 	// Commando's voor verschillende VPS'en lopen naast elkaar, voor dezelfde VPS
 	// op volgorde. Zie werkers.go voor waarom dat onderscheid nodig is.
 	banen := nieuweWerkers(parallel, func(cmd transport.Command) {
-		handleCommand(ctx, logger, prov, cp, memos, cmd)
+		handleCommand(werkCtx, logger, prov, cp, memos, cmd)
 	})
-	// Bij het stoppen eerst het lopende werk laten aflopen. Het kost niets: de
-	// context is dan al afgelopen, dus elk commando dat nog draait valt binnen
-	// een tel om en meldt dat het mislukt is. Dat laatste is precies de winst --
-	// een commando dat stilzwijgend verdwijnt laat het control plane wachten tot
-	// de herleverings-TTL.
+	// Bij het stoppen eerst het lopende werk laten aflopen. Het draait op
+	// werkCtx, die het stopsignaal niet erft, dus het wordt echt afgemaakt; run()
+	// breekt het pas af als de wachttijd om is. Een commando dat stilzwijgend
+	// verdwijnt laat het control plane wachten tot de herleverings-TTL.
 	defer banen.wacht()
 
 	for {
