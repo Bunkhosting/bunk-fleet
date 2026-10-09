@@ -138,6 +138,9 @@ defmodule ControlPlane.Fleet.Vps do
     |> assoc_constraint(:region)
     |> assoc_constraint(:node)
     |> assoc_constraint(:user)
+    # Een pakket dat niet (meer) bestaat: een nette fout in plaats van een
+    # exceptie die als 500 bij de klant aankomt.
+    |> foreign_key_constraint(:package_id)
     |> unique_constraint(:ip_address, name: :vpses_active_node_ip_uidx)
   end
 

@@ -104,6 +104,7 @@ defmodule ControlPlaneWeb.Fouten do
     too_many_pending: {:too_many_requests, "too_many_pending_topups"},
 
     # Geld.
+    no_package: {:unprocessable_entity, "no_matching_package"},
     insufficient_credits: {:payment_required, "insufficient_credits"},
     vps_suspended: {:payment_required, "vps_suspended"},
 

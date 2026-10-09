@@ -383,14 +383,20 @@ defmodule ControlPlane.Provisioning do
     # instead of a clean {:error, :no_capacity} (→ 409).
     with {:ok, %Vps{} = vps} <- insert_within_quota(owner_id, full),
          {:ok, %{vps: placed}} <- place_and_dispatch(vps, placement_request(full), full) do
-      start_subscription(placed, owner_id, full)
       {:ok, %{vps: placed}}
     end
   end
 
-  # The quota gate and the durable :queued insert, in one short transaction: the
-  # per-owner advisory lock (auto-released at commit) serialises concurrent
-  # creates against the quota check, so two cannot both pass the cap.
+  # The quota gate, the durable :queued insert and the subscription, in one
+  # short transaction: the per-owner advisory lock (auto-released at commit)
+  # serialises concurrent creates against the quota check, so two cannot both
+  # pass the cap.
+  #
+  # Het abonnement hoort erbij. Het werd eerst pas na het plaatsen aangemaakt,
+  # buiten elke transactie, en de uitkomst werd weggegooid: viel het proces
+  # daartussen weg (een uitrol, een crash), dan draaide er een VPS die na de
+  # eerste maand nooit meer werd gefactureerd -- en niemand die het zag. Mislukt
+  # het plaatsen hierna, dan zegt place_and_dispatch het weer op.
   defp insert_within_quota(owner_id, attrs) do
     Repo.transaction(fn ->
       :ok = Locks.take(Repo, :owner_quota, owner_id)
@@ -398,9 +404,16 @@ defmodule ControlPlane.Provisioning do
       if count_live_vpses(owner_id) >= max_vpses_per_owner() do
         Repo.rollback(:quota_exceeded)
       else
-        insert_or_rollback(attrs)
+        attrs |> insert_or_rollback() |> met_abonnement(owner_id, attrs)
       end
     end)
+  end
+
+  defp met_abonnement(vps, owner_id, attrs) do
+    case Subscriptions.create_for_vps(vps, owner_id, field(attrs, :package_id)) do
+      {:ok, _} -> vps
+      {:error, reden} -> Repo.rollback(reden)
+    end
   end
 
   defp insert_or_rollback(attrs) do
@@ -423,10 +436,6 @@ defmodule ControlPlane.Provisioning do
   end
 
   defp field(attrs, key), do: attrs[key] || attrs[Atom.to_string(key)]
-
-  defp start_subscription(%Vps{} = vps, owner_id, attrs) do
-    Subscriptions.create_for_vps(vps, owner_id, field(attrs, :package_id))
-  end
 
   @doc """
   Counts an owner's live VPSes — everything except `:deleted`/`:failed`, which no
@@ -508,12 +517,14 @@ defmodule ControlPlane.Provisioning do
             # Any failure here is AFTER the scheduler reserved capacity, so release
             # the held reservation and restore the node's capacity (else it leaks).
             {:ok, _} = fail_and_release_reservation(vps.id)
+            {:ok, _} = Subscriptions.cancel_for_vps(vps.id)
             Events.broadcast_changed(:vps)
             {:error, reason}
         end
 
       {:error, :no_capacity} ->
         {:ok, _failed} = mark_vps_failed(vps)
+        {:ok, _} = Subscriptions.cancel_for_vps(vps.id)
         # The VPS was persisted (now :failed) so the dashboard should still update.
         Events.broadcast_changed(:vps)
         {:error, :no_capacity}
