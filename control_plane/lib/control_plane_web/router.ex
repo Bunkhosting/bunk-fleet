@@ -99,6 +99,9 @@ defmodule ControlPlaneWeb.Router do
   # End-user API: JSON plus per-user session-token bearer authentication.
   pipeline :user_api do
     plug :accepts, ["json"]
+    # Vóór de authenticatie: een wijzigend verzoek dat op de cookie leunt moet
+    # van ons eigen dashboard komen. Zie de plug.
+    plug ControlPlaneWeb.Plugs.SameOrigin
     plug ControlPlaneWeb.Plugs.ApiAuth
 
     # Ruim, want dit is het hele paneel: de lijst, de details, het bijwerken van
@@ -117,6 +120,9 @@ defmodule ControlPlaneWeb.Router do
   # the :admin role (distinct from /admin/v1/* which uses a shared secret).
   pipeline :admin_session_api do
     plug :accepts, ["json"]
+    # Vóór de authenticatie: een wijzigend verzoek dat op de cookie leunt moet
+    # van ons eigen dashboard komen. Zie de plug.
+    plug ControlPlaneWeb.Plugs.SameOrigin
     plug ControlPlaneWeb.Plugs.ApiAuth
     plug ControlPlaneWeb.Plugs.RequireAdmin
     plug ControlPlaneWeb.Plugs.RequireAdminMfa
@@ -178,6 +184,9 @@ defmodule ControlPlaneWeb.Router do
   # pending-topup cap in the controller.
   pipeline :user_api_throttled do
     plug :accepts, ["json"]
+    # Vóór de authenticatie: een wijzigend verzoek dat op de cookie leunt moet
+    # van ons eigen dashboard komen. Zie de plug.
+    plug ControlPlaneWeb.Plugs.SameOrigin
     plug ControlPlaneWeb.Plugs.ApiAuth
     plug ControlPlaneWeb.Plugs.RateLimit, bucket: "topup", max: 15, window_ms: 60_000
   end

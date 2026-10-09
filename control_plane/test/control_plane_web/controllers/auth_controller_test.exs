@@ -144,6 +144,8 @@ defmodule ControlPlaneWeb.AuthControllerTest do
       out =
         build_conn()
         |> put_req_cookie("bunk_session", value)
+        # Zoals de browser het stuurt: zonder Origin weigert SameOrigin het.
+        |> put_req_header("origin", Application.get_env(:control_plane, :public_url))
         |> delete(~p"/api/v1/auth/logout")
 
       assert response(out, 204)
