@@ -25,11 +25,19 @@ defmodule ControlPlaneWeb.CommandController do
 
   def index(conn, _params) do
     node = conn.assigns.current_node
-    commands = Provisioning.deliverable_commands_for_node(node)
+    gelezen = Provisioning.deliverable_commands_for_node(node)
 
     # Mark the whole batch delivered in one UPDATE rather than one per command
     # (the previous per-row loop was an N+1 on every agent long-poll).
-    Provisioning.mark_delivered_all(commands)
+    #
+    # Alleen wat dat UPDATE werkelijk raakte gaat naar de agent. Een klant die
+    # vlak na bestellen op verwijderen drukt, kan het provision-commando
+    # annuleren tussen het lezen hierboven en dit schrijven. Het UPDATE slaat
+    # het dan over, maar het stond nog in de gelezen lijst -- en de agent
+    # bouwde een VM voor een VPS die niet meer bestond.
+    {_, gemarkeerd} = Provisioning.mark_delivered_all(gelezen)
+    gemarkeerd = MapSet.new(gemarkeerd)
+    commands = Enum.filter(gelezen, &MapSet.member?(gemarkeerd, &1.id))
 
     payload =
       Enum.map(commands, fn command ->

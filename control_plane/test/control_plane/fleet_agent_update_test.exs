@@ -154,4 +154,56 @@ defmodule ControlPlane.FleetAgentUpdateTest do
     assert :no_target = AgentUpdate.dispatch_wave()
     assert alle_updates() == []
   end
+
+  defp werk(node, kind, status, geleden \\ 0) do
+    t = DateTime.utc_now() |> DateTime.add(-geleden, :second) |> DateTime.truncate(:second)
+
+    Repo.insert!(%Command{
+      node_id: node.id,
+      kind: kind,
+      status: status,
+      payload: %{},
+      inserted_at: t,
+      updated_at: t
+    })
+  end
+
+  describe "een node die midden in werk zit" do
+    # De update herstart de agent. Een uitrol die dan halverwege is, blijft half
+    # liggen: de klant krijgt een mislukte bestelling en zijn geld terug.
+    test "krijgt geen update zolang een uitrol loopt", %{regio: r} do
+      node = fleet_node(r)
+      werk(node, :provision, :delivered)
+
+      assert AgentUpdate.dispatch_wave() == :up_to_date
+      assert updates(node.id) == []
+    end
+
+    test "krijgt hem zodra het werk klaar is", %{regio: r} do
+      node = fleet_node(r)
+      cmd = werk(node, :backup, :delivered)
+      assert updates(node.id) == [] and AgentUpdate.dispatch_wave() == :up_to_date
+
+      Repo.update_all(from(c in Command, where: c.id == ^cmd.id), set: [status: :done])
+
+      assert {:dispatched, 1} = AgentUpdate.dispatch_wave()
+      assert [_] = updates(node.id)
+    end
+
+    test "vastgelopen werk houdt een node niet voorgoed tegen", %{regio: r} do
+      # Een commando dat al een uur loopt, is vastgelopen. Juist die node moet
+      # van de binary af waarin het misging.
+      node = fleet_node(r)
+      werk(node, :restore_backup, :delivered, 3600)
+
+      assert {:dispatched, 1} = AgentUpdate.dispatch_wave()
+    end
+
+    test "een stop of start houdt niets tegen", %{regio: r} do
+      node = fleet_node(r)
+      werk(node, :stop, :delivered)
+
+      assert {:dispatched, 1} = AgentUpdate.dispatch_wave()
+    end
+  end
 end

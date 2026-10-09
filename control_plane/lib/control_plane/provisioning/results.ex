@@ -98,6 +98,7 @@ defmodule ControlPlane.Provisioning.Results do
 
       # The result was already applied by a prior (or concurrent) delivery.
       {:error, :lock, :already_applied, _changes} ->
+        ruim_late_vm_op(command, outcome, result)
         {:ok, command}
 
       {:error, _step, reason, _changes} ->
@@ -106,6 +107,57 @@ defmodule ControlPlane.Provisioning.Results do
   end
 
   # --- internal helpers -----------------------------------------------------
+
+  # Een provision die al als mislukt is afgeschreven, en dan tóch "klaar" meldt.
+  #
+  # Dat gebeurt: de node was een half uur onbereikbaar, de sweeper schreef de
+  # uitrol af, gaf het geld terug en gaf het IP-adres vrij -- en de agent, die de
+  # hele tijd gewoon doorwerkte, meldt daarna dat de VM draait. Dat resultaat
+  # werd als "al verwerkt" weggegooid. De VM bleef draaien op een adres dat
+  # inmiddels aan een ander kon zijn gegeven, en niemand ruimde hem op.
+  #
+  # Hier wordt hij alsnog afgebroken. Eén keer: een tweede late melding vindt
+  # het commando dat er al staat.
+  defp ruim_late_vm_op(%Command{kind: :provision} = command, :done, result) do
+    case sane_vm_id(result["vm_id"]) do
+      nil -> :ok
+      vm_id -> Repo.transaction(fn -> plan_late_afbraak(command.id, vm_id) end)
+    end
+
+    :ok
+  end
+
+  defp ruim_late_vm_op(_command, _outcome, _result), do: :ok
+
+  defp plan_late_afbraak(command_id, vm_id) do
+    locked = Repo.one!(from c in Command, where: c.id == ^command_id, lock: "FOR UPDATE")
+
+    if locked.status == :failed and not afbraak_gepland?(locked.node_id, vm_id) do
+      %Command{}
+      |> Command.changeset(%{
+        node_id: locked.node_id,
+        vps_id: locked.vps_id,
+        kind: :delete,
+        status: :pending,
+        payload: %{"vm_id" => vm_id}
+      })
+      |> Repo.insert!()
+
+      Logger.error(
+        "provision #{locked.id} meldde klaar met vm #{vm_id} nadat hij als mislukt " <>
+          "was afgeschreven; de VM wordt afgebroken"
+      )
+    end
+  end
+
+  defp afbraak_gepland?(node_id, vm_id) do
+    Repo.exists?(
+      from c in Command,
+        where:
+          c.node_id == ^node_id and c.kind == :delete and
+            fragment("?->>'vm_id'", c.payload) == ^vm_id
+    )
+  end
 
   # A provision payload can carry a cloud-init password, which the node needs
   # while it builds the guest and nobody needs afterwards. Commands are durable

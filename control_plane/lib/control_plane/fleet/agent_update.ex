@@ -72,6 +72,18 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   # het op en loopt hij alsnog bij.
   @levend_seconds 180
 
+  # Werk dat een herstart van de agent niet overleeft. De update herstart de
+  # service, en wat dan halverwege is, blijft half liggen: een clone zonder
+  # configuratie (de uitrol mislukt en de klant krijgt zijn geld terug), een
+  # back-up die opnieuw begint, een terugzetactie die na herlevering nóg een keer
+  # over de schijf gaat.
+  @lang_werk [:provision, :delete, :backup, :restore_backup]
+
+  # Hoe lang werk als "loopt nog" telt. Daarboven is het vastgelopen, en dat mag
+  # een node niet voorgoed van updates afhouden: dan blijft hij juist op de
+  # binary staan waarin het misging.
+  @lang_werk_seconds 1800
+
   @doc """
   Zet de volgende golf klaar, of wacht. Bedoeld om elke reconciler-tik aan te
   roepen; hij doet alleen iets als er iets te doen is.
@@ -129,14 +141,26 @@ defmodule ControlPlane.Fleet.AgentUpdate do
   end
 
   # Online nodes die de doelversie nog niet draaien, oudste heartbeat eerst zodat
-  # de volgorde over tikken heen stabiel is.
+  # de volgorde over tikken heen stabiel is. Een node die midden in werk zit dat
+  # een herstart niet overleeft, wacht een tik: zijn update komt zodra hij klaar
+  # is.
   defp behind(doel) do
     levend = Clock.shift(-@levend_seconds)
+    recent = Clock.shift(-@lang_werk_seconds)
+
+    bezig =
+      from c in Command,
+        where: c.node_id == parent_as(:node).id,
+        where: c.kind in ^@lang_werk and c.status in [:pending, :delivered],
+        where: c.updated_at >= ^recent,
+        select: 1
 
     Repo.all(
       from n in Node,
+        as: :node,
         where: n.status in [:online, :draining],
         where: not is_nil(n.last_heartbeat_at) and n.last_heartbeat_at >= ^levend,
+        where: not exists(bezig),
         where: is_nil(n.agent_version) or n.agent_version != ^doel,
         order_by: [asc: n.inserted_at],
         select: n.id

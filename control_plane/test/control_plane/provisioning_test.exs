@@ -204,6 +204,52 @@ defmodule ControlPlane.ProvisioningTest do
     end
   end
 
+  defp deletes_voor(node) do
+    Repo.all(from c in Command, where: c.node_id == ^node.id and c.kind == :delete)
+  end
+
+  describe "een late melding na een afgeschreven uitrol" do
+    setup do
+      region = insert_region()
+      node = insert_node(region)
+      {:ok, %{vps: vps, command: command}} = Provisioning.create_vps(create_attrs(region))
+      %{node: node, vps: vps, command: command}
+    end
+
+    test "een VM die na het afschrijven toch draait, wordt afgebroken -- één keer",
+         %{node: node, command: command} do
+      # Zoals de sweeper doet als de node te lang weg was: mislukt, zonder vm_id.
+      assert {:ok, _} =
+               Provisioning.apply_result(command, %{
+                 "status" => "failed",
+                 "error" => "node offline"
+               })
+
+      assert deletes_voor(node) == []
+
+      # De agent werkte gewoon door en meldt nu dat de VM er staat.
+      laat = %{"status" => "done", "vm_id" => "131", "ip" => "10.10.0.21"}
+      assert {:ok, _} = Provisioning.apply_result(command, laat)
+
+      assert [delete] = deletes_voor(node)
+      assert delete.payload["vm_id"] == "131"
+      assert delete.status == :pending
+
+      # Een tweede late melding plant geen tweede afbraak.
+      assert {:ok, _} = Provisioning.apply_result(command, laat)
+      assert length(deletes_voor(node)) == 1
+    end
+
+    test "een dubbele 'klaar' voor een geslaagde uitrol breekt niets af",
+         %{node: node, command: command} do
+      klaar = %{"status" => "done", "vm_id" => "131", "ip" => "10.10.0.21"}
+      assert {:ok, _} = Provisioning.apply_result(command, klaar)
+      assert {:ok, _} = Provisioning.apply_result(command, klaar)
+
+      assert deletes_voor(node) == []
+    end
+  end
+
   # --- delete_vps ------------------------------------------------------------
 
   # Drives a VPS through provision -> active so it has a provider_vm_id and a

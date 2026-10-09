@@ -904,10 +904,15 @@ defmodule ControlPlane.Provisioning do
   @doc """
   Marks a whole batch of commands `:delivered` in a single UPDATE. Same effect as
   calling `mark_delivered/1` per command (including resetting `delivered_at` for a
-  redelivery) but without the N+1. Returns `{count, nil}`.
+  redelivery) but without the N+1.
+
+  Returns `{count, ids}`: the ids that were actually marked. Only those may go to
+  the agent. A command that a concurrent delete cancelled between the poll's read
+  and this write is skipped by the guard below -- and if the caller still sent
+  it, the agent built a VM for a VPS that no longer exists.
   """
-  @spec mark_delivered_all([Command.t()]) :: {non_neg_integer(), nil}
-  def mark_delivered_all([]), do: {0, nil}
+  @spec mark_delivered_all([Command.t()]) :: {non_neg_integer(), [Ecto.UUID.t()]}
+  def mark_delivered_all([]), do: {0, []}
 
   def mark_delivered_all(commands) do
     ids = Enum.map(commands, & &1.id)
@@ -919,7 +924,10 @@ defmodule ControlPlane.Provisioning do
     # :delivered and hand the agent a provision/delete it must not run (orphan VM,
     # double-booked capacity).
     Repo.update_all(
-      from(c in Command, where: c.id in ^ids and c.status in [:pending, :delivered]),
+      from(c in Command,
+        where: c.id in ^ids and c.status in [:pending, :delivered],
+        select: c.id
+      ),
       set: [status: :delivered, delivered_at: ts, updated_at: ts],
       inc: [delivery_count: 1]
     )

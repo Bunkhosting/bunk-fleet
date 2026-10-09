@@ -94,4 +94,21 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
     assert Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [cmd.id]
     assert Provisioning.vastgelopen_commandos() == []
   end
+
+  test "een commando dat tussen lezen en markeren werd geannuleerd, gaat niet mee" do
+    # Het gat: de poll las het commando nog als :pending, een verwijdering
+    # annuleerde het, en het UPDATE sloeg het terecht over -- maar het stond nog
+    # in de gelezen lijst en ging naar de agent, die er een VM voor bouwde.
+    node = fleet_node()
+    blijft = commando(node)
+    geannuleerd = commando(node)
+
+    gelezen = Provisioning.deliverable_commands_for_node(node)
+    assert length(gelezen) == 2
+
+    Repo.update_all(from(c in Command, where: c.id == ^geannuleerd.id), set: [status: :failed])
+
+    assert {1, [id]} = Provisioning.mark_delivered_all(gelezen)
+    assert id == blijft.id
+  end
 end
