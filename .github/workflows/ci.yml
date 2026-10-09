@@ -19,6 +19,31 @@ permissions:
   contents: read
 
 jobs:
+  # Geheimen in de broncode of de geschiedenis. De repo is openbaar: wat hier
+  # ooit in een commit stond, staat op internet. Over de hele geschiedenis, niet
+  # alleen de laatste commit -- een sleutel die in een latere commit is
+  # weggehaald, is daarmee niet weg.
+  #
+  # Eerst niet-blokkerend: de geschiedenis op GitHub gaat verder terug dan wat
+  # lokaal gescand is. Blijkt hij schoon, dan gaat continue-on-error eraf.
+  geheimen:
+    name: Geheimen (gitleaks)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Scan
+        env:
+          VERSIE: "8.30.1"
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${VERSIE}"
+          curl -sSfL -o gl.tgz "$base/gitleaks_${VERSIE}_linux_x64.tar.gz"
+          curl -sSfL "$base/gitleaks_${VERSIE}_checksums.txt" | grep "linux_x64.tar.gz" | sed 's/  .*/  gl.tgz/' | sha256sum -c -
+          tar xzf gl.tgz gitleaks
+          ./gitleaks detect --source . --redact --no-banner --exit-code 1
+
   agent:
     name: Go agent
     runs-on: ubuntu-latest
@@ -26,10 +51,10 @@ jobs:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # Kept current on purpose: the agent runs on hardware we do not own and
           # speaks TLS to the control plane, so its standard library is part of
@@ -102,7 +127,7 @@ jobs:
       DATABASE_URL: ecto://postgres:postgres@localhost:5432/control_plane_test
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Elixir / OTP
         # Zie de opmerking bij staticcheck-action hierboven: commit, niet tag.
@@ -112,7 +137,7 @@ jobs:
           otp-version: "27"
 
       - name: Restore deps + _build cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             control_plane/deps
@@ -139,6 +164,13 @@ jobs:
       - name: Run tests
         run: mix test
 
+      # Elke migratie terug en weer heen. Een `down` die nooit gedraaid heeft,
+      # draait voor het eerst tijdens een storing, en dan is het geen moment om
+      # te ontdekken dat hij niet werkt. Tegen de testdatabase, dus wat hij
+      # weggooit doet er niet toe.
+      - name: Migrations roll back
+        run: mix ecto.rollback --all --quiet && mix ecto.migrate --quiet
+
       # Het installatiescript is shell die uit een Elixir-string wordt opgebouwd,
       # dus de compiler zegt er niets over. Hier wel, want deze runner heeft bash;
       # de container waarin de suite lokaal draait niet, en een test die zich per
@@ -152,7 +184,7 @@ jobs:
       # Dialyzer last: it is the slowest step and the least likely to fail, so
       # everything cheaper gets to report first.
       - name: Restore Dialyzer PLT
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: control_plane/priv/plts
           key: ${{ runner.os }}-plt-${{ hashFiles('control_plane/mix.lock') }}
@@ -170,7 +202,7 @@ jobs:
     name: Shellscripts
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Shellcheck
         run: shellcheck -S warning *.sh tools/*.sh provisioning/*/*.sh
 
@@ -181,7 +213,7 @@ jobs:
     name: Foutcodes hebben een zin
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: python3 tools/foutcodes.py
 
   # De e2e-suite draait niet in de CI -- hij heeft een live omgeving nodig en
@@ -195,10 +227,11 @@ jobs:
       run:
         working-directory: e2e
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          # 20 is sinds april 2026 end-of-life. 22 is de LTS.
+          node-version: "22"
           cache: npm
           cache-dependency-path: e2e/package-lock.json
       - run: npm ci
@@ -211,11 +244,12 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: "20"
+          # 20 is sinds april 2026 end-of-life. 22 is de LTS.
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

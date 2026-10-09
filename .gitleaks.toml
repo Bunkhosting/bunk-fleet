@@ -1,0 +1,16 @@
+# Geheimenscan (gitleaks). De standaardregels, plus wat we bewust laten staan.
+#
+# Elke uitzondering hieronder heeft een reden. Een lange lijst maakt de scan
+# waardeloos: wat erop staat, wordt nooit meer bekeken.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Bewust onschuldige treffers"
+paths = [
+  # De standaard secret_key_base van Phoenix voor ontwikkeling en tests. Hij
+  # beschermt niets: productie leest SECRET_KEY_BASE uit de omgeving en weigert
+  # te starten zonder (config/runtime.exs).
+  '''control_plane/config/dev\.exs''',
+  '''control_plane/config/test\.exs''',
+]
