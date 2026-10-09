@@ -158,19 +158,30 @@ export default function NewVpsPage() {
       </div>
 
       {/* Pakket kiezen */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Kies een pakket</h2>
+      {/* Een echte keuzegroep: met de pijltjestoetsen te bedienen en door een
+          schermlezer voor te lezen. Het waren div's met een klik-handler, en
+          dan kon wie geen muis gebruikt geen pakket kiezen -- en dus niet
+          bestellen. */}
+      <fieldset className="space-y-4">
+        <legend className="mb-4 text-xl font-semibold">Kies een pakket</legend>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {packages.map((pkg) => (
+            <label key={pkg.id} className="block cursor-pointer">
+            <input
+              type="radio"
+              name="pakket"
+              value={pkg.id}
+              checked={selectedPackageId === pkg.id}
+              onChange={() => setSelectedPackageId(pkg.id)}
+              className="peer sr-only"
+            />
             <Card
-              key={pkg.id}
               className={cn(
-                "cursor-pointer transition-all",
+                "transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background",
                 selectedPackageId === pkg.id
                   ? "border-primary ring-2 ring-primary"
                   : "hover:border-primary/50"
               )}
-              onClick={() => setSelectedPackageId(pkg.id)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
@@ -193,9 +204,10 @@ export default function NewVpsPage() {
                 </p>
               </CardContent>
             </Card>
+            </label>
           ))}
         </div>
-      </div>
+      </fieldset>
 
       {/* Locatie.
           Dit blok stond er alleen bij twee of meer locaties, met als gedachte

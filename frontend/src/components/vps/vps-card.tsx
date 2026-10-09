@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Server, Cpu, HardDrive, Globe, MapPin } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/vps/status-badge";
@@ -12,13 +12,14 @@ interface VpsCardProps {
 }
 
 export function VpsCard({ vps }: VpsCardProps) {
-  const router = useRouter();
-
+  // Een echte link en geen div met een klik-handler: zo werkt de kaart met het
+  // toetsenbord en een schermlezer, en kun je hem in een nieuw tabblad openen.
   return (
-    <Card
-      className="cursor-pointer transition-shadow hover:shadow-md"
-      onClick={() => router.push(`/dashboard/vps/${vps.id}`)}
+    <Link
+      href={`/dashboard/vps/${vps.id}`}
+      className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
+    <Card className="transition-shadow hover:shadow-md">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
         <CardTitle className="text-base font-semibold flex items-center gap-2">
           <Server className="h-4 w-4 text-muted-foreground" />
@@ -66,5 +67,6 @@ export function VpsCard({ vps }: VpsCardProps) {
         </div>
       </CardContent>
     </Card>
+    </Link>
   );
 }

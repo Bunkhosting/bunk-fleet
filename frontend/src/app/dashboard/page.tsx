@@ -6,6 +6,7 @@ import { Loader2, Server, ServerOff, PlusCircle, Wallet } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { VpsCard } from "@/components/vps/vps-card";
+import { LoadError } from "@/components/feedback/load-error";
 import { vpsApi, billingApi } from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
 import { formatBalance } from "@/lib/utils";
@@ -18,6 +19,8 @@ export default function DashboardPage() {
   const [vpsList, setVpsList] = useState<Vps[]>([]);
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [vpsFailed, setVpsFailed] = useState(false);
+  const [poging, setPoging] = useState(0);
 
   useEffect(() => {
     // Both start now and are awaited separately. Sequentially they cost two
@@ -29,9 +32,14 @@ export default function DashboardPage() {
     const walletRequest = billingApi.wallet();
 
     vpsRequest
-      .then((res) => setVpsList(res.data.results))
+      .then((res) => {
+        setVpsList(res.data.results);
+        setVpsFailed(false);
+      })
       .catch(() => {
-        // errors handled by layout redirect
+        // Een 401 stuurt de layout door. Al het andere moet hier zichtbaar
+        // zijn: anders staat er "0 VPS'en" en "je hebt nog geen VPS'en".
+        setVpsFailed(true);
       })
       .finally(() => setLoading(false));
 
@@ -40,7 +48,7 @@ export default function DashboardPage() {
       .catch(() => {
         // leave balance unknown
       });
-  }, []);
+  }, [poging]);
 
   if (loading) {
     return (
@@ -69,7 +77,18 @@ export default function DashboardPage() {
         </p>
       </div>
 
+      {vpsFailed && (
+        <LoadError
+          message="Je VPS'en konden niet worden opgehaald. Er is niets verloren gegaan; probeer het zo opnieuw."
+          onRetry={() => {
+            setLoading(true);
+            setPoging((p) => p + 1);
+          }}
+        />
+      )}
+
       {/* Stats cards */}
+      {!vpsFailed && (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -113,8 +132,10 @@ export default function DashboardPage() {
           </Card>
         </Link>
       </div>
+      )}
 
       {/* Recent VPS list */}
+      {!vpsFailed && (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Recente VPS&apos;en</h2>
@@ -148,6 +169,7 @@ export default function DashboardPage() {
           </Card>
         )}
       </div>
+      )}
 
       {/* Quick action */}
       {totalVps > 0 && (

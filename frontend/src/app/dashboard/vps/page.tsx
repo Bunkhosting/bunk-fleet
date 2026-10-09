@@ -6,6 +6,7 @@ import { Loader2, PlusCircle, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { VpsCard } from "@/components/vps/vps-card";
+import { LoadError } from "@/components/feedback/load-error";
 import { vpsApi } from "@/lib/api";
 import type { Vps, VpsStatus } from "@/lib/types";
 
@@ -19,13 +20,19 @@ const POLL_INTERVAL_MS = 10_000;
 export default function VpsListPage() {
   const [vpsList, setVpsList] = useState<Vps[]>([]);
   const [loading, setLoading] = useState(true);
+  // Alleen relevant zolang er nog nooit een lijst binnenkwam. Mislukt een
+  // latere poll, dan blijft de laatste goede lijst staan.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const fetchVps = useCallback(async () => {
     try {
       const response = await vpsApi.list();
       setVpsList(response.data.results);
+      setLoadFailed(false);
     } catch {
-      // error handled by layout
+      // Een 401 stuurt de layout naar het inlogscherm; al het andere hoort hier
+      // zichtbaar te zijn en niet te lezen als "je hebt geen VPS'en".
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -53,6 +60,21 @@ export default function VpsListPage() {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (loadFailed && vpsList.length === 0) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold tracking-tight">Mijn VPS&apos;en</h1>
+        <LoadError
+          message="Je VPS'en konden niet worden opgehaald. Er is niets verloren gegaan; probeer het zo opnieuw."
+          onRetry={() => {
+            setLoading(true);
+            fetchVps();
+          }}
+        />
       </div>
     );
   }

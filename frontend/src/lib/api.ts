@@ -65,6 +65,8 @@ const ERROR_MESSAGES: Record<string, string> = {
 
   // Een VPS bestellen
   insufficient_credits: "Je tegoed is niet toereikend voor deze VPS.",
+  cross_origin_request:
+    "Dit verzoek kwam niet van het dashboard en is geweigerd. Herlaad de pagina en probeer het opnieuw.",
   vps_suspended:
     "Deze VPS staat stil omdat de maandelijkse verlenging niet betaald kon worden. Waardeer je tegoed op; hij start daarna vanzelf weer, uiterlijk binnen een dag.",
   quota_exceeded: "Je hebt het maximum aantal VPS'en bereikt.",

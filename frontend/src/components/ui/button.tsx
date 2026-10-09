@@ -10,7 +10,10 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-gradient-to-r from-primary to-accent text-primary-foreground font-semibold hover:brightness-110 hover:shadow-[0_0_20px_hsl(214_100%_47%/0.4)]",
+          // Effen blauw: wit op het verloop haalde in het midden 2,8:1 en aan
+          // de rechterkant 1,7:1 -- onleesbaar voor wie slecht ziet (WCAG
+          // vraagt 4,5:1). Het merkverloop blijft als gloed bij hover.
+          "bg-primary text-primary-foreground font-semibold hover:bg-primary/90 hover:shadow-[0_0_20px_hsl(214_100%_47%/0.4)]",
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:

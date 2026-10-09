@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { billingApi, parseApiError, type Wallet } from "@/lib/api";
 import { useToast } from "@/components/ui/use-toast";
 import { formatEuro, formatDateLong, formatBalance } from "@/lib/utils";
+import { LoadError } from "@/components/feedback/load-error";
 
 const PRESET_EUROS = [5, 10, 25, 50];
 const MIN_EUROS = 5;
@@ -38,6 +39,8 @@ export default function TegoedPage() {
   const { toast } = useToast();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [poging, setPoging] = useState(0);
   const [amount, setAmount] = useState<string>("10");
   const [submitting, setSubmitting] = useState(false);
 
@@ -46,18 +49,18 @@ export default function TegoedPage() {
       try {
         const res = await billingApi.wallet();
         setWallet(res.data);
+        setLoadFailed(false);
       } catch {
-        toast({
-          title: "Fout",
-          description: "Kon je tegoed niet laden.",
-          variant: "destructive",
-        });
+        // Geen toast en geen saldo van nul: een mislukte aanvraag is geen leeg
+        // tegoed, en een klant die € 0,00 in het rood ziet staan denkt dat zijn
+        // geld weg is.
+        setLoadFailed(true);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, [toast]);
+  }, [poging]);
 
   const handleTopup = async () => {
     const euros = Number(amount.replace(",", "."));
@@ -95,7 +98,22 @@ export default function TegoedPage() {
     );
   }
 
-  const balance = wallet?.balance_cents ?? 0;
+  if (loadFailed || !wallet) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold tracking-tight">Tegoed</h1>
+        <LoadError
+          message="Je tegoed kon niet worden opgehaald. Je saldo is niet veranderd; probeer het zo opnieuw."
+          onRetry={() => {
+            setLoading(true);
+            setPoging((p) => p + 1);
+          }}
+        />
+      </div>
+    );
+  }
+
+  const balance = wallet.balance_cents;
   const lowBalance = balance < 500;
 
   return (
@@ -116,7 +134,7 @@ export default function TegoedPage() {
           maandbedrag van het gekozen pakket eenmalig van je tegoed afgeschreven.
           Is je tegoed te laag, dan kun je geen nieuwe VPS aanmaken — je bestaande
           servers blijven gewoon draaien. Opwaarderen kan hieronder, veilig via
-          iDEAL of creditcard.
+          iDEAL of Bancontact.
         </div>
       </div>
 
