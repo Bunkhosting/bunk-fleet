@@ -24,7 +24,8 @@ function safeNext(raw: string | null): string {
   // URL-parser van de browser gooit tabs en regeleindes weg en maakt er
   // "//evil.example" van -- een andere site, direct na een geslaagde login. Dus
   // laten we de browser zelf parsen en kijken waar het uitkomt.
-  const stuurteken = [...raw].some((c) => c.charCodeAt(0) < 0x20);
+  let stuurteken = false;
+  for (let i = 0; i < raw.length; i++) if (raw.charCodeAt(i) < 0x20) stuurteken = true;
   if (!raw.startsWith("/") || stuurteken || raw.includes("\\")) return "/dashboard";
   // Een vaste basis in plaats van window.location: dan werkt dit ook als het
   // ooit tijdens het renderen op de server wordt aangeroepen. Het gaat alleen om
