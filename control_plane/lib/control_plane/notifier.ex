@@ -165,13 +165,41 @@ defmodule ControlPlane.Notifier do
     # one, which some clients render as a blank message.
     email = if html, do: html_body(email, html), else: email
 
-    case Mailer.deliver(email) do
+    case verstuur_begrensd(email) do
       {:ok, _metadata} ->
         :ok
 
       {:error, reason} ->
         Logger.error("mail delivery failed to #{redact(to_email)}: #{inspect(reason)}")
         {:error, reason}
+    end
+  end
+
+  # Hoe lang één mail mag duren. gen_smtp wacht op een antwoord van de server
+  # tot twintig minuten, en dat is niet in te stellen. Een relay die de
+  # verbinding aanneemt en dan zwijgt, hield zo de reconciler twintig minuten
+  # vast -- geen nodes offline zetten, geen verlengingen, geen levensteken naar
+  # buiten -- of een klant twintig minuten op een registratie. Dertig seconden
+  # is ruim voor een gezonde server.
+  @mail_timeout_ms 30_000
+
+  defp mail_timeout_ms,
+    do: Application.get_env(:control_plane, :mail_timeout_ms, @mail_timeout_ms)
+
+  defp verstuur_begrensd(email) do
+    taak =
+      Task.async(fn ->
+        try do
+          Mailer.deliver(email)
+        rescue
+          exception -> {:error, {:exception, Exception.message(exception)}}
+        end
+      end)
+
+    case Task.yield(taak, mail_timeout_ms()) || Task.shutdown(taak, :brutal_kill) do
+      {:ok, uitkomst} -> uitkomst
+      nil -> {:error, :timeout}
+      {:exit, reden} -> {:error, {:exit, reden}}
     end
   end
 
