@@ -20,6 +20,7 @@ import { adminApi, parseApiError, type AdminUser } from "@/lib/api";
 import { formatBalance } from "@/lib/utils";
 
 const ROLES = ["user", "admin"] as const;
+const ROL_LABEL: Record<(typeof ROLES)[number], string> = { user: "Klant", admin: "Beheerder" };
 
 function UsersInner() {
   const { toast } = useToast();
@@ -43,11 +44,23 @@ function UsersInner() {
 
   async function changeRole(u: AdminUser, role: "user" | "admin") {
     if (role === u.role) return;
+    // Beheerder maken geeft toegang tot elk account, elke VPS en de knop die
+    // tegoed bijboekt. Dat hoort geen misklik in een tabelrij te kunnen zijn,
+    // dus hier wel een bevestiging -- de andere kant op niet.
+    if (
+      role === "admin" &&
+      !window.confirm(
+        `${u.email} beheerder maken?\n\nDeze persoon kan dan elk account en elke VPS zien en ` +
+          "beheren, en tegoed bijboeken."
+      )
+    ) {
+      return;
+    }
     setBusy(u.id);
     try {
       await adminApi.setRole(u.id, role);
       setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, role } : x)));
-      toast({ title: "Rol gewijzigd", description: `${u.email} → ${role}` });
+      toast({ title: "Rol gewijzigd", description: `${u.email} → ${ROL_LABEL[role]}` });
     } catch (e) {
       toast({ title: "Mislukt", description: parseApiError(e, "Kon rol niet wijzigen."), variant: "destructive" });
     } finally {
@@ -202,10 +215,10 @@ function UsersInner() {
                     </td>
                     <td className="px-4 py-3">
                       <Select value={u.role} onValueChange={(v) => changeRole(u, v as "user" | "admin")}>
-                        <SelectTrigger className="h-8 w-32"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-8 w-32" aria-label={`Rol van ${u.email}`}><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {ROLES.map((r) => (
-                            <SelectItem key={r} value={r}>{r}</SelectItem>
+                            <SelectItem key={r} value={r}>{ROL_LABEL[r]}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -225,7 +238,7 @@ function UsersInner() {
                           variant="ghost"
                           size="sm"
                           className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                          title="Account verwijderen"
+                          title="Account verwijderen" aria-label="Account verwijderen"
                           disabled={busy === u.id}
                           onClick={() => removeUser(u)}
                         >

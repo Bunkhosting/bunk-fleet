@@ -372,7 +372,14 @@ function BeveiligingContent() {
                 <code className="flex-1 bg-muted rounded px-3 py-2 text-xs font-mono break-all">
                   {secret}
                 </code>
-                <Button type="button" variant="outline" size="sm" onClick={copySecret}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={copySecret}
+                  aria-label={copied ? "Gekopieerd" : "Sleutel kopiëren"}
+                  title="Sleutel kopiëren"
+                >
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
@@ -499,7 +506,13 @@ function BeveiligingContent() {
                           : " · nog niet gebruikt"}
                       </p>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => removePasskey(pk)} title="Verwijderen">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removePasskey(pk)}
+                      title="Verwijderen"
+                      aria-label={`Passkey ${pk.label} verwijderen`}
+                    >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </li>

@@ -16,10 +16,6 @@ import {
   RotateCw,
   Pencil,
   Trash2,
-  Eye,
-  EyeOff,
-  Copy,
-  Check,
   KeyRound,
   AlertCircle,
 } from "lucide-react";
@@ -37,8 +33,8 @@ import { StatusBadge } from "@/components/vps/status-badge";
 import { useToast } from "@/components/ui/use-toast";
 import { vpsApi, parseApiError } from "@/lib/api";
 import type { VpsBackup } from "@/lib/api";
-import { formatDate, getOsLabel, formatBandbreedte } from "@/lib/utils";
-import type { Vps, VpsCredentials, VpsStatus } from "@/lib/types";
+import { formatDate, formatBandbreedte } from "@/lib/utils";
+import type { Vps, VpsStatus } from "@/lib/types";
 
 const TRANSITIONAL_STATUSES: VpsStatus[] = [
   "PENDING",
@@ -59,14 +55,10 @@ export default function VpsDetailPage() {
   const id = params.id as string;
 
   const [vps, setVps] = useState<Vps | null>(null);
-  const [credentials, setCredentials] = useState<VpsCredentials | null>(null);
   const [backups, setBackups] = useState<VpsBackup[]>([]);
   const [backupBezig, setBackupBezig] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
-  const [credentialsLoading, setCredentialsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
@@ -155,34 +147,6 @@ export default function VpsDetailPage() {
     } finally {
       setRestoring(null);
     }
-  };
-
-  const fetchCredentials = async () => {
-    if (credentials) {
-      setShowPassword((p) => !p);
-      return;
-    }
-    setCredentialsLoading(true);
-    try {
-      const response = await vpsApi.credentials(id);
-      setCredentials(response.data);
-      setShowPassword(true);
-    } catch {
-      toast({
-        title: "Fout",
-        description: "Kon SSH-gegevens niet ophalen.",
-        variant: "destructive",
-      });
-    } finally {
-      setCredentialsLoading(false);
-    }
-  };
-
-  const copyPassword = async () => {
-    if (!credentials?.sudo_password) return;
-    await navigator.clipboard.writeText(credentials.sudo_password).catch(() => undefined);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   useEffect(() => {
@@ -601,9 +565,7 @@ export default function VpsDetailPage() {
               Inloggegevens
             </CardTitle>
             <CardDescription>
-              De snelste manier om in te loggen is de webterminal hierboven. Een
-              sudo-wachtwoord verschijnt hier alleen als de server er zelf één
-              instelt.
+              De snelste manier om in te loggen is de webterminal hierboven.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -643,49 +605,6 @@ export default function VpsDetailPage() {
                   </p>
                 </div>
               )}
-              <div className="sm:col-span-3 space-y-1">
-                <p className="text-sm text-muted-foreground">Sudo-wachtwoord</p>
-                <div className="flex items-center gap-2">
-                  <p className="font-medium font-mono tracking-wider">
-                    {credentials?.sudo_password
-                      ? showPassword
-                        ? credentials.sudo_password
-                        : "••••••••••••"
-                      : "—"}
-                  </p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={fetchCredentials}
-                    disabled={credentialsLoading}
-                    title={showPassword ? "Verbergen" : "Tonen"}
-                  >
-                    {credentialsLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </Button>
-                  {credentials?.sudo_password && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={copyPassword}
-                      title="Kopiëren"
-                    >
-                      {copied ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
-                  )}
-                </div>
-              </div>
             </div>
           </CardContent>
         </Card>

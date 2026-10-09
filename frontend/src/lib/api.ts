@@ -13,7 +13,6 @@ import axios from "axios";
 import type {
   User,
   Vps,
-  VpsCredentials,
   VpsPackage,
   VpsStatus,
   OsChoice,
@@ -690,18 +689,6 @@ export const vpsApi = {
       immediate_delivery_consent: data.immediate_delivery_consent,
     }, data.idempotency_key ? { headers: { "Idempotency-Key": data.idempotency_key } } : undefined);
     return { data: transformVps(res.data.vps) };
-  },
-
-  credentials: async (id: string): Promise<{ data: VpsCredentials }> => {
-    const res = await api.get<{ vps: BunkVps }>(`/vpses/${id}`);
-    return {
-      data: {
-        ip_address: res.data.vps.ip_address,
-        ssh_port: res.data.vps.ssh_port ?? null,
-        ssh_username: "root",
-        sudo_password: null,
-      },
-    };
   },
 
   /** A VPS's restore points, newest first. Failures are listed too — they are news. */

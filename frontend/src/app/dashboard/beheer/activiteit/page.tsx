@@ -77,12 +77,14 @@ function ActiviteitInner() {
             variant="ghost"
             size="sm"
             className="gap-2"
+            aria-label="Vernieuwen"
+            title="Vernieuwen"
             onClick={() => {
               setLoading(true);
               load(filter);
             }}
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
       </div>

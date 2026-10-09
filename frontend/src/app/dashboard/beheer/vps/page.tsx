@@ -112,13 +112,13 @@ function VpsInner() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy === v.id || v.status !== "stopped"} title="Starten" onClick={() => act(v, "start")}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy === v.id || v.status !== "stopped"} title="Starten" aria-label="Starten" onClick={() => act(v, "start")}>
                           <Play className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy === v.id || v.status !== "active"} title="Stoppen" onClick={() => act(v, "stop")}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy === v.id || v.status !== "active"} title="Stoppen" aria-label="Stoppen" onClick={() => act(v, "stop")}>
                           <Square className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" disabled={busy === v.id || v.status === "deleting"} title="Verwijderen" onClick={() => act(v, "delete")}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" disabled={busy === v.id || v.status === "deleting"} title="Verwijderen" aria-label="Verwijderen" onClick={() => act(v, "delete")}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>

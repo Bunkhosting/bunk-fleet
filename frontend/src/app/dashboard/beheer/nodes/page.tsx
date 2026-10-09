@@ -294,6 +294,10 @@ function NodesInner() {
                         n.status === "draining"
                           ? "Node weer openstellen voor nieuwe VPS'en"
                           : "Geen nieuwe VPS'en meer plaatsen; wat er draait blijft draaien"
+                      } aria-label={
+                        n.status === "draining"
+                          ? "Node weer openstellen voor nieuwe VPS'en"
+                          : "Geen nieuwe VPS'en meer plaatsen; wat er draait blijft draaien"
                       }
                       disabled={draining === n.id}
                       onClick={() => toggleDrain(n)}
@@ -310,7 +314,7 @@ function NodesInner() {
                       variant="ghost"
                       size="sm"
                       className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                      title="Node verwijderen"
+                      title="Node verwijderen" aria-label="Node verwijderen"
                       disabled={removing === n.id}
                       onClick={() => removeNode(n)}
                     >
@@ -391,20 +395,8 @@ function NodesInner() {
                     gerekend.
                   </p>
                 )}
-                {wijktAf && (
-                  // De scheduler houdt zijn eigen boekhouding bij en die kan
-                  // ruimer staan dan wat er werkelijk vrij is. Dat verschil
-                  // hoort zichtbaar te zijn, niet weggemiddeld.
-                  <p className="text-xs text-muted-foreground">
-                    De node meldt minder vrij dan de scheduler denkt te hebben
-                    ({Math.round((n.reported_avail_ram_mb ?? 0) / 1024)} GB tegenover{" "}
-                    {Math.round((n.available_ram_mb ?? 0) / 1024)} GB RAM). Er wordt met het laagste
-                    gerekend.
-                  </p>
-                )}
                 <p className="text-xs text-muted-foreground">
                   Alleen de eigenaar wijzigt de instellingen van deze node, en draagt hem over.
-                  Een node zonder eigenaar kun je hier toewijzen.
                 </p>
                 {n.last_heartbeat_at && (
                   <p className="text-xs text-muted-foreground">

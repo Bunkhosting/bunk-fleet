@@ -76,12 +76,6 @@ export interface Vps {
   owner_email: string | null;
 }
 
-export interface VpsCredentials {
-  ip_address: string | null;
-  ssh_port: number | null;
-  ssh_username: string;
-  sudo_password: string | null;
-}
 
 export interface BillingOverview {
   open_amount: string;
