@@ -1,5 +1,0 @@
-# Vingerafdrukken van losse treffers die geen geheim zijn. Per regel waarom.
-#
-# docs/architecture.md: een tabelregel ("node creds, payout/billing secrets") die
-# de regel generic-api-key voor een sleutel aanziet.
-335bb9f4e79fc14e605340f76a0942fdb4890498:docs/architecture.md:generic-api-key:28

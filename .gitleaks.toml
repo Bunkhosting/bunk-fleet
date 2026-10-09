@@ -14,3 +14,14 @@ paths = [
   '''control_plane/config/dev\.exs''',
   '''control_plane/config/test\.exs''',
 ]
+regexTarget = "line"
+regexes = [
+  # Een tabelregel in docs/architecture.md die de regel generic-api-key voor
+  # een sleutel aanziet.
+  '''node creds, payout/billing secrets''',
+]
+
+# NIET hier: commit 85d88c3 (2026-06-26) zette .env.prod in de repo. Die treffers
+# zijn echt. SECRET_KEY_BASE en ADMIN_TOKEN zijn sindsdien vervangen; het
+# databasewachtwoord nog niet. Pas als dat ook vervangen is, komt die commit hier
+# te staan, met de datum van de vervanging erbij.
