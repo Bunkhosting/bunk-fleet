@@ -28,6 +28,7 @@ defmodule ControlPlaneWeb.VpsController do
   alias ControlPlane.Idempotency
   alias ControlPlane.Provisioning
   alias ControlPlane.Repo
+  alias ControlPlane.Subscriptions
   alias ControlPlaneWeb.Fouten
 
   def index(conn, _params) do
@@ -274,7 +275,7 @@ defmodule ControlPlaneWeb.VpsController do
   end
 
   @doc "Starts an owned, stopped VPS. 404 if not owned (existence is never leaked)."
-  def start(conn, params), do: power(conn, params, &Provisioning.start_vps/1)
+  def start(conn, params), do: power(conn, params, &start_als_betaald/1)
 
   @doc "Stops an owned, running VPS. 404 if not owned."
   def stop(conn, params), do: power(conn, params, &Provisioning.stop_vps/1)
@@ -305,6 +306,14 @@ defmodule ControlPlaneWeb.VpsController do
   andere handeling en hoort er ook als een andere handeling uit te zien.
   """
   def reboot(conn, params), do: power(conn, params, &Provisioning.reboot_vps/1)
+
+  # Een VPS die wegens een onbetaalde verlenging stilstaat, start de klant niet
+  # zelf. Hij komt vanzelf terug zodra de betaling lukt (Subscriptions.settle_due).
+  defp start_als_betaald(id) do
+    if Subscriptions.geschorst?(id),
+      do: {:error, :vps_suspended},
+      else: Provisioning.start_vps(id)
+  end
 
   defp power(conn, %{"id" => id}, transition) do
     with {:ok, id} <- valid_id(id),

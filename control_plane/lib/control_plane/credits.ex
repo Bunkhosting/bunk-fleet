@@ -297,6 +297,9 @@ defmodule ControlPlane.Credits do
     case Repo.one(
            from e in LedgerEntry,
              where: e.vps_id == ^vps_id and e.kind == "vps_charge" and e.amount_cents < 0,
+             # Een VPS met een abonnement heeft na een maand meer dan één
+             # afschrijving. Terugbetaald wordt de bestelling: de eerste.
+             order_by: [asc: e.inserted_at],
              limit: 1
          ) do
       nil ->

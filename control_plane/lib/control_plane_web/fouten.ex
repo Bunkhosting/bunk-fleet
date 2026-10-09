@@ -105,6 +105,7 @@ defmodule ControlPlaneWeb.Fouten do
 
     # Geld.
     insufficient_credits: {:payment_required, "insufficient_credits"},
+    vps_suspended: {:payment_required, "vps_suspended"},
 
     # Aan ons, niet aan de klant.
     not_configured: {:service_unavailable, "payments_unavailable"}

@@ -71,6 +71,18 @@ defmodule ControlPlane.Subscriptions do
   end
 
   @doc """
+  Of de VPS stilstaat omdat de eigenaar niet kon betalen.
+
+  Schorsen is een stopcommando, en een stopcommando is iets wat de klant met één
+  klik ongedaan maakt. Zonder deze vraag draaide een geschorste VPS dus gewoon
+  weer, onbetaald, tot de dagelijkse nieuwe poging hem opnieuw stopte.
+  """
+  @spec geschorst?(binary()) :: boolean()
+  def geschorst?(vps_id) do
+    Repo.exists?(from s in Subscription, where: s.vps_id == ^vps_id and s.status == :past_due)
+  end
+
+  @doc """
   Settles every subscription that has come due (`next_billing_date <= today`):
 
     * charges the owner's wallet the monthly price and advances the billing date
@@ -188,7 +200,11 @@ defmodule ControlPlane.Subscriptions do
               sub.owner_id,
               -cents,
               "vps_charge",
-              "Maandelijkse verlenging: #{sub.vps.name}"
+              "Maandelijkse verlenging: #{sub.vps.name}",
+              # Zonder vps_id is dit voor `Credits.refund_orphan_charges/1` een
+              # afschrijving voor een VPS die nooit is aangemaakt, en die betaalt
+              # hem tien minuten later terug. Elke verlenging, elke maand.
+              sub.vps_id
             )
 
           claimed

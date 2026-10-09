@@ -92,6 +92,31 @@ defmodule ControlPlane.SubscriptionsSettleTest do
     assert sub.retry_at == nil
   end
 
+  test "een verlenging is geen verweesde afschrijving en wordt niet terugbetaald" do
+    # De weessweep betaalt elke vps_charge zonder vps_id terug. De verlenging
+    # schreef er nooit een, dus elke maand ging het geld tien minuten later terug.
+    user = insert_user()
+    {:ok, _} = Credits.add_entry(user.id, 5_000, "topup", "test")
+    vps = insert_vps()
+    insert_subscription(user, vps, ~D[2026-07-05])
+
+    assert %{charged: 1} = Subscriptions.settle_due(~D[2026-07-05])
+    # Eerst vaststellen dat er werkelijk is afgeschreven: zonder dat zou de rest
+    # van deze test om de verkeerde reden slagen.
+    assert Credits.balance_cents(user.id) == 4_000
+
+    assert Credits.refund_orphan_charges(0) == 0
+    assert Credits.balance_cents(user.id) == 4_000
+
+    assert [regel] =
+             Repo.all(
+               from e in ControlPlane.Credits.LedgerEntry,
+                 where: e.user_id == ^user.id and e.kind == "vps_charge"
+             )
+
+    assert regel.vps_id == vps.id
+  end
+
   test "insufficient credit marks past_due but keeps the billing anchor" do
     user = insert_user()
     sub = insert_subscription(user, insert_vps(), ~D[2026-07-05])
