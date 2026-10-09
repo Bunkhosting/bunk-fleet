@@ -60,7 +60,12 @@ defmodule ControlPlaneWeb.VpsController do
         # Dit verzoek is al eerder gelukt. Hetzelfde antwoord teruggeven is het
         # hele punt: de klant heeft zijn VPS, hij heeft alleen het antwoord
         # gemist.
-        json(conn, %{vps: vps_json(Fleet.get_vps_for_owner(user.id, vps_id))})
+        # Bestaat die VPS niet meer (inmiddels verwijderd), dan valt er niets
+        # terug te geven. Eerst crashte dit met een 500 op vps_json(nil).
+        case Fleet.get_vps_for_owner(user.id, vps_id) do
+          %Vps{} = vps -> json(conn, %{vps: vps_json(vps)})
+          nil -> error(conn, :not_found, "not_found")
+        end
 
       {:error, :in_flight} ->
         error(conn, :conflict, "order_in_progress")

@@ -376,6 +376,7 @@ defmodule ControlPlane.Fleet.Reconciler do
 
   defp ruim_archieven do
     Backups.ruim_wees_archieven_op()
+    ControlPlane.Idempotency.ruim_op()
   rescue
     exception ->
       Logger.error(

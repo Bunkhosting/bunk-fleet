@@ -89,13 +89,32 @@ defmodule ControlPlane.Idempotency do
     end
   end
 
-  defp bestaande(user_id, key, scope) do
+  defp bestaande(user_id, key, scope, opnieuw? \\ true) do
     case Repo.one(
            from k in Key,
              where: k.user_id == ^user_id and k.key == ^key and k.scope == ^scope
          ) do
-      %Key{status: "done", vps_id: vps_id} when not is_nil(vps_id) -> {:ok, {:done, vps_id}}
-      %Key{} -> {:error, :in_flight}
+      %Key{status: "done", vps_id: vps_id} when not is_nil(vps_id) ->
+        {:ok, {:done, vps_id}}
+
+      # Een sleutel die "bezig" zegt maar al lang niets meer doet, is van een
+      # verzoek dat halverwege stierf: een uitrol, een crash. Alleen dat verzoek
+      # kon hem vrijgeven, en dat leeft niet meer. Eerst bleef hij voorgoed
+      # staan, en kreeg de klant op elke nieuwe poging "bestelling loopt al" --
+      # tot hij de pagina herlaadde en een nieuwe sleutel kreeg. Nu mag dit
+      # verzoek het overnemen. Eén keer: lukt de overname niet, dan was iemand
+      # anders net eerder, en dan geldt diens rij.
+      %Key{status: "in_flight"} = rij when opnieuw? ->
+        neem_over_als_verlaten(rij, user_id, key, scope)
+
+      %Key{status: "in_flight"} ->
+        {:error, :in_flight}
+
+      # "done" zonder VPS: die rij is weg (de verwijzing werd leeggemaakt). Er
+      # valt niets terug te geven en niets af te wachten.
+      %Key{} ->
+        {:ok, :zonder_sleutel}
+
       # De rij is tussen de insert en deze query verdwenen. Dat kan echt
       # gebeuren: een gelijktijdig verzoek dat mislukte geeft zijn sleutel vrij
       # (`release/1`). Er is dan niets meer om op te wachten en dit verzoek mag
@@ -105,8 +124,59 @@ defmodule ControlPlane.Idempotency do
       # opslaan en opzoeken is dit een echte race en geen bug. Werd hij dat wel
       # -- afkappen bij het ene en niet bij het andere -- dan is deze tak de
       # plek waar een dubbele bestelling er stilletjes doorheen glipt.
-      nil -> {:ok, :zonder_sleutel}
+      nil ->
+        {:ok, :zonder_sleutel}
     end
+  end
+
+  # Een bestelling duurt seconden. Tien minuten zonder bijwerken is geen
+  # langzaam verzoek meer maar een dood verzoek -- en ruim binnen de tijd
+  # waarin de weessweep een afschrijving zonder VPS terugbetaalt, dus de klant
+  # betaalt niet twee keer als hij opnieuw bestelt.
+  @verlaten_na_seconden 600
+
+  defp neem_over_als_verlaten(%Key{id: id, updated_at: bijgewerkt}, user_id, key, scope) do
+    if verlaten?(bijgewerkt) and verwijder_verlaten(id) == 1,
+      do: neem_opnieuw(user_id, key, scope),
+      else: {:error, :in_flight}
+  end
+
+  defp verlaten?(bijgewerkt),
+    do: DateTime.diff(DateTime.utc_now(), bijgewerkt, :second) >= @verlaten_na_seconden
+
+  defp verwijder_verlaten(id) do
+    cutoff = DateTime.add(DateTime.utc_now(), -@verlaten_na_seconden, :second)
+
+    {n, _} =
+      Repo.delete_all(
+        from k in Key, where: k.id == ^id and k.status == "in_flight" and k.updated_at <= ^cutoff
+      )
+
+    n
+  end
+
+  defp neem_opnieuw(user_id, key, scope) do
+    %Key{}
+    |> Key.changeset(%{user_id: user_id, key: key, scope: scope})
+    |> Repo.insert()
+    |> case do
+      {:ok, rij} -> {:ok, {:claimed, rij}}
+      {:error, _} -> bestaande(user_id, key, scope, false)
+    end
+  end
+
+  @doc """
+  Ruimt sleutels op die niemand meer nodig heeft.
+
+  Een sleutel beschermt tegen een dubbel verzoek in de seconden of minuten
+  rond een bestelling. Na een maand stuurt geen enkele client dezelfde sleutel
+  nog, en zonder opruimen groeide de tabel met elke bestelling.
+  """
+  @spec ruim_op(pos_integer()) :: non_neg_integer()
+  def ruim_op(dagen \\ 30) do
+    cutoff = DateTime.add(DateTime.utc_now(), -dagen * 86_400, :second)
+    {n, _} = Repo.delete_all(from k in Key, where: k.inserted_at < ^cutoff)
+    n
   end
 
   @doc "Legt vast dat deze sleutel tot `vps_id` heeft geleid."
