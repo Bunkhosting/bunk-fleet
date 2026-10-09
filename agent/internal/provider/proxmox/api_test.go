@@ -123,6 +123,15 @@ func (r *recorder) client(t *testing.T, mutate ...func(*Config)) *Client {
 // A UPID that the recorder resolves to a finished, successful task.
 const okTask = `{"data":"UPID:pve:0000:OK::task"}`
 
+// firewallVoor laat de vier aanroepen van isoleerGast slagen voor één gast.
+func (r *recorder) firewallVoor(vmid string) {
+	base := "/nodes/pve/qemu/" + vmid + "/firewall"
+	r.on("PUT "+base+"/options", `{"data":null}`)
+	r.on("POST "+base+"/ipset", `{"data":null}`)
+	r.on("POST "+base+"/ipset/ipfilter-net0", `{"data":null}`)
+	r.on("POST "+base+"/rules", `{"data":null}`)
+}
+
 func (r *recorder) taskSucceeds() {
 	r.on("GET /nodes/pve/tasks/UPID:pve:0000:OK::task/status",
 		`{"data":{"status":"stopped","exitstatus":"OK"}}`)
@@ -139,6 +148,7 @@ func TestCreateVMHappyPath(t *testing.T) {
 	r.on("POST /nodes/pve/qemu/9000/clone", okTask)
 	r.on("PUT /nodes/pve/qemu/131/resize", okTask)
 	r.on("POST /nodes/pve/qemu/131/config", `{"data":null}`)
+	r.firewallVoor("131")
 	r.on("POST /nodes/pve/qemu/131/status/start", okTask)
 	r.taskSucceeds()
 
@@ -476,5 +486,102 @@ func TestBaseURLToleratesATrailingSlash(t *testing.T) {
 	}
 	if c.base != "https://pve.example:8006/api2/json" {
 		t.Errorf("base = %q", c.base)
+	}
+}
+
+// Proxmox zet een nieuwe regel bovenaan en leest van boven naar beneden. De
+// gateway-ACCEPT moet dus ná de DROP worden aangemaakt, anders staat de DROP
+// bovenaan en snijdt hij -- zodra iemand de datacenter-firewall aanzet -- elke
+// VPS af van zijn gateway. Zo stond het op productie.
+func TestIsolatieLaatDeGatewayBovenDeDropStaan(t *testing.T) {
+	r := newRecorder(t)
+	r.on("GET /cluster/nextid", `{"data":"131"}`)
+	r.on("POST /nodes/pve/qemu/9000/clone", okTask)
+	r.on("PUT /nodes/pve/qemu/131/resize", okTask)
+	r.on("POST /nodes/pve/qemu/131/config", `{"data":null}`)
+	r.firewallVoor("131")
+	r.on("POST /nodes/pve/qemu/131/status/start", okTask)
+	r.taskSucceeds()
+
+	if _, err := r.client(t).CreateVM(context.Background(), provider.VMSpec{
+		Name: "x", TemplateID: 9000, DiskGB: 40, IPConfig: "ip=10.10.0.21/22,gw=10.10.0.1",
+	}); err != nil {
+		t.Fatalf("CreateVM: %v", err)
+	}
+
+	var regels []url.Values
+	r.mu.Lock()
+	for _, req := range r.requests {
+		if req.method == "POST" && req.path == "/nodes/pve/qemu/131/firewall/rules" {
+			regels = append(regels, req.form)
+		}
+	}
+	r.mu.Unlock()
+
+	if len(regels) != 2 {
+		t.Fatalf("%d regels aangemaakt, wilde er 2", len(regels))
+	}
+	if regels[0].Get("action") != "DROP" || regels[1].Get("action") != "ACCEPT" {
+		t.Fatalf("volgorde van aanmaken: %s dan %s; de ACCEPT moet als laatste, zodat hij bovenaan komt",
+			regels[0].Get("action"), regels[1].Get("action"))
+	}
+	if regels[1].Get("dest") != "10.10.0.1" || regels[0].Get("dest") != "10.10.0.0/22" {
+		t.Errorf("doelen: drop %q, accept %q", regels[0].Get("dest"), regels[1].Get("dest"))
+	}
+	for _, f := range regels {
+		if f.Get("pos") != "0" {
+			t.Errorf("regel %s zonder pos=0", f.Get("action"))
+		}
+	}
+}
+
+// Een gast waarvan de afscherming mislukte, mag niet starten. Eerst werd die
+// fout weggegooid en startte hij open naar zijn buren.
+func TestMisluktIsolerenDraaitDeGastTerug(t *testing.T) {
+	r := newRecorder(t)
+	r.on("GET /cluster/nextid", `{"data":"132"}`)
+	r.on("POST /nodes/pve/qemu/9000/clone", okTask)
+	r.on("PUT /nodes/pve/qemu/132/resize", okTask)
+	r.on("POST /nodes/pve/qemu/132/config", `{"data":null}`)
+	r.onStatus("PUT /nodes/pve/qemu/132/firewall/options", http.StatusForbidden, `{"errors":"permission denied"}`)
+	r.on("POST /nodes/pve/qemu/132/status/start", okTask)
+	r.on("GET /nodes/pve/qemu/132/status/current", `{"data":{"status":"stopped"}}`)
+	r.on("DELETE /nodes/pve/qemu/132", okTask)
+	r.taskSucceeds()
+
+	_, err := r.client(t).CreateVM(context.Background(), provider.VMSpec{
+		Name: "x", TemplateID: 9000, DiskGB: 40, IPConfig: "ip=10.10.0.22/22,gw=10.10.0.1",
+	})
+	if err == nil {
+		t.Fatal("CreateVM slaagde terwijl de afscherming mislukte")
+	}
+	if r.count("POST", "/nodes/pve/qemu/132/status/start") != 0 {
+		t.Error("de gast is gestart zonder afscherming")
+	}
+	if r.count("DELETE", "/nodes/pve/qemu/132") != 1 {
+		t.Error("de half aangemaakte gast is niet teruggedraaid")
+	}
+}
+
+func TestAfschermingMeldtEenUitgeschakeldeDatacenterFirewall(t *testing.T) {
+	for _, tc := range []struct {
+		naam, antwoord string
+		melding        bool
+	}{
+		{"nooit ingesteld (de Proxmox-standaard)", `{"data":{"digest":"x"}}`, true},
+		{"uitgezet", `{"data":{"enable":0}}`, true},
+		{"aan", `{"data":{"enable":1}}`, false},
+	} {
+		t.Run(tc.naam, func(t *testing.T) {
+			r := newRecorder(t)
+			r.on("GET /cluster/firewall/options", tc.antwoord)
+			n, err := r.client(t).Afscherming(context.Background())
+			if err != nil {
+				t.Fatalf("Afscherming: %v", err)
+			}
+			if (n != "") != tc.melding {
+				t.Errorf("notitie = %q, melding verwacht: %v", n, tc.melding)
+			}
+		})
 	}
 }

@@ -223,3 +223,61 @@ func TestUitgaandeSmtpWordtGeweigerd(t *testing.T) {
 		}
 	}
 }
+
+// Een klant mag niet bij het LAN achter de node: de router, de Proxmox-
+// interface, andere machines. DNS wel, want de gast krijgt de nameserver van de
+// host mee en die staat vaak op het LAN.
+func TestPrivenettenDichtBehalveDNS(t *testing.T) {
+	_, subnet, err := net.ParseCIDR("10.10.4.0/22")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := denyRules("vmbr2", subnet)
+
+	plek := func(net, actie string, dns bool) int {
+		for i, r := range rules {
+			j := strings.Join(r, " ")
+			if strings.Contains(j, "-d "+net+" ") && strings.HasSuffix(j, "-j "+actie) &&
+				strings.Contains(j, "--dport 53") == dns {
+				return i
+			}
+		}
+		return -1
+	}
+
+	for _, n := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"} {
+		drop, dns := plek(n, "DROP", false), plek(n, "ACCEPT", true)
+		if drop < 0 {
+			t.Errorf("geen DROP naar %s", n)
+			continue
+		}
+		if dns < 0 {
+			t.Errorf("geen DNS-uitzondering naar %s; naamresolutie zou breken", n)
+			continue
+		}
+		// Elke regel gaat bovenaan, dus wat later in de lijst staat, staat
+		// hoger in de keten. De uitzondering moet boven de DROP komen.
+		if dns < drop {
+			t.Errorf("de DNS-uitzondering naar %s komt onder de DROP en wordt nooit bereikt", n)
+		}
+	}
+}
+
+// Op een beheerde node is de gateway de hypervisor zelf. Een VPS mocht daar
+// nieuwe verbindingen openen, en bereikte zo de Proxmox-interface.
+func TestHostRegelsWeigerenAlleenNieuweVerbindingen(t *testing.T) {
+	_, subnet, _ := net.ParseCIDR("10.10.4.0/22")
+	rules := hostRules("vmbr2", subnet)
+	if len(rules) == 0 {
+		t.Fatal("geen regels voor de host")
+	}
+	for _, r := range rules {
+		j := strings.Join(r, " ")
+		if r[1] != "INPUT" || !strings.Contains(j, "--ctstate NEW") || !strings.Contains(j, "10.10.4.0/22") {
+			t.Errorf("hostregel raakt meer dan nieuwe verbindingen van klanten: %s", j)
+		}
+		if strings.Contains(strings.Join(checkArgs(r), " "), "-I ") {
+			t.Errorf("de check is een insert: %s", j)
+		}
+	}
+}

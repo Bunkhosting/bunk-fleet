@@ -863,16 +863,16 @@ func (c *Client) configureAndStart(ctx context.Context, node string, newID int, 
 
 	// 3b. Isoleer deze gast van zijn buren voordat hij draait.
 	//
-	// Een mislukking hier stopt het uitrollen NIET. De datacenter-firewall staat
-	// standaard uit in Proxmox, en zolang dat zo is doen deze instellingen niets
-	// -- ze staan dan alvast goed voor het moment dat een operator hem aanzet.
-	// Wél afbreken zou betekenen dat een node zonder ingeschakelde firewall geen
-	// enkele VPS meer kan uitrollen, en dat is een grotere storing dan het gat
-	// dat we hier dichten.
+	// Mislukt dit, dan mislukt het uitrollen, en de clone wordt teruggedraaid.
+	// Dat stond eerst andersom: de fout werd weggegooid, met als reden dat een
+	// node zonder ingeschakelde datacenter-firewall anders niets meer kon
+	// uitrollen. Maar die redenering klopt niet: met de firewall uit slagen deze
+	// aanroepen gewoon -- ze schrijven alleen instellingen weg. Ze mislukken
+	// alleen als de API echt iets weigert, en een VPS die dan toch start, staat
+	// zonder dat iemand het weet open naar zijn buren. Of de firewall van het
+	// datacenter aanstaat, meldt de agent apart in het paneel (zie Afscherming).
 	if err := c.isoleerGast(ctx, node, newID, spec); err != nil {
-		// Geen logger in deze laag; de fout reist mee naar de agent, die hem
-		// logt zonder de uitrol te laten mislukken.
-		_ = err
+		return provider.VMStatus{}, err
 	}
 
 	// 4. Start the guest and wait for the start task to complete.
@@ -917,9 +917,12 @@ func (c *Client) configureAndStart(ctx context.Context, node string, newID int, 
 func (c *Client) isoleerGast(ctx context.Context, node string, vmid int, spec provider.VMSpec) error {
 	ip := ipUitIPConfig(spec.IPConfig)
 	if ip == "" {
-		// Zonder toegewezen adres is er niets te filteren op bron, en een leeg
-		// ipset zou de gast volledig afsluiten.
-		return fmt.Errorf("proxmox: geen ip in ipconfig voor vm %d; firewall niet ingericht", vmid)
+		// Een node zonder eigen VPS-adresbereik laat zijn gasten een adres via
+		// DHCP halen. Dan is er niets om op bron te filteren, en een leeg ipset
+		// zou de gast volledig afsluiten. Overslaan, niet falen: zo'n node kon
+		// vóór deze regel ook uitrollen, en weigeren zou hem stilleggen om iets
+		// wat hij nooit gehad heeft.
+		return nil
 	}
 
 	base := fmt.Sprintf("/nodes/%s/qemu/%d/firewall", node, vmid)
@@ -946,29 +949,38 @@ func (c *Client) isoleerGast(ctx context.Context, node string, vmid int, spec pr
 		return fmt.Errorf("proxmox: ipfilter vm %d: %w", vmid, err)
 	}
 
-	// Buurverkeer weg, gateway houden. Volgorde telt: Proxmox evalueert van
-	// boven naar beneden, dus de ACCEPT voor de gateway moet vóór de DROP staan.
-	if gw := gatewayUitIPConfig(spec.IPConfig); gw != "" {
-		accept := url.Values{}
-		accept.Set("type", "out")
-		accept.Set("action", "ACCEPT")
-		accept.Set("dest", gw)
-		accept.Set("enable", "1")
-		accept.Set("comment", "gateway blijft bereikbaar")
-		if err := c.doJSON(ctx, http.MethodPost, base+"/rules", accept, nil); err != nil {
-			return fmt.Errorf("proxmox: gateway-regel vm %d: %w", vmid, err)
-		}
-	}
-
+	// Buurverkeer weg, gateway houden. Proxmox evalueert van boven naar beneden,
+	// dus de ACCEPT voor de gateway moet BOVEN de DROP staan. En Proxmox zet een
+	// nieuwe regel bovenaan, dus wordt de DROP eerst aangemaakt en de ACCEPT
+	// daarna.
+	//
+	// Dat stond andersom, en op productie stond daardoor de DROP bovenaan. Het
+	// viel niet op omdat de datacenter-firewall uit stond. Wie hem aanzette,
+	// sneed elke VPS af van zijn gateway -- en dus van internet. `pos` staat er
+	// voor de zekerheid ook expliciet bij.
 	if net := subnetUitIPConfig(spec.IPConfig); net != "" {
 		drop := url.Values{}
 		drop.Set("type", "out")
 		drop.Set("action", "DROP")
 		drop.Set("dest", net)
 		drop.Set("enable", "1")
+		drop.Set("pos", "0")
 		drop.Set("comment", "geen verkeer naar andere klanten")
 		if err := c.doJSON(ctx, http.MethodPost, base+"/rules", drop, nil); err != nil {
 			return fmt.Errorf("proxmox: isolatieregel vm %d: %w", vmid, err)
+		}
+	}
+
+	if gw := gatewayUitIPConfig(spec.IPConfig); gw != "" {
+		accept := url.Values{}
+		accept.Set("type", "out")
+		accept.Set("action", "ACCEPT")
+		accept.Set("dest", gw)
+		accept.Set("enable", "1")
+		accept.Set("pos", "0")
+		accept.Set("comment", "gateway blijft bereikbaar")
+		if err := c.doJSON(ctx, http.MethodPost, base+"/rules", accept, nil); err != nil {
+			return fmt.Errorf("proxmox: gateway-regel vm %d: %w", vmid, err)
 		}
 	}
 
@@ -1373,4 +1385,26 @@ func (c *Client) eigenaarVan(ctx context.Context, vmid int) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Afscherming zegt of de klanten op deze node van elkaar zijn afgeschermd, en
+// geeft een notitie voor het paneel als dat niet zo is.
+//
+// De regels per gast (isoleerGast) doen alleen iets als de firewall van het
+// datacenter aanstaat, en die staat in Proxmox standaard uit. Zonder deze vraag
+// zag niemand dat: elke gast had zijn regels, en geen van die regels deed iets.
+func (c *Client) Afscherming(ctx context.Context) (string, error) {
+	var resp struct {
+		Data struct {
+			Enable *int `json:"enable"`
+		} `json:"data"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/cluster/firewall/options", nil, &resp); err != nil {
+		return "", fmt.Errorf("proxmox: firewall-opties: %w", err)
+	}
+	if resp.Data.Enable != nil && *resp.Data.Enable == 1 {
+		return "", nil
+	}
+	return "de firewall van het Proxmox-datacenter staat uit, dus klanten op deze node zijn " +
+		"niet van elkaar afgeschermd (Datacenter > Firewall > Opties > Firewall: Ja)", nil
 }

@@ -141,6 +141,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	offer := &offerHolder{v: cfg.Offer}
+	afscherming := &afschermingsMelder{}
 
 	// Heartbeat loop.
 	ticker := time.NewTicker(cfg.HeartbeatInterval)
@@ -149,7 +150,7 @@ func run(logger *slog.Logger) error {
 	logger.Info("starting heartbeat loop", "interval", cfg.HeartbeatInterval.String())
 
 	// Send an immediate first heartbeat, then on each tick.
-	sendHeartbeat(ctx, logger, prov, cp, offer, netwerk)
+	sendHeartbeat(ctx, logger, prov, cp, offer, netwerk, afscherming)
 
 	for {
 		select {
@@ -157,7 +158,7 @@ func run(logger *slog.Logger) error {
 			logger.Info("shutdown signal received, stopping")
 			return nil
 		case <-ticker.C:
-			sendHeartbeat(ctx, logger, prov, cp, offer, netwerk)
+			sendHeartbeat(ctx, logger, prov, cp, offer, netwerk, afscherming)
 		}
 	}
 }
@@ -300,7 +301,7 @@ func kies(vanCP, lokaal int) int {
 // sendHeartbeat collects capacity from the provider and reports it to the
 // control plane. Errors are logged but never fatal: a single failed heartbeat
 // must not take the agent down.
-func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, offer *offerHolder, netwerk *netwerkBeheer) {
+func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, offer *offerHolder, netwerk *netwerkBeheer, afscherming *afschermingsMelder) {
 	hbCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -338,7 +339,7 @@ func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provi
 	// Een capaciteitsfout van de hypervisor gaat voor: die is al de reden dat deze
 	// node niets krijgt, en twee redenen in één veld is er één te veel.
 	oordeel := netwerk.oordeel()
-	hb.NetworkNote = afkappen(oordeel.Notitie)
+	hb.NetworkNote = afkappen(voegSamen(oordeel.Notitie, afscherming.notitie(hbCtx, logger, prov)))
 	if oordeel.Blokkerend && hb.CapacityError == "" {
 		hb.CapacityError = afkappen(oordeel.Notitie)
 	}

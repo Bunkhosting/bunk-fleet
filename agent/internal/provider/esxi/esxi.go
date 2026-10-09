@@ -665,3 +665,12 @@ func networkConfig(ipConfig string) string {
 	}
 	return b.String()
 }
+
+// Afscherming: deze provider schermt klanten op één host niet van elkaar af. Er
+// zijn geen regels per gast, zoals bij Proxmox, en een port group laat gasten
+// elkaar op laag 2 gewoon zien. Dat hoort de eigenaar van de node te weten
+// voordat hij er klanten op zet, niet achteraf.
+func (c *Client) Afscherming(context.Context) (string, error) {
+	return "ESXi schermt klanten op deze node niet van elkaar af; zet de VPS'en op een " +
+		"port group met private VLAN's of gebruik deze node voor één klant", nil
+}

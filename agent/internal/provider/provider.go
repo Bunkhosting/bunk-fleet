@@ -200,3 +200,11 @@ type Settings struct {
 type Configurable interface {
 	ApplySettings(Settings)
 }
+
+// Afscherming is wat een provider kan zeggen over hoe goed klanten op deze node
+// van elkaar gescheiden zijn. Optioneel: de agent vraagt het alleen als de
+// provider het kent. Een lege notitie betekent "afgeschermd"; anders staat er
+// voor de eigenaar van de node wat er ontbreekt.
+type Afscherming interface {
+	Afscherming(ctx context.Context) (string, error)
+}

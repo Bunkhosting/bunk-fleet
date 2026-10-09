@@ -330,7 +330,7 @@ func collectMetNetwerk(t *testing.T, prov provider.Provider, nb *netwerkBeheer) 
 	cp.SetCredentials("node-1", "token-1")
 
 	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
-	sendHeartbeat(context.Background(), logger, prov, cp, &offerHolder{v: config.OfferConfig{}}, nb)
+	sendHeartbeat(context.Background(), logger, prov, cp, &offerHolder{v: config.OfferConfig{}}, nb, nil)
 	return got
 }
 

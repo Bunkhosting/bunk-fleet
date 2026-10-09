@@ -81,14 +81,17 @@ func uplinkFromRoutes(routeOutput string) (string, error) {
 //     being able to reach anything. Customers who genuinely need to send mail use
 //     a relay; unblocking per node is a setting we can add when someone asks,
 //     which is cheaper than the reputation of an address we cannot get back.
+//
 //   - More than 60 new connections per second from one VPS. That is far above
 //     normal use and squarely in port-scan and flood territory. Established
 //     connections are untouched, so a busy web server is unaffected.
 //
-// What this deliberately does NOT do: it does not isolate customers from each
-// other. VPSes share one bridge, so their traffic is switched at layer 2 and
-// never reaches FORWARD. That needs per-VM filtering on the hypervisor and is a
-// separate piece of work — pretending otherwise here would be worse than the gap.
+//   - Anything on a private range behind the node, except DNS. See
+//     privenetRules.
+//
+// Customers are isolated from each other by the per-guest Proxmox firewall
+// (isoleerGast in the provider), which only works with the datacenter firewall
+// on; the agent reports it in the panel when it is off.
 func denyRules(bridge string, subnet *net.IPNet) [][]string {
 	cidr := subnet.String()
 
@@ -100,13 +103,71 @@ func denyRules(bridge string, subnet *net.IPNet) [][]string {
 		})
 	}
 
-	return append(deny, []string{
+	deny = append(deny, []string{
 		"-I", "FORWARD", "1", "-i", bridge, "-s", cidr,
 		"-m", "conntrack", "--ctstate", "NEW",
 		"-m", "hashlimit", "--hashlimit-mode", "srcip",
 		"--hashlimit-above", "60/sec", "--hashlimit-burst", "120",
 		"--hashlimit-name", "bunk_out", "-j", "DROP",
 	})
+
+	return append(deny, privenetRules(bridge, cidr)...)
+}
+
+// De adresruimtes die nooit "internet" zijn: het LAN van de operator, de
+// beheerinterfaces van zijn router en hypervisor, CGNAT, link-local.
+var privenetten = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16"}
+
+// privenetRules houden een klant weg van alles achter de node. Zonder deze
+// regels mocht een VPS overal heen behalve poort 25, en bereikte hij via de NAT
+// het hele LAN van de operator: de router, de Proxmox-interface op 8006, andere
+// machines. Met één hergebruikt wachtwoord of één lek in Proxmox is dat de
+// hypervisor, en daarmee elke klant op de node.
+//
+// DNS blijft open. De gast krijgt geen nameserver mee, en Proxmox geeft hem dan
+// die van de host -- en die staat vaak op het LAN. Zonder deze uitzondering
+// werkt naamresolutie op geen enkele VPS meer.
+//
+// De volgorde in de lijst telt: elke regel wordt bovenaan ingevoegd, dus de
+// laatste in de lijst staat bovenaan. De DNS-uitzonderingen komen daarom na de
+// DROP's. Met br_netfilter (Proxmox met firewall) gaat ook verkeer tussen twee
+// gasten op dezelfde bridge langs FORWARD; dat wordt dan ook geweigerd, en dat
+// is precies de bedoeling.
+func privenetRules(bridge, cidr string) [][]string {
+	regels := [][]string{}
+	for _, net := range privenetten {
+		regels = append(regels, []string{
+			"-I", "FORWARD", "1", "-i", bridge, "-s", cidr, "-d", net, "-j", "DROP",
+		})
+	}
+	for _, net := range privenetten {
+		for _, proto := range []string{"udp", "tcp"} {
+			regels = append(regels, []string{
+				"-I", "FORWARD", "1", "-i", bridge, "-s", cidr, "-d", net,
+				"-p", proto, "--dport", "53", "-j", "ACCEPT",
+			})
+		}
+	}
+	return regels
+}
+
+// hostRules beschermen de node zelf. Op een node die zijn netwerk beheert is de
+// gateway van de klanten de hypervisor, en dat verkeer gaat langs INPUT, niet
+// FORWARD: zonder deze regels bereikte elke VPS de Proxmox-interface en sshd van
+// zijn eigen host. Alleen NIEUWE verbindingen vanuit de klanten worden
+// geweigerd. Het antwoord op wat de agent zelf opent -- de webterminal belt de
+// VPS -- is een bestaande verbinding en blijft werken, net als ping naar de
+// gateway.
+func hostRules(bridge string, subnet *net.IPNet) [][]string {
+	cidr := subnet.String()
+	regels := [][]string{}
+	for _, proto := range []string{"tcp", "udp"} {
+		regels = append(regels, []string{
+			"-I", "INPUT", "1", "-i", bridge, "-s", cidr, "-p", proto,
+			"-m", "conntrack", "--ctstate", "NEW", "-j", "DROP",
+		})
+	}
+	return regels
 }
 
 // natRules is every firewall rule this node needs for its VPS network, as
@@ -238,7 +299,7 @@ func applyVpsNetwork(logger *slog.Logger, bridge string, n vpsNetwork, manage bo
 	// `hashlimit` zit niet in elke kernel. Dan draait de node zonder die ene
 	// grens verder, en dat staat in de log -- stoppen zou een node zonder enig
 	// netwerk opleveren, wat erger is dan een node zonder snelheidsgrens.
-	for _, rule := range denyRules(bridge, subnet) {
+	for _, rule := range append(denyRules(bridge, subnet), hostRules(bridge, subnet)...) {
 		if _, err := runCmd(ctx, "iptables", checkArgs(rule)...); err == nil {
 			continue // already present
 		}
