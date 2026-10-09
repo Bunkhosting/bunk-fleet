@@ -16,7 +16,7 @@ on:
   # Handmatig starten blijft mogelijk, bijvoorbeeld om een uitrol te herhalen
   # nadat een machine terug is van onderhoud. Dat slaat de CI-eis bewust over:
   # het is een mens die weet wat hij doet, en soms is dat precies wat nodig is
-  # als de CI zelf stuk zit.
+  # als de CI zelf stuk zit. Wel alleen vanaf main (zie de `if:` hieronder).
   workflow_dispatch:
 
 # Uitrollen leest de repo en praat verder alleen met de machine zelf; naar
@@ -45,9 +45,22 @@ jobs:
     timeout-minutes: 90
     # Een workflow_run vuurt ook af als de CI faalde of is afgebroken; alleen
     # "success" mag door.
+    #
+    # En alleen een push naar main van DEZE repo. Het filter `branches: [main]`
+    # hierboven kijkt naar de naam van de branch, en die kiest een fork zelf: een
+    # pull request uit een fork met een branch die "main" heet laat de CI draaien,
+    # en als die slaagt startte deze uitrol -- met de code van de fork, op de
+    # machine waar .env.prod ligt. De repo is openbaar, dus dat kon iedereen.
+    # Handmatig starten mag alleen vanaf main: anders gaat een branch die de CI
+    # nooit zag zo live.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
 
     steps:
       # De commit die de CI daadwerkelijk heeft gekeurd, niet de laatste stand
