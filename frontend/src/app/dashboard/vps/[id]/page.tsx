@@ -562,6 +562,10 @@ export default function VpsDetailPage() {
               <StatusBadge status={vps.status} />
             </div>
             <div className="flex justify-between">
+              <span className="text-muted-foreground">Locatie</span>
+              <span className="font-medium">{vps.location ?? "—"}</span>
+            </div>
+            <div className="flex justify-between">
               <span className="text-muted-foreground">Aangemaakt op</span>
               <span className="font-medium">{formatDate(vps.created_at)}</span>
             </div>

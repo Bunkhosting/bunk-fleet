@@ -276,6 +276,8 @@ interface BunkVps {
   ram_mb: number;
   disk_gb: number;
   region?: string | null;
+  /** De naam van de regio ("Eindhoven"); `region` is de code. */
+  location?: string | null;
   provider_vm_id?: string | null;
   public_host?: string | null;
   ssh_port?: number | null;
@@ -316,6 +318,9 @@ function transformVps(v: BunkVps): Vps {
     // cannot succeed.
     ssh_port: v.ssh_port ?? null,
     ssh_username: "root",
+    // Op de code terugvallen is beter dan niets: een oudere server stuurt de
+    // naam nog niet mee.
+    location: v.location ?? v.region ?? null,
     vcenter_vm_id: v.provider_vm_id ?? null,
     created_at: v.inserted_at,
     updated_at: v.inserted_at,
@@ -773,6 +778,7 @@ export interface AdminVps {
   owner_email: string | null;
   node: string | null;
   region: string | null;
+  location: string | null;
   vcpu: number;
   ram_mb: number;
   disk_gb: number;

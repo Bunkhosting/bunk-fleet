@@ -61,6 +61,8 @@ export interface Vps {
   public_host: string | null;
   ssh_port: number | null;
   ssh_username: string;
+  /** De locatie waar de VPS draait, zoals een mens hem kent ("Eindhoven"). */
+  location: string | null;
   vcenter_vm_id: string | null;
   created_at: string;
   updated_at: string;

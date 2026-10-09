@@ -81,6 +81,7 @@ defmodule ControlPlaneWeb.VpsAntwoordCompleetTest do
 
   defp compleet?(antwoord, code) do
     antwoord["region"] == code and
+      antwoord["location"] == "Regio" and
       antwoord["public_host"] == "node.example.test" and
       antwoord["ssh_port"] == 20_022 and
       length(antwoord["port_forwards"] || []) == 1

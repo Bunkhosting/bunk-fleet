@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Server, Cpu, HardDrive, Globe } from "lucide-react";
+import { Server, Cpu, HardDrive, Globe, MapPin } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/vps/status-badge";
 import { getOsLabel } from "@/lib/utils";
@@ -39,6 +39,12 @@ export function VpsCard({ vps }: VpsCardProps) {
                 : "Alleen via de webterminal"}
             </span>
           </div>
+          {vps.location && (
+            <div className="flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              <span>{vps.location}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <HardDrive className="h-4 w-4" />
             <span>{getOsLabel(vps.os)}</span>

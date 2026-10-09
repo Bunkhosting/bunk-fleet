@@ -49,7 +49,8 @@ function VpsInner() {
   const filtered = vpses.filter(
     (v) =>
       v.name.toLowerCase().includes(q.toLowerCase()) ||
-      (v.owner_email ?? "").toLowerCase().includes(q.toLowerCase())
+      (v.owner_email ?? "").toLowerCase().includes(q.toLowerCase()) ||
+      (v.location ?? "").toLowerCase().includes(q.toLowerCase())
   );
 
   if (loading) {
@@ -74,7 +75,7 @@ function VpsInner() {
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Zoek op naam of eigenaar" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+        <Input placeholder="Zoek op naam, eigenaar of locatie" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
       </div>
 
       <Card>
@@ -87,7 +88,7 @@ function VpsInner() {
                   <th className="px-4 py-3">Eigenaar</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Specs</th>
-                  <th className="px-4 py-3">Node</th>
+                  <th className="px-4 py-3">Locatie</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -106,7 +107,8 @@ function VpsInner() {
                       {v.vcpu} vCPU · {Math.round(v.ram_mb / 1024)} GB · {v.disk_gb} GB
                     </td>
                     <td className="px-4 py-3 text-xs">
-                      {v.node ?? "—"}
+                      <div className="font-medium">{v.location ?? v.region ?? "—"}</div>
+                      <div className="text-muted-foreground font-mono">{v.node ?? "—"}</div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">

@@ -779,6 +779,7 @@ defmodule ControlPlaneWeb.Admin.PanelController do
       owner_email: v.owner_email,
       node: node_name(v),
       region: region_code(v),
+      location: region_name(v),
       vcpu: v.vcpu,
       ram_mb: v.ram_mb,
       disk_gb: v.disk_gb,
@@ -829,6 +830,9 @@ defmodule ControlPlaneWeb.Admin.PanelController do
 
   defp region_code(%{region: %{code: code}}), do: code
   defp region_code(_), do: nil
+
+  defp region_name(%{region: %{name: name}}), do: name
+  defp region_name(_), do: nil
 
   defp count_by(query, f) do
     Repo.all(from x in query, group_by: field(x, ^f), select: {field(x, ^f), count(x.id)})

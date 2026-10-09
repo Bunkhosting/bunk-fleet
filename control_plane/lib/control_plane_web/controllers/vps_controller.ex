@@ -493,6 +493,9 @@ defmodule ControlPlaneWeb.VpsController do
       name: vps.name,
       status: vps.status,
       region: region_code(vps),
+      # De naam die een mens herkent ("Eindhoven"), naast de code die in een URL
+      # past. Zonder dit stond nergens in het dashboard waar een VPS draait.
+      location: region_name(vps),
       provider_vm_id: vps.provider_vm_id,
       ip_address: vps.ip_address,
       vcpu: vps.vcpu,
@@ -569,4 +572,7 @@ defmodule ControlPlaneWeb.VpsController do
 
   defp region_code(%Vps{region: %{code: code}}), do: code
   defp region_code(%Vps{}), do: nil
+
+  defp region_name(%Vps{region: %{name: name}}), do: name
+  defp region_name(%Vps{}), do: nil
 end
