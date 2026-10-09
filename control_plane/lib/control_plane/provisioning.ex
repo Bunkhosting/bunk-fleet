@@ -69,6 +69,22 @@ defmodule ControlPlane.Provisioning do
   # mens laat beslissen. Zelfde afweging als in `Fleet.Drift`.
   @max_afleveringen 5
 
+  # Daarboven: niet nooit meer, maar langzaam. "Nooit meer" maakte het
+  # vastlopen permanent: het geheugen van de agent herhaalt een resultaat
+  # alleen als het control plane ernaar vraagt, en dat vroeg het niet meer. Een
+  # uitrol die klaar was maar zijn resultaat niet kwijt kon (het control plane
+  # stond net te herstarten), bleef zo voorgoed in "aanmaken" staan. Eens per
+  # half uur is genoeg om dat te herstellen en weinig genoeg om niets te
+  # belasten.
+  @trage_herlevering_seconds 1800
+
+  # Back-ups en terugzetten duren normaal veel langer dan 90 seconden, en de
+  # agent zwijgt zolang hij bezig is. Met de gewone termijn haalden ze binnen
+  # acht minuten de grens en kwam er een "commando's zitten vast"-mail voor werk
+  # dat gewoon liep.
+  @lang_werk [:backup, :restore_backup]
+  @lang_werk_ttl_seconds 900
+
   @doc """
   Creates a VPS and dispatches a provision command to the node it is placed on.
 
@@ -831,18 +847,40 @@ defmodule ControlPlane.Provisioning do
   """
   @spec deliverable_commands_for_node(Node.t()) :: [Command.t()]
   def deliverable_commands_for_node(%Node{id: node_id}) do
-    cutoff = Clock.shift(-@redelivery_ttl_seconds)
-
     Repo.all(
       from c in Command,
-        where:
-          c.node_id == ^node_id and
-            c.delivery_count < ^@max_afleveringen and
-            (c.status == :pending or
-               (c.status == :delivered and not is_nil(c.delivered_at) and
-                  c.delivered_at < ^cutoff)),
+        where: c.node_id == ^node_id,
+        where: ^dynamic([c], c.status == :pending or ^opnieuw_uit_te_delen()),
         order_by: [asc: c.inserted_at]
     )
+  end
+
+  # Een afgeleverd commando zonder resultaat gaat opnieuw de deur uit: na de
+  # gewone termijn (langer voor back-ups en terugzetten), en boven de grens nog
+  # eens per half uur.
+  defp opnieuw_uit_te_delen do
+    dynamic(
+      [c],
+      c.status == :delivered and not is_nil(c.delivered_at) and
+        (^binnen_de_grens() or ^boven_de_grens())
+    )
+  end
+
+  defp binnen_de_grens do
+    cutoff = Clock.shift(-@redelivery_ttl_seconds)
+    cutoff_lang = Clock.shift(-@lang_werk_ttl_seconds)
+
+    dynamic(
+      [c],
+      c.delivery_count < ^@max_afleveringen and
+        ((c.kind in ^@lang_werk and c.delivered_at < ^cutoff_lang) or
+           (c.kind not in ^@lang_werk and c.delivered_at < ^cutoff))
+    )
+  end
+
+  defp boven_de_grens do
+    cutoff_traag = Clock.shift(-@trage_herlevering_seconds)
+    dynamic([c], c.delivery_count >= ^@max_afleveringen and c.delivered_at < ^cutoff_traag)
   end
 
   @doc """

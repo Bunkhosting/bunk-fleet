@@ -111,4 +111,41 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
     assert {1, [id]} = Provisioning.mark_delivered_all(gelezen)
     assert id == blijft.id
   end
+
+  defp verouder_met(cmd, seconden) do
+    oud = Clock.shift(-seconden)
+
+    Repo.update_all(from(c in Command, where: c.id == ^cmd.id),
+      set: [delivered_at: oud, updated_at: oud]
+    )
+  end
+
+  test "boven de grens komt een commando eens per half uur toch nog langs" do
+    # Anders kon het geheugen van de agent zijn resultaat nooit meer herhalen,
+    # en bleef een VPS die allang draaide voorgoed in "aanmaken" staan.
+    node = fleet_node()
+    cmd = commando(node)
+    for _ <- 1..Provisioning.max_afleveringen(), do: Provisioning.mark_delivered_all([cmd])
+
+    verouder_met(cmd, 600)
+    assert Provisioning.deliverable_commands_for_node(node) == []
+
+    verouder_met(cmd, 1900)
+    assert Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [cmd.id]
+  end
+
+  test "een lopende back-up wordt niet na anderhalve minuut opnieuw uitgedeeld" do
+    node = fleet_node()
+    backup = commando(node, %{kind: :backup})
+    provision = commando(node)
+    Provisioning.mark_delivered_all([backup, provision])
+
+    # Vijf minuten: lang voor een uitrol, normaal voor een back-up.
+    verouder_met(backup, 300)
+    verouder_met(provision, 300)
+    assert Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [provision.id]
+
+    verouder_met(backup, 1000)
+    assert backup.id in (Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id))
+  end
 end
