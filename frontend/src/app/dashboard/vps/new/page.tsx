@@ -32,6 +32,9 @@ export default function NewVpsPage() {
   const [label, setLabel] = useState("");
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
   const [regions, setRegions] = useState<BunkRegion[]>([]);
+  // Of de lijst met locaties echt binnenkwam. Een lege lijst na een mislukte
+  // aanvraag betekent niet "geen ruimte"; de server plaatst dan zelf.
+  const [regionsGeladen, setRegionsGeladen] = useState(false);
   const [deliveryConsent, setDeliveryConsent] = useState(false);
   // "" is automatic: no region is sent and Bunk places on the emptiest machine.
   const [regionCode, setRegionCode] = useState("");
@@ -62,7 +65,12 @@ export default function NewVpsPage() {
         // balance is a nice-to-have here; ignore failures
       });
 
-    regionsRequest.then(setRegions).catch(() => {
+    regionsRequest
+      .then((r) => {
+        setRegions(r);
+        setRegionsGeladen(true);
+      })
+      .catch(() => {
       // No list means no choice to offer; automatic placement still works.
     });
   }, [toast]);
@@ -116,7 +124,7 @@ export default function NewVpsPage() {
 
     setSubmitting(true);
     try {
-      await vpsApi.create({
+      const res = await vpsApi.create({
         package_id: selectedPackageId,
         os: "ubuntu-22.04",
         label: label || undefined,
@@ -125,10 +133,12 @@ export default function NewVpsPage() {
         idempotency_key: bestelSleutel(),
       });
       toast({
-        title: "Gelukt!",
-        description: "VPS aanvraag ingediend!",
+        title: "Je VPS wordt aangemaakt",
+        description: "Dat duurt meestal een tot twee minuten.",
       });
-      router.push("/dashboard/vps");
+      // Naar de nieuwe VPS zelf: daar is te zien hoe het aanmaken vordert, en
+      // daar staat de terminal zodra hij klaar is.
+      router.push(`/dashboard/vps/${res.data.id}`);
     } catch (error: unknown) {
       toast({
         title: "Fout bij aanvragen",
@@ -139,6 +149,19 @@ export default function NewVpsPage() {
       setSubmitting(false);
     }
   };
+
+  const gekozen = packages.find((p) => p.id === selectedPackageId);
+  const prijsCents = gekozen ? Math.round(parseFloat(gekozen.price_monthly) * 100) : null;
+  const tekort = prijsCents !== null && balanceCents !== null && balanceCents < prijsCents;
+  const blokkade: string | null = !gekozen
+    ? "Kies eerst een pakket."
+    : regionsGeladen && regions.length === 0
+      ? "Er is nu geen locatie met vrije capaciteit."
+      : tekort
+        ? "Je tegoed is niet toereikend voor dit pakket."
+        : !deliveryConsent
+          ? "Zet het vinkje voor directe levering."
+          : null;
 
   if (loading) {
     return (
@@ -151,7 +174,7 @@ export default function NewVpsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Nieuwe VPS Aanvragen</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Nieuwe VPS aanvragen</h1>
         <p className="text-muted-foreground">
           Kies een pakket en geef je VPS optioneel een naam.
         </p>
@@ -217,7 +240,7 @@ export default function NewVpsPage() {
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">Locatie</h2>
 
-        {regions.length === 0 && (
+        {regionsGeladen && regions.length === 0 && (
           <p className="max-w-sm text-sm text-muted-foreground">
             Er is op dit moment geen locatie met vrije capaciteit. Bestellen lukt
             pas als er weer ruimte is.
@@ -358,11 +381,17 @@ export default function NewVpsPage() {
         </span>
       </label>
 
-      {/* Submit */}
-      <div className="flex gap-4">
-        <Button onClick={handleSubmit} disabled={submitting || !deliveryConsent}>
+      {/* Submit. De knop staat uit zolang bestellen niet kan, en zegt waarom.
+          Eerst kon je klikken zonder ruimte of zonder tegoed, en kwam de reden
+          pas daarna als foutmelding van de server. */}
+      <div className="flex flex-wrap items-center gap-4">
+        <Button
+          onClick={handleSubmit}
+          disabled={submitting || blokkade !== null}
+          aria-describedby={blokkade ? "bestel-blokkade" : undefined}
+        >
           {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          VPS Aanvragen
+          VPS aanvragen
         </Button>
         <Button
           variant="outline"
@@ -371,6 +400,11 @@ export default function NewVpsPage() {
         >
           Annuleren
         </Button>
+        {blokkade && (
+          <p id="bestel-blokkade" className="text-sm text-muted-foreground">
+            {blokkade}
+          </p>
+        )}
       </div>
     </div>
   );
