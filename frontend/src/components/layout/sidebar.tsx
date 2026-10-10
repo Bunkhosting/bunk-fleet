@@ -30,7 +30,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { authApi } from "@/lib/api";
+import { authApi, parseApiError } from "@/lib/api";
+import { useToast } from "@/components/ui/use-toast";
 import type { User } from "@/lib/types";
 
 interface SidebarProps {
@@ -112,11 +113,26 @@ function SidebarContent({ user }: SidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
 
+  const { toast } = useToast();
+
   const handleLogout = async () => {
     try {
       await authApi.logout();
-    } catch {
-      // ignore logout errors
+    } catch (err: unknown) {
+      // Alleen een 401 betekent "al uitgelogd". Bij een storing staat het
+      // sessiecookie er nog (het is HttpOnly, de browser kan het niet zelf
+      // weggooien), en stuurde de middleware /login gewoon terug naar het
+      // dashboard: wie op een gedeelde computer uitlogde, bleef ingelogd
+      // zonder het te weten.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status !== 401) {
+        toast({
+          title: "Uitloggen is niet gelukt",
+          description: parseApiError(err, "Je bent nog ingelogd. Probeer het opnieuw."),
+          variant: "destructive",
+        });
+        return;
+      }
     }
     router.push("/login");
   };

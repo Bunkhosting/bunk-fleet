@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
@@ -29,6 +30,7 @@ function UsersInner() {
   const { toast } = useToast();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState(false);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [toonVerwijderd, setToonVerwijderd] = useState(false);
@@ -36,8 +38,15 @@ function UsersInner() {
   const load = () =>
     adminApi
       .users()
-      .then(setUsers)
-      .catch(() => toast({ title: "Fout", description: "Kon gebruikers niet laden.", variant: "destructive" }))
+      .then((d) => {
+        setUsers(d);
+        setLaadFout(false);
+      })
+      .catch(() => {
+        // Een lege tabel na een mislukte lading leest als "er is niets".
+        setLaadFout(true);
+        toast({ title: "Fout", description: "Kon gebruikers niet laden.", variant: "destructive" });
+      })
       .finally(() => setLoading(false));
 
   useEffect(() => {
@@ -171,6 +180,16 @@ function UsersInner() {
       {dialoog}
     <div className="space-y-6">
       <PageHeader title="Gebruikers" description={<>{users.length - aantalVerwijderd} accounts — rol wijzigen en tegoed aanpassen.</>} />
+
+      {laadFout && (
+        <LoadError
+          message="De gebruikers konden niet worden opgehaald. Wat hieronder staat is niet volledig."
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative max-w-sm flex-1">

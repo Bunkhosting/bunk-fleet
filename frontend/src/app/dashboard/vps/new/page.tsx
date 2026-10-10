@@ -1,6 +1,7 @@
 "use client";
 
 import { PageHeader } from "@/components/layout/page-header";
+import { LoadError } from "@/components/feedback/load-error";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -39,6 +40,11 @@ export default function NewVpsPage() {
   const [deliveryConsent, setDeliveryConsent] = useState(false);
   // "" is automatic: no region is sent and Bunk places on the emptiest machine.
   const [regionCode, setRegionCode] = useState("");
+  // Zonder catalogus valt er niets te bestellen. Dat stond als een melding die
+  // na een paar seconden weg was, met daaronder een lege pagina en geen manier
+  // om het opnieuw te proberen dan herladen.
+  const [pakkettenFout, setPakkettenFout] = useState(false);
+  const [poging, setPoging] = useState(0);
 
   useEffect(() => {
     // Three answers this page needs and none of them depends on another, so
@@ -50,14 +56,11 @@ export default function NewVpsPage() {
     const regionsRequest = regionsApi.list();
 
     packagesRequest
-      .then((res) => setPackages(res.data.results))
-      .catch(() =>
-        toast({
-          title: "Fout",
-          description: "Kon pakketten niet laden.",
-          variant: "destructive",
-        }),
-      )
+      .then((res) => {
+        setPackages(res.data.results);
+        setPakkettenFout(false);
+      })
+      .catch(() => setPakkettenFout(true))
       .finally(() => setLoading(false));
 
     walletRequest
@@ -74,7 +77,7 @@ export default function NewVpsPage() {
       .catch(() => {
       // No list means no choice to offer; automatic placement still works.
     });
-  }, [toast]);
+  }, [poging]);
 
   // Eén sleutel per bestelling, niet per klik.
   //
@@ -168,6 +171,21 @@ export default function NewVpsPage() {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (pakkettenFout && packages.length === 0) {
+    return (
+      <div className="mx-auto max-w-4xl space-y-8">
+        <PageHeader title="Nieuwe VPS aanvragen" />
+        <LoadError
+          message="De pakketten konden niet worden opgehaald. Er is niets besteld of afgeschreven; probeer het zo opnieuw."
+          onRetry={() => {
+            setLoading(true);
+            setPoging((p) => p + 1);
+          }}
+        />
       </div>
     );
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2, ArrowLeft, ShieldCheck, KeyRound, Mail } from "lucide-react";
@@ -9,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/vps/status-badge";
 import { useToast } from "@/components/ui/use-toast";
 import { AdminGuard } from "@/components/admin/admin-guard";
-import { adminApi, type AdminUserDetail, vpsStatusFromApi } from "@/lib/api";
+import { adminApi, type AdminUserDetail, vpsStatusFromApi, parseApiError } from "@/lib/api";
 import { isOnbeperktTegoed } from "@/lib/utils";
 
 const euro = (cents: number) =>
@@ -27,20 +28,45 @@ function KlantDetail() {
   const { toast } = useToast();
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState<string | null>(null);
 
   // Zie abonnementen/page.tsx: loading begint op true, dus geen synchrone
   // setState in het effect.
   const load = useCallback(() => {
     adminApi
       .userDetail(id)
-      .then(setData)
-      .catch(() =>
-        toast({ title: "Fout", description: "Kon deze klant niet laden.", variant: "destructive" }),
-      )
+      .then((d) => {
+        setData(d);
+        setLaadFout(null);
+      })
+      .catch((err: unknown) => {
+        const reden = parseApiError(err, "Kon deze klant niet laden.");
+        setLaadFout(reden);
+        toast({ title: "Fout", description: reden, variant: "destructive" });
+      })
       .finally(() => setLoading(false));
   }, [id, toast]);
 
-  useEffect(load, [load]);
+  // Niet `useEffect(load, ...)`: load geeft een promise terug, en React neemt
+  // de return van een effect als opruimfunctie.
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Zonder deze tak bleef een mislukte lading een eeuwige spinner, met alleen
+  // een melding die na een paar seconden verdween.
+  if (!data && laadFout) {
+    return (
+      <LoadError
+        message={laadFout}
+        onRetry={() => {
+          setLoading(true);
+          setLaadFout(null);
+          load();
+        }}
+      />
+    );
+  }
 
   if (loading || !data) {
     return (

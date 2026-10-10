@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { AdminGuard } from "@/components/admin/admin-guard";
-import { adminApi, type AdminSubscription } from "@/lib/api";
+import { adminApi, type AdminSubscription, parseApiError } from "@/lib/api";
 
 const dag = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("nl-NL") : "—");
 
@@ -22,6 +23,7 @@ function AbonnementenInner() {
     monthly_total: string;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState<string | null>(null);
 
   // setLoading staat bewust niet hier: loading begint al op true, en een
   // synchrone setState in een effect kost een extra rendercyclus. De
@@ -29,14 +31,38 @@ function AbonnementenInner() {
   const load = useCallback(() => {
     adminApi
       .subscriptions()
-      .then(setData)
-      .catch(() =>
-        toast({ title: "Fout", description: "Kon abonnementen niet laden.", variant: "destructive" }),
-      )
+      .then((d) => {
+        setData(d);
+        setLaadFout(null);
+      })
+      .catch((err: unknown) => {
+        const reden = parseApiError(err, "Kon abonnementen niet laden.");
+        setLaadFout(reden);
+        toast({ title: "Fout", description: reden, variant: "destructive" });
+      })
       .finally(() => setLoading(false));
   }, [toast]);
 
-  useEffect(load, [load]);
+  // Niet `useEffect(load, ...)`: load geeft een promise terug, en React neemt
+  // de return van een effect als opruimfunctie.
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Zonder deze tak bleef een mislukte lading een eeuwige spinner, met alleen
+  // een melding die na een paar seconden verdween.
+  if (!data && laadFout) {
+    return (
+      <LoadError
+        message={laadFout}
+        onRetry={() => {
+          setLoading(true);
+          setLaadFout(null);
+          load();
+        }}
+      />
+    );
+  }
 
   if (loading || !data) {
     return (

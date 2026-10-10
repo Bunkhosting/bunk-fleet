@@ -28,6 +28,8 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   alias ControlPlane.Credits
   alias ControlPlane.Mollie
 
+  @dag_ms 24 * 60 * 60 * 1000
+
   # Mollie states that mean the money will never arrive. Anything else is either
   # paid or still in flight, and a topup in flight stays pending.
   @unpaid_terminal ["expired", "canceled", "failed"]
@@ -57,15 +59,29 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   def verzoen(ouder_dan_seconden \\ 900) do
     openstaand = Credits.openstaande_topups_om_te_verzoenen(ouder_dan_seconden)
 
-    Enum.each(openstaand, fn topup ->
-      afhandelen(
-        topup.mollie_payment_id,
-        Mollie.get_payment(topup.mollie_payment_id),
-        "verzoening"
-      )
-    end)
+    Enum.each(openstaand, &verzoen_een/1)
 
     length(openstaand)
+  end
+
+  # Eén rij die faalt mag de rest niet tegenhouden. De rijen komen oudste
+  # eerst, dus een rij die altijd faalde (een exceptie in het bijschrijven, een
+  # exit uit de database) hield elke ronde alles daarachter tegen -- ook de
+  # betalingen die gewoon bijgeschreven konden worden.
+  defp verzoen_een(topup) do
+    afhandelen(
+      topup.mollie_payment_id,
+      Mollie.get_payment(topup.mollie_payment_id),
+      "verzoening"
+    )
+  rescue
+    e ->
+      Logger.error(
+        "mollie verzoening van #{topup.mollie_payment_id} faalde: #{Exception.message(e)}"
+      )
+  catch
+    :exit, reden ->
+      Logger.error("mollie verzoening van #{topup.mollie_payment_id} faalde: #{inspect(reden)}")
   end
 
   @doc """
@@ -214,8 +230,36 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
     :ok
   end
 
-  defp credited(payment_id, {:error, :amount_mismatch}, bron),
-    do: Logger.error("mollie #{bron} amount mismatch for #{payment_id}")
+  # Betaald, maar een ander bedrag dan de opwaardering. Er wordt niets
+  # bijgeschreven (welk bedrag zou kloppen?), en dat was alleen een logregel:
+  # de rij bleef openstaan, de verzoening vroeg hem elke ronde opnieuw na, en
+  # niemand wist dat een klant betaald had zonder tegoed. Nu een melding, ten
+  # hoogste één per betaling per dag -- de rij blijft openstaan tot iemand hem
+  # afhandelt, en elke ronde een mail zou de melding zelf onleesbaar maken.
+  defp credited(payment_id, {:error, :amount_mismatch}, bron) do
+    Logger.error("mollie #{bron} amount mismatch for #{payment_id}")
+
+    if ControlPlane.RateLimiter.hit("mollie-bedrag:" <> payment_id, 1, @dag_ms) == :ok do
+      ControlPlane.Notifier.deliver_operational_alert(
+        "Betaling met een ander bedrag dan de opwaardering (#{payment_id})",
+        """
+        Mollie meldt betaling #{payment_id} als betaald, maar het bedrag klopt niet
+        met de opwaardering die erbij hoort. Er is niets bijgeschreven.
+
+        Zoek de betaling op in het Mollie-dashboard en boek wat de klant werkelijk
+        betaalde met de hand bij (beheer > gebruikers > tegoed). Zet daarna de
+        opwaardering op cancelled, anders blijft de verzoening hem nalopen en komt
+        deze melding elke dag terug.
+
+        Dit hoort niet voor te komen: het bedrag gaat van ons naar Mollie en niet
+        andersom. Komt het toch langs, kijk dan of iemand de betaling in Mollie
+        heeft aangepast.
+        """
+      )
+    end
+
+    :ok
+  end
 
   defp credited(_payment_id, other, bron),
     do: Logger.warning("mollie #{bron} credit: #{inspect(other)}")

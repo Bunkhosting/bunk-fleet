@@ -1,14 +1,14 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw, Download } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/use-toast";
 import { AdminGuard } from "@/components/admin/admin-guard";
-import { adminApi, type AdminRevenue } from "@/lib/api";
+import { adminApi, type AdminRevenue, parseApiError } from "@/lib/api";
 
 // Een cel die met =, +, - of @ begint wordt door Excel en LibreOffice als
 // formule uitgevoerd, niet als tekst. De klantkolom is een e-mailadres en dat
@@ -38,9 +38,9 @@ function vandaag() {
 }
 
 function OmzetInner() {
-  const { toast } = useToast();
   const [data, setData] = useState<AdminRevenue | null>(null);
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState<string | null>(null);
   const [from, setFrom] = useState(jaarBegin());
   const [to, setTo] = useState(vandaag());
 
@@ -50,12 +50,19 @@ function OmzetInner() {
   const load = useCallback(() => {
     adminApi
       .revenue(from, to)
-      .then(setData)
-      .catch(() =>
-        toast({ title: "Fout", description: "Kon de omzet niet laden.", variant: "destructive" }),
-      )
+      .then((d) => {
+        setData(d);
+        setLaadFout(null);
+      })
+      .catch((err: unknown) => {
+        // De cijfers van de vorige periode weg. Ze bleven staan onder de nieuwe
+        // datums, en de CSV-knop exporteerde ze ook -- voor een btw-aangifte
+        // erger dan geen cijfers.
+        setData(null);
+        setLaadFout(parseApiError(err, "De omzet kon niet worden opgehaald."));
+      })
       .finally(() => setLoading(false));
-  }, [from, to, toast]);
+  }, [from, to]);
 
   useEffect(() => {
     load();
@@ -117,7 +124,15 @@ function OmzetInner() {
         </div>
       </PageHeader>
 
-      {loading || !data ? (
+      {laadFout && !loading ? (
+        <LoadError
+          message={laadFout}
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
+      ) : loading || !data ? (
         <div className="flex justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>

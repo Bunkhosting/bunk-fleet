@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
@@ -18,14 +19,22 @@ function VpsInner() {
   const { toast } = useToast();
   const [vpses, setVpses] = useState<AdminVps[]>([]);
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState(false);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
 
   const load = () =>
     adminApi
       .vpses()
-      .then((all) => setVpses(all.filter((v) => v.status !== "deleted")))
-      .catch(() => toast({ title: "Fout", description: "Kon VPS'en niet laden.", variant: "destructive" }))
+      .then((d) => {
+        setVpses(d.filter((v) => v.status !== "deleted"));
+        setLaadFout(false);
+      })
+      .catch(() => {
+        // Een lege tabel na een mislukte lading leest als "er is niets".
+        setLaadFout(true);
+        toast({ title: "Fout", description: "Kon VPS'en niet laden.", variant: "destructive" });
+      })
       .finally(() => setLoading(false));
 
   useEffect(() => {
@@ -93,6 +102,16 @@ function VpsInner() {
           <RefreshCw className="h-4 w-4" /> Ververs
         </Button>
       </PageHeader>
+
+      {laadFout && (
+        <LoadError
+          message="De VPS'en konden niet worden opgehaald. Wat hieronder staat is niet volledig."
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
+      )}
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

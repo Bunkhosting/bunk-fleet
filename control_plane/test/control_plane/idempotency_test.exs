@@ -66,4 +66,18 @@ defmodule ControlPlane.IdempotencyTest do
     assert Idempotency.ruim_op() == 1
     assert [%Key{key: "vers"}] = Repo.all(from k in Key, where: k.user_id == ^u.id)
   end
+
+  # finish/2 gooide zijn uitkomst weg. Bleef de sleutel op in_flight staan,
+  # dan nam een herhaling hem na tien minuten over en ontstond een tweede VPS.
+  test "een sleutel die niet afgesloten kan worden, valt op in plaats van stil", %{user: u} do
+    assert {:ok, {:claimed, rij}} = Idempotency.claim(u.id, "weg-onder-de-handen", @scope)
+    Repo.delete!(rij)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert Idempotency.finish(rij, Ecto.UUID.generate(), 2) == :ok
+      end)
+
+    assert log =~ "niet afgesloten"
+  end
 end

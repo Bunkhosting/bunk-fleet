@@ -6,24 +6,30 @@ import { Loader2, ArrowLeft, Server, MailCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authApi } from "@/lib/api";
+import { authApi, parseApiError } from "@/lib/api";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [submitted, setSubmitted] = React.useState(false);
+  const [fout, setFout] = React.useState<string | null>(null);
 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFout(null);
     setLoading(true);
     try {
       await authApi.requestPasswordReset(email);
-    } catch {
-      // Altijd succes tonen — geen user-enumeration
+      setSubmitted(true);
+    } catch (err: unknown) {
+      // De server antwoordt voor elk adres hetzelfde (200), bestaand of niet;
+      // daar zit de bescherming tegen het aftasten van accounts. Een fout hier
+      // is dus nooit "dit adres bestaat niet" maar een storing of een rem, en
+      // die verzwijgen liet iemand wachten op een mail die nooit kwam.
+      setFout(parseApiError(err, "Het versturen is niet gelukt. Probeer het zo opnieuw."));
     } finally {
       setLoading(false);
-      setSubmitted(true);
     }
   };
 
@@ -85,6 +91,11 @@ export default function ForgotPasswordPage() {
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
                 </div>
+                {fout && (
+                  <p role="alert" className="text-sm text-destructive-text">
+                    {fout}
+                  </p>
+                )}
                 <Button type="submit" className="w-full py-5" disabled={loading}>
                   {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Resetlink versturen

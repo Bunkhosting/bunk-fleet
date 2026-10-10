@@ -39,8 +39,9 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
         <h1 className="text-2xl font-display font-bold">Er ging iets mis</h1>
         <p className="max-w-md text-sm text-muted-foreground">
           Er is een onverwachte fout opgetreden bij het laden van deze pagina.
-          Probeer het opnieuw. Blijft het probleem bestaan, neem dan contact op
-          met support en vermeld bovenstaande referentie.
+          Er is niets verloren gegaan. Probeer het opnieuw; blijft het probleem
+          bestaan, mail dan support@bunkhosting.nl
+          {error.digest ? " en vermeld de referentie hieronder." : "."}
         </p>
         {error.digest && (
           <p className="font-mono text-xs text-muted-foreground">

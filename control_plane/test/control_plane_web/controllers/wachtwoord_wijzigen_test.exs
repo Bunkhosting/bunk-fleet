@@ -52,7 +52,7 @@ defmodule ControlPlaneWeb.WachtwoordWijzigenTest do
       })
       |> json_response(422)
 
-    assert resp["error"] == "invalid_credentials"
+    assert resp["error"] == "wrong_current_password"
     assert Accounts.get_user_by_email_and_password(u.email, @oud)
   end
 
@@ -65,7 +65,7 @@ defmodule ControlPlaneWeb.WachtwoordWijzigenTest do
       |> patch(~p"/api/v1/auth/password", %{"current_password" => @oud, "password" => "kort"})
       |> json_response(422)
 
-    assert resp["error"] == "invalid_password"
+    assert resp["error"] == "weak_password"
     assert resp["errors"]["password"]
     assert Accounts.get_user_by_email_and_password(u.email, @oud)
   end

@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useCallback, useEffect, useState } from "react";
@@ -117,13 +118,18 @@ function RegiosInner() {
   const [code, setCode] = useState("");
   const [naam, setNaam] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [laadFout, setLaadFout] = useState(false);
 
   const laden = useCallback(() => {
     adminApi
       .regions()
-      .then(setRegions)
+      .then((r) => {
+        setRegions(r);
+        setLaadFout(false);
+      })
       .catch(() => {
-        setRegions([]);
+        // Niet leeg maken: een lege lijst leest als "er zijn geen locaties".
+        setLaadFout(true);
         toast({ title: "Fout", description: "Kon de locaties niet laden.", variant: "destructive" });
       });
   }, [toast]);
@@ -272,6 +278,10 @@ function RegiosInner() {
           <RefreshCw className="h-4 w-4" /> Vernieuwen
         </Button>
       </PageHeader>
+
+      {laadFout && (
+        <LoadError message="De locaties konden niet worden opgehaald." onRetry={laden} />
+      )}
 
       <Card>
         <CardContent className="space-y-4 p-6">

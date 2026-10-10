@@ -59,6 +59,15 @@ const ERROR_MESSAGES: Record<string, string> = {
   rate_limited: "Te veel pogingen. Probeer het over een minuutje opnieuw.",
   captcha_failed: "De verificatie is niet gelukt. Probeer het opnieuw.",
   invalid_password: "Het opgegeven wachtwoord klopt niet.",
+  wrong_current_password: "Je huidige wachtwoord klopt niet.",
+  weak_password: "Je nieuwe wachtwoord moet tussen de 12 en 72 tekens lang zijn.",
+  missing_password: "Vul je wachtwoord in.",
+  missing_credentials: "Vul je e-mailadres en wachtwoord in.",
+  missing_email: "Vul je e-mailadres in.",
+  missing_code: "Vul de code in.",
+  missing_token: "Deze link is onvolledig. Gebruik de link uit de e-mail.",
+  missing_token_or_password: "Deze link is onvolledig, of je wachtwoord ontbreekt.",
+  confirmation_failed: "Je e-mailadres kon niet bevestigd worden. Vraag een nieuwe link aan.",
   totp_already_enabled: "Tweestapsverificatie staat al aan voor dit account.",
   challenge_expired: "Dit duurde te lang. Begin opnieuw.",
   invalid_passkey: "Deze passkey kon niet gelezen worden. Probeer het opnieuw.",
@@ -103,6 +112,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_status_provisioning: "De VPS wordt nog aangemaakt.",
   invalid_status_restoring: "Er wordt een back-up teruggezet; wacht tot dat klaar is.",
   invalid_status_deleted: "Deze VPS is verwijderd.",
+  invalid_status_deleting: "Deze VPS wordt verwijderd.",
+  invalid_status_failed: "Deze VPS kon niet worden aangemaakt. Verwijder hem en bestel opnieuw.",
+  invalid_status_paused: "De VPS staat gepauzeerd.",
+  invalid_idempotency_key: "Deze bestelling kon niet worden geplaatst. Herlaad de pagina en probeer het opnieuw.",
   already_deleting: "Deze VPS wordt al verwijderd.",
   not_provisioned: "Deze VPS is nog niet klaar.",
   vps_not_active: "Dit kan alleen bij een draaiende VPS.",
@@ -134,11 +147,31 @@ const ERROR_MESSAGES: Record<string, string> = {
   topup_not_found: "Deze betaling bestaat niet.",
   not_pending: "Deze betaling staat niet meer open.",
   invalid_date: "Deze datum kan niet.",
+  invalid_datetime: "Deze datum of tijd kan niet.",
+  invalid_window: "De begindatum moet vóór de einddatum liggen.",
+  update_failed: "Opslaan is niet gelukt.",
+  delete_failed: "Verwijderen is niet gelukt.",
+  supernet_exhausted: "Er is geen vrij VPS-netwerk meer voor een nieuwe node.",
   no_node: "Er is geen node waar dit op kan draaien.",
 
   // Geldt overal: een verzoek dat groter is dan wat we aannemen.
   input_too_large: "Wat je verstuurde is te groot.",
+  payload_too_large: "Wat je verstuurde is te groot.",
+  bad_request: "Dit verzoek kon de server niet lezen. Herlaad de pagina en probeer het opnieuw.",
+  method_not_allowed: "Dit kan zo niet. Herlaad de pagina en probeer het opnieuw.",
+  // Een crash aan onze kant. parseApiError zet hier liever de zin van de
+  // aanroeper voor ("Kon de VPS niet starten."); deze staat er voor wie de
+  // code zonder context opzoekt.
+  internal_error: "Er ging aan onze kant iets mis. Probeer het zo opnieuw.",
 };
+
+// Fouten aan onze kant (500, 502, 503) en een server die niet antwoordt. Hier
+// staat bewust geen code-vertaling tegenover: wat de klant moet weten is dat
+// het niet aan hem ligt en dat er niets kwijt is. De contextuele zin van de
+// aanroeper ("kon de VPS niet starten") gaat ervoor; deze komt erachter.
+const SERVERFOUT = "Er ging aan onze kant iets mis. Probeer het zo opnieuw.";
+const GEEN_ANTWOORD = "De server reageert niet. Probeer het zo opnieuw.";
+const GEEN_VERBINDING = "Geen verbinding met de server. Controleer je internet en probeer het opnieuw.";
 
 /**
  * Turns an unknown thrown value (usually an Axios error) into a human-readable
@@ -147,29 +180,46 @@ const ERROR_MESSAGES: Record<string, string> = {
  * otherwise returns the caller's contextual fallback. Never surfaces raw codes.
  */
 export function parseApiError(err: unknown, fallback: string): string {
-  if (axios.isAxiosError(err)) {
-    const data = err.response?.data as Record<string, unknown> | string | undefined;
-    if (data && typeof data === "object") {
-      // Only surface a short, plain-text detail — never an HTML error page body.
-      if (
-        typeof data.detail === "string" &&
-        data.detail.length > 0 &&
-        data.detail.length < 200 &&
-        !data.detail.includes("<")
-      ) {
-        return data.detail;
-      }
-      if (typeof data.error === "string") return ERROR_MESSAGES[data.error] ?? fallback;
-      const errors = data.errors;
-      if (errors && typeof errors === "object") {
-        const first = Object.values(errors as Record<string, unknown>)[0];
-        if (Array.isArray(first) && typeof first[0] === "string") return first[0];
-        if (typeof first === "string") return first;
-      }
+  if (!axios.isAxiosError(err)) return fallback;
+
+  // Geen antwoord: de server is onbereikbaar of te traag. Eerst, want dan is
+  // er ook geen body om naar te kijken.
+  if (!err.response) {
+    if (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT") return GEEN_ANTWOORD;
+    if (err.code === "ERR_NETWORK") return GEEN_VERBINDING;
+    return fallback;
+  }
+
+  const status = err.response.status;
+  const data = err.response.data as Record<string, unknown> | string | undefined;
+
+  // Een bekende code gaat voor alles. Hij is van ons en heeft een Nederlandse
+  // zin; een `detail` ernaast is soms Engels ("code is required").
+  if (data && typeof data === "object" && typeof data.error === "string" && data.error !== "internal_error") {
+    const zin = ERROR_MESSAGES[data.error];
+    if (zin) return zin;
+  }
+
+  // Aan onze kant mis: nooit de tekst uit het antwoord (dat was "Internal
+  // Server Error", of een HTML-pagina van Cloudflare), wel de zin van de
+  // aanroeper met de geruststelling erachter.
+  if (status >= 500) return fallback === SERVERFOUT ? fallback : `${fallback} ${SERVERFOUT}`;
+  if (status === 429) return ERROR_MESSAGES.rate_limited;
+
+  if (data && typeof data === "object") {
+    // Een korte zin zonder code die we kennen. Alleen platte tekst, nooit een
+    // HTML-pagina.
+    if (
+      typeof data.detail === "string" &&
+      data.detail.length > 0 &&
+      data.detail.length < 200 &&
+      !data.detail.includes("<")
+    ) {
+      return data.detail;
     }
-    if (err.code === "ERR_NETWORK") {
-      return "Geen verbinding met de server. Probeer het later opnieuw.";
-    }
+    // Changeset-fouten (`errors: {veld: [...]}`) zijn Engelse Ecto-zinnen. Een
+    // formulier dat ze per veld wil tonen leest ze zelf (zie register en
+    // reset-password); hier wint de zin van de aanroeper.
   }
   return fallback;
 }
@@ -177,6 +227,12 @@ export function parseApiError(err: unknown, fallback: string): string {
 const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
   headers: { "Content-Type": "application/json" },
+  // Zonder grens draaide een knop bij een hangende server tot de browser of
+  // Cloudflare het opgaf (ruim anderhalve minuut), en kreeg de klant daarna een
+  // HTML-foutpagina als antwoord. Niets in de API hoort zo lang te duren:
+  // aanmaken, back-ups en terugzetten gaan als opdracht naar de node en
+  // antwoorden meteen.
+  timeout: 30_000,
   // Send the HttpOnly session cookie with every request (needed for a same-site
   // cross-origin API host; a no-op for the same-origin default).
   withCredentials: true,

@@ -84,4 +84,70 @@ defmodule ControlPlaneWeb.ErrorCodesTest do
       assert resp["error"] =~ ~r/\A[a-z][a-z0-9_]*\z/
     end
   end
+
+  describe "every code has a Dutch sentence in the dashboard" do
+    # The frontend falls back to a contextual sentence for a code it does not
+    # know, so a missing entry never breaks loudly -- the customer just reads
+    # "Kon de VPS niet starten." instead of why. That is how
+    # "weak_password" came to be shown as "het opgegeven wachtwoord klopt
+    # niet": nobody looked. This test does.
+    @frontend "../frontend/src/lib/api.ts"
+
+    # Codes no dashboard screen ever receives: the node agent's own API and
+    # the enrolment handshake. They are read by a program, not a person.
+    @machine_only ~w(invalid_heartbeat missing_node_id node_id_mismatch)
+
+    defp frontend_codes(source) do
+      [_, body] = Regex.run(~r/const ERROR_MESSAGES[^{]*\{(.*?)\n\};/s, source)
+      Regex.scan(~r/^\s*([a-z][a-z0-9_]*):/m, body, capture: :all_but_first) |> List.flatten()
+    end
+
+    defp all_codes do
+      vps_statuses = Ecto.Enum.values(ControlPlane.Fleet.Vps, :status)
+
+      literal =
+        declared_codes()
+        |> Enum.flat_map(fn code ->
+          case String.split(code, "\#{") do
+            [prefix, _] -> Enum.map(vps_statuses, &(prefix <> Atom.to_string(&1)))
+            [_] -> [code]
+          end
+        end)
+
+      fouten =
+        ControlPlaneWeb.Fouten.bekend()
+        |> Enum.map(fn reden ->
+          conn = Phoenix.ConnTest.build_conn() |> ControlPlaneWeb.Fouten.fout(reden)
+          Jason.decode!(conn.resp_body)["error"]
+        end)
+
+      error_json =
+        for s <- ~w(400 404 413 500),
+            do: ControlPlaneWeb.ErrorJSON.render(s <> ".json", %{}).error
+
+      (literal ++ fouten ++ error_json)
+      |> Enum.reject(&(&1 in html_form_messages()))
+      |> Enum.uniq()
+    end
+
+    test "no code reaches a customer untranslated" do
+      case File.read(@frontend) do
+        {:ok, source} ->
+          known = MapSet.new(frontend_codes(source))
+
+          missing =
+            all_codes()
+            |> Enum.reject(&(MapSet.member?(known, &1) or &1 in @machine_only))
+            |> Enum.sort()
+
+          assert missing == [],
+                 "codes without a sentence in ERROR_MESSAGES (#{@frontend}): #{inspect(missing)}"
+
+        {:error, :enoent} ->
+          # The gate on the build machine mounts only control_plane/. CI has
+          # the whole repository and runs this for real.
+          IO.puts("skipped: #{@frontend} is not in this checkout")
+      end
+    end
+  end
 end

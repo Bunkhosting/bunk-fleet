@@ -429,10 +429,17 @@ defmodule ControlPlane.Provisioning do
   caller's, so a user cannot provision a VPS into someone else's account. Returns
   `{:error, :quota_exceeded}` when the owner already holds the maximum number of
   live (non-`:deleted`/non-`:failed`) VPSes.
+
+  `afschrijving:` is de grootboekregel waarmee de klant voor deze VPS betaalde.
+  Hij wordt in dezelfde transactie als de VPS aan die VPS gekoppeld. Gebeurde
+  dat erna, los, dan kon de VPS bestaan terwijl de afschrijving nog verweesd
+  leek -- en dan betaalde `Credits.refund_orphan_charges/1` hem tien minuten
+  later terug: een gratis VPS, en een klant die "mislukt" las en opnieuw
+  bestelde.
   """
-  @spec create_vps_for_owner(%{id: binary(), email: binary()}, map()) ::
+  @spec create_vps_for_owner(%{id: binary(), email: binary()}, map(), keyword()) ::
           {:ok, dispatch()} | {:error, refusal() | Ecto.Changeset.t()}
-  def create_vps_for_owner(%{id: owner_id, email: email}, attrs) do
+  def create_vps_for_owner(%{id: owner_id, email: email}, attrs, opts \\ []) do
     full =
       attrs
       |> Map.drop([:owner_id, "owner_id", :owner_email, "owner_email"])
@@ -446,7 +453,7 @@ defmodule ControlPlane.Provisioning do
     # this enclosing transaction, and the following `mark_vps_failed`/reservation-
     # release update would raise "current transaction is aborted" → HTTP 500
     # instead of a clean {:error, :no_capacity} (→ 409).
-    with {:ok, %Vps{} = vps} <- insert_within_quota(owner_id, full),
+    with {:ok, %Vps{} = vps} <- insert_within_quota(owner_id, full, opts[:afschrijving]),
          {:ok, %{vps: placed}} <- place_and_dispatch(vps, placement_request(full), full) do
       {:ok, %{vps: placed}}
     end
@@ -462,16 +469,28 @@ defmodule ControlPlane.Provisioning do
   # daartussen weg (een uitrol, een crash), dan draaide er een VPS die na de
   # eerste maand nooit meer werd gefactureerd -- en niemand die het zag. Mislukt
   # het plaatsen hierna, dan zegt place_and_dispatch het weer op.
-  defp insert_within_quota(owner_id, attrs) do
+  defp insert_within_quota(owner_id, attrs, afschrijving) do
     Repo.transaction(fn ->
       :ok = Locks.take(Repo, :owner_quota, owner_id)
 
       if count_live_vpses(owner_id) >= max_vpses_per_owner() do
         Repo.rollback(:quota_exceeded)
       else
-        attrs |> insert_or_rollback() |> met_abonnement(owner_id, attrs)
+        attrs
+        |> insert_or_rollback()
+        |> met_abonnement(owner_id, attrs)
+        |> met_afschrijving(afschrijving)
       end
     end)
+  end
+
+  defp met_afschrijving(vps, nil), do: vps
+
+  defp met_afschrijving(vps, afschrijving) do
+    case Credits.attach_vps(afschrijving, vps.id) do
+      {:ok, _} -> vps
+      {:error, reden} -> Repo.rollback(reden)
+    end
   end
 
   defp met_abonnement(vps, owner_id, attrs) do

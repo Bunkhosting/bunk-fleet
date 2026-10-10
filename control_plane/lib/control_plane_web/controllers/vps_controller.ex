@@ -120,17 +120,15 @@ defmodule ControlPlaneWeb.VpsController do
          %Package{} = pkg <- Fleet.package_for_specs(attrs.vcpu, attrs.ram_mb, attrs.disk_gb),
          price = package_price_cents(pkg),
          {:ok, charge} <- Credits.charge(user.id, price, "vps_charge", "VPS #{pkg.name}"),
+         # The charge had to come first — the wallet is checked and debited
+         # before anything is provisioned. It is tied to the VPS inside the
+         # transaction that creates it (see Provisioning.create_vps_for_owner/3).
          {:ok, %{vps: vps}} <-
            charge_safe_create(
              user,
              attrs |> Map.put(:package_id, pkg.id) |> Map.put(:withdrawal_waiver_at, Clock.now()),
              charge
-           ),
-         # The charge had to come first — the wallet is checked and debited before
-         # anything is provisioned — so only now can it be told which machine it
-         # paid for. Until this lands the entry is an orphan, which is exactly
-         # what Credits.refund_orphan_charges/1 looks for.
-         {:ok, _} <- Credits.attach_vps(charge, vps.id) do
+           ) do
       antwoord =
         conn
         |> put_status(:created)
@@ -162,7 +160,7 @@ defmodule ControlPlaneWeb.VpsController do
   # `Credits.refund_orphan_charges/1` hem tien minuten later nóg een keer. Dat
   # is op productie gebeurd.
   defp charge_safe_create(user, attrs, charge) do
-    case Provisioning.create_vps_for_owner(user, attrs) do
+    case Provisioning.create_vps_for_owner(user, attrs, afschrijving: charge) do
       {:ok, _} = ok ->
         ok
 

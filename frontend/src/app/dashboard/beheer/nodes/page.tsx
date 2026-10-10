@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
@@ -51,6 +52,7 @@ function NodesInner() {
   const { toast } = useToast();
   const [nodes, setNodes] = useState<AdminNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState(false);
 
   const [removing, setRemoving] = useState<string | null>(null);
   const [draining, setDraining] = useState<string | null>(null);
@@ -114,8 +116,15 @@ function NodesInner() {
   const load = () =>
     adminApi
       .nodes()
-      .then(setNodes)
-      .catch(() => toast({ title: "Fout", description: "Kon nodes niet laden.", variant: "destructive" }))
+      .then((d) => {
+        setNodes(d);
+        setLaadFout(false);
+      })
+      .catch(() => {
+        // Een lege tabel na een mislukte lading leest als "er is niets".
+        setLaadFout(true);
+        toast({ title: "Fout", description: "Kon nodes niet laden.", variant: "destructive" });
+      })
       .finally(() => setLoading(false));
 
   const toggleDrain = async (n: AdminNode) => {
@@ -137,10 +146,13 @@ function NodesInner() {
       const status = (e as { response?: { status?: number } })?.response?.status;
       toast({
         title: closing ? "Afsluiten mislukt" : "Heropenen mislukt",
-        description:
+        // De code van de server eerst; de 409-zin alleen als hij geen code gaf.
+        description: parseApiError(
+          e,
           status === 409
             ? "Deze node is offline — die komt vanzelf terug zodra hij weer meldt."
             : "Kon de status niet wijzigen.",
+        ),
         variant: "destructive",
       });
     } finally {
@@ -165,10 +177,10 @@ function NodesInner() {
       const status = (e as { response?: { status?: number } })?.response?.status;
       toast({
         title: "Verwijderen mislukt",
-        description:
-          status === 409
-            ? "Deze node host nog VPS'en — verwijder die eerst."
-            : "Kon de node niet verwijderen.",
+        description: parseApiError(
+          e,
+          status === 409 ? "Deze node host nog VPS'en — verwijder die eerst." : "Kon de node niet verwijderen.",
+        ),
         variant: "destructive",
       });
     } finally {
@@ -224,6 +236,16 @@ function NodesInner() {
           </Button>
         </div>
       </PageHeader>
+
+      {laadFout && (
+        <LoadError
+          message="De nodes konden niet worden opgehaald. Wat hieronder staat is niet volledig."
+          onRetry={() => {
+            setLoading(true);
+            load();
+          }}
+        />
+      )}
 
       {enroll && (
         <Card className="border-primary/40">

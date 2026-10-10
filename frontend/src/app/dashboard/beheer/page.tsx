@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -23,14 +24,20 @@ function Stat({ label, value, sub }: { label: string; value: string | number; su
 function Overview() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
+  // Een mislukte lading gaf een lege pagina zonder één woord uitleg.
+  const [laadFout, setLaadFout] = useState(false);
+  const [poging, setPoging] = useState(0);
 
   useEffect(() => {
     adminApi
       .stats()
-      .then(setStats)
-      .catch(() => {})
+      .then((st) => {
+        setStats(st);
+        setLaadFout(false);
+      })
+      .catch(() => setLaadFout(true))
       .finally(() => setLoading(false));
-  }, []);
+  }, [poging]);
 
   if (loading) {
     return (
@@ -49,6 +56,16 @@ function Overview() {
           </Link>
         </Button>
       </PageHeader>
+
+      {laadFout && (
+        <LoadError
+          message="Het overzicht kon niet worden opgehaald."
+          onRetry={() => {
+            setLoading(true);
+            setPoging((p) => p + 1);
+          }}
+        />
+      )}
 
       {stats && (
         <div className="grid gap-6 lg:grid-cols-2">

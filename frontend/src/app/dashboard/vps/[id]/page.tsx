@@ -1,6 +1,7 @@
 "use client";
 
 import { usePolling } from "@/hooks/use-polling";
+import { LoadError } from "@/components/feedback/load-error";
 import { useNieuwste } from "@/hooks/use-nieuwste";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -72,6 +73,11 @@ export default function VpsDetailPage() {
   const [pollUntil, setPollUntil] = useState<number | null>(null);
 
   const nieuwste = useNieuwste();
+  // Waarom er geen VPS op het scherm staat. Een storing bij het eerste laden
+  // las als "VPS niet gevonden": een klant die schrok dat zijn server weg was,
+  // terwijl het control plane even haperde.
+  const [laadFout, setLaadFout] = useState<"niet_gevonden" | "storing" | null>(null);
+  const [backupsFout, setBackupsFout] = useState(false);
 
   const fetchVps = useCallback(
     async (silent = false) => {
@@ -80,8 +86,15 @@ export default function VpsDetailPage() {
       const isNieuwste = nieuwste();
       try {
         const response = await vpsApi.get(id);
-        if (isNieuwste()) setVps(response.data);
-      } catch {
+        if (isNieuwste()) {
+          setVps(response.data);
+          setLaadFout(null);
+        }
+      } catch (err: unknown) {
+        if (isNieuwste()) {
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          setLaadFout(status === 404 ? "niet_gevonden" : "storing");
+        }
         if (!silent && isNieuwste()) {
           toast({
             title: "Fout",
@@ -99,9 +112,13 @@ export default function VpsDetailPage() {
   const fetchBackups = useCallback(async () => {
     try {
       setBackups(await vpsApi.backups(id));
+      setBackupsFout(false);
     } catch {
       // Restore points are a panel on a page, not the page: failing to load them
-      // should not bury the rest of it under an error.
+      // should not bury the rest of it under an error. But the panel must say
+      // so -- an empty list read as "you have no backups", which is untrue and
+      // exactly the wrong thing to believe right before something risky.
+      setBackupsFout(true);
     }
   }, [id]);
 
@@ -144,10 +161,14 @@ export default function VpsDetailPage() {
       const status = (e as { response?: { status?: number } })?.response?.status;
       toast({
         title: "Terugzetten mislukt",
-        description:
+        // De code van de server zegt meer (geschorst, back-up niet bruikbaar,
+        // node onbereikbaar); de algemene zin alleen als die er niet is.
+        description: parseApiError(
+          e,
           status === 409
             ? "Deze VPS is nu ergens anders mee bezig. Probeer het zo opnieuw."
             : "Kon het terugzetten niet starten.",
+        ),
         variant: "destructive",
       });
     } finally {
@@ -298,6 +319,21 @@ export default function VpsDetailPage() {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!vps && laadFout === "storing") {
+    return (
+      <div className="mx-auto max-w-4xl space-y-6">
+        <LoadError
+          message="Je VPS kon niet worden opgehaald. Er is niets mee gebeurd; probeer het zo opnieuw."
+          onRetry={() => {
+            setLoading(true);
+            fetchVps();
+            fetchBackups();
+          }}
+        />
       </div>
     );
   }
@@ -695,7 +731,14 @@ export default function VpsDetailPage() {
               Nu een back-up maken
             </Button>
 
-            {backups.length === 0 ? (
+            {backupsFout ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>Je back-ups konden niet worden opgehaald.</span>
+                <Button variant="link" size="sm" className="h-auto p-0" onClick={() => fetchBackups()}>
+                  Opnieuw proberen
+                </Button>
+              </div>
+            ) : backups.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Nog geen back-up. De eerste volgt vannacht, of maak er nu zelf een.
               </p>

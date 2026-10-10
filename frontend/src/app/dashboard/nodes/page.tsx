@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useCallback, useEffect, useState } from "react";
@@ -358,6 +359,7 @@ export default function MijnNodesPagina() {
   const { toast } = useToast();
   const [nodes, setNodes] = useState<MyNode[] | null>(null);
   const [regions, setRegions] = useState<NodeRegion[]>([]);
+  const [laadFout, setLaadFout] = useState(false);
 
   const laden = useCallback(() => {
     nodeApi
@@ -365,14 +367,28 @@ export default function MijnNodesPagina() {
       .then(({ nodes, regions }) => {
         setNodes(nodes);
         setRegions(regions);
+        setLaadFout(false);
       })
       .catch(() => {
-        setNodes([]);
+        // Niet op [] zetten: dan stond er "je beheert nog geen node".
+        setLaadFout(true);
         toast({ title: "Fout", description: "Kon je nodes niet laden.", variant: "destructive" });
       });
   }, [toast]);
 
   useEffect(() => laden(), [laden]);
+
+  if (nodes === null && laadFout) {
+    return (
+      <LoadError
+        message="Je nodes konden niet worden opgehaald. Er is niets aan veranderd; probeer het zo opnieuw."
+        onRetry={() => {
+          setLaadFout(false);
+          laden();
+        }}
+      />
+    );
+  }
 
   if (nodes === null) {
     return (

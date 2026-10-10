@@ -165,6 +165,38 @@ defmodule ControlPlane.MollieVerzoeningTest do
     assert stand(tr) == :pending
   end
 
+  # Was alleen een logregel, bij elke verzoeningsronde opnieuw: een klant had
+  # betaald zonder tegoed en niemand wist het.
+  test "een afwijkend bedrag wordt gemeld, één keer en niet elke ronde", %{user: user} do
+    ControlPlane.RateLimiter.reset()
+    eerder = Application.get_env(:control_plane, :ops_email)
+    Application.put_env(:control_plane, :ops_email, "ops@bunk.test")
+
+    on_exit(fn ->
+      if eerder,
+        do: Application.put_env(:control_plane, :ops_email, eerder),
+        else: Application.delete_env(:control_plane, :ops_email)
+    end)
+
+    id = "tr_#{System.unique_integer([:positive])}"
+    openstaand(user, 2500, id) |> verouder(3600)
+
+    mollie_zegt(%{
+      "id" => id,
+      "status" => "paid",
+      "amount" => %{"currency" => "EUR", "value" => "250.00"}
+    })
+
+    capture_log(fn -> MollieAfhandeling.verzoen(900) end)
+    # Het onderwerp, niet zomaar de eerste mail: de registratie in de setup
+    # stuurde al een bevestigingsmail.
+    assert_received {:email, %{subject: "[Bunk] Betaling met een ander bedrag" <> _ = onderwerp}}
+    assert onderwerp =~ id
+
+    capture_log(fn -> MollieAfhandeling.verzoen(900) end)
+    refute_received {:email, %{subject: "[Bunk] Betaling met een ander bedrag" <> _}}
+  end
+
   test "een Mollie die niet antwoordt laat alles staan", %{user: user} do
     id = "tr_#{System.unique_integer([:positive])}"
     tr = openstaand(user, 2500, id) |> verouder(3600)

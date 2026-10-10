@@ -124,10 +124,12 @@ function LoginForm() {
       if (axios.isAxiosError(err) && err.response?.data?.passkey_challenge) {
         setMfa((m) => ({ ...m, passkey: err.response!.data.passkey_challenge }));
       }
+      // Een storing of een rem (429) is iets anders dan een geweigerde passkey;
+      // parseApiError zegt welke van de twee het was.
       const msg =
         err instanceof DOMException && err.name === "NotAllowedError"
           ? "Geannuleerd of geen toestemming gegeven."
-          : "Passkey niet geaccepteerd. Probeer het opnieuw of gebruik je authenticator-code.";
+          : parseApiError(err, "Passkey niet geaccepteerd. Probeer het opnieuw of gebruik je authenticator-code.");
       toast({ variant: "destructive", title: "Inloggen mislukt", description: msg });
     } finally {
       setPasskeyBusy(false);
@@ -154,11 +156,14 @@ function LoginForm() {
       setCode("");
       const next = safeNext(searchParams.get("next"));
       router.push(next);
-    } catch {
+    } catch (err: unknown) {
+      // Niet elke fout is een foute code. Bij een rem (te veel pogingen) of
+      // een storing bleef iemand met de juiste code het opnieuw proberen,
+      // omdat hier altijd "ongeldige code" stond.
       toast({
         variant: "destructive",
         title: "Inloggen mislukt",
-        description: "Ongeldige authenticator-code.",
+        description: parseApiError(err, "Ongeldige authenticator-code."),
       });
       setCode("");
     } finally {

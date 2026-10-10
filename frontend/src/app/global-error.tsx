@@ -4,6 +4,7 @@ import * as React from "react";
 
 interface GlobalErrorProps {
   error: Error & { digest?: string };
+  // Next geeft ook reset() mee; hier bewust niet gebruikt, zie de knop.
   reset: () => void;
 }
 
@@ -13,7 +14,7 @@ interface GlobalErrorProps {
  * design-system imports hier zodat ook bij een crash in globals.css of fonts
  * deze fallback nog rendert.
  */
-export default function GlobalError({ error, reset }: GlobalErrorProps) {
+export default function GlobalError({ error }: GlobalErrorProps) {
   React.useEffect(() => {
     console.error("[global error boundary]", error);
   }, [error]);
@@ -33,8 +34,11 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
               ref: {error.digest}
             </p>
           )}
+          {/* Echt herladen. reset() rendert alleen deze boom opnieuw, en wat het
+              RootLayout liet vallen (een chunk die niet laadde, een crash bij
+              het opstarten) valt dan gewoon opnieuw. De knop heet "herladen". */}
           <button
-            onClick={reset}
+            onClick={() => window.location.reload()}
             style={{ padding: "0.6rem 1.25rem", borderRadius: "0.5rem", background: "#f97316", color: "#0a0a0a", border: "none", fontWeight: 600, cursor: "pointer" }}
           >
             Pagina herladen

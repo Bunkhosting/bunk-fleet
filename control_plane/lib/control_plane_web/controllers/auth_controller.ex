@@ -265,18 +265,24 @@ defmodule ControlPlaneWeb.AuthController do
       {:ok, _bijgewerkt} ->
         json(conn, %{detail: "ok"})
 
+      # Eigen codes. Het waren invalid_credentials en invalid_password, en het
+      # scherm zei bij een te kort nieuw wachtwoord "het opgegeven wachtwoord
+      # klopt niet" -- de klant ging zijn huidige wachtwoord zitten controleren.
       {:error, :invalid_current_password} ->
-        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_credentials"})
+        conn |> put_status(:unprocessable_entity) |> json(%{error: "wrong_current_password"})
 
       {:error, changeset} ->
         conn
         |> put_status(:unprocessable_entity)
-        |> json(%{error: "invalid_password", errors: changeset_errors(changeset)})
+        |> json(%{error: "weak_password", errors: changeset_errors(changeset)})
     end
   end
 
   def change_password(conn, _params),
-    do: conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_password"})
+    do:
+      conn
+      |> put_status(:unprocessable_entity)
+      |> json(%{error: "missing_password"})
 
   @doc """
   Revokes every session of the authenticated user ("log out everywhere"), giving a

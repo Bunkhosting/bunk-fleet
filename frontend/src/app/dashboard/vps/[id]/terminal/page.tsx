@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Clipboard, Loader2, WifiOff, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { vpsApi } from "@/lib/api";
+import { vpsApi, parseApiError } from "@/lib/api";
 import type { Vps } from "@/lib/types";
 
 function resolveWsBase(): string {
@@ -137,9 +137,13 @@ export default function VpsTerminalPage() {
       let ticket: string;
       try {
         ({ ticket } = await vpsApi.consoleTicket(id));
-      } catch {
+      } catch (err: unknown) {
         if (destroyed) return;
-        term.writeln("\r\n\x1b[31mGeen console-toegang (is de VPS actief?).\x1b[0m");
+        // De echte reden: geschorst, node onbereikbaar, te veel pogingen. Het
+        // was altijd "is de VPS actief?", ook bij een VPS die gewoon draaide.
+        const reden = parseApiError(err, "Geen console-toegang. Is de VPS actief?");
+        term.writeln(`\r\n\x1b[31m${reden}\x1b[0m`);
+        setErrorMsg(reden);
         setConnState("error");
         return;
       }

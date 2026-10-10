@@ -65,11 +65,18 @@ function BeveiligingContent() {
   const webauthnAvailable =
     typeof window !== "undefined" && typeof window.PublicKeyCredential !== "undefined";
 
+  // Een mislukte lijst is geen lege lijst. Hier stond dan "Geen" -- op de
+  // pagina waar iemand controleert of zijn account goed beveiligd is, en
+  // misschien een passkey zou toevoegen die hij al had.
+  const [passkeysFout, setPasskeysFout] = React.useState(false);
   const loadPasskeys = React.useCallback(() => {
     authApi.passkey
       .list()
-      .then(setPasskeys)
-      .catch(() => setPasskeys([]));
+      .then((lijst) => {
+        setPasskeys(lijst);
+        setPasskeysFout(false);
+      })
+      .catch(() => setPasskeysFout(true));
   }, []);
 
   React.useEffect(() => {
@@ -279,7 +286,13 @@ function BeveiligingContent() {
               autoComplete="new-password"
               value={nieuwWachtwoord}
               onChange={(e) => setNieuwWachtwoord(e.target.value)}
+              minLength={12}
+              maxLength={72}
+              aria-describedby="nieuw-eis"
             />
+            <p id="nieuw-eis" className="text-xs text-muted-foreground">
+              Minimaal 12 tekens.
+            </p>
           </div>
           <div className="space-y-1">
             <Label htmlFor="herhaal">Nogmaals</Label>
@@ -498,9 +511,24 @@ function BeveiligingContent() {
               passkeys?.length ? "bg-green-500/10 text-green-500" : "bg-muted text-muted-foreground"
             }`}
           >
-            {passkeys === null ? "…" : passkeys.length ? `${passkeys.length} actief` : "Geen"}
+            {passkeys === null
+              ? passkeysFout
+                ? "Onbekend"
+                : "…"
+              : passkeys.length
+                ? `${passkeys.length} actief`
+                : "Geen"}
           </span>
         </div>
+
+        {passkeysFout && (
+          <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive-text">
+            <span>Je passkeys konden niet worden opgehaald.</span>
+            <Button variant="link" size="sm" className="h-auto p-0" onClick={loadPasskeys}>
+              Opnieuw proberen
+            </Button>
+          </div>
+        )}
 
         {!webauthnAvailable ? (
           <p className="text-sm text-muted-foreground">Deze browser ondersteunt geen passkeys.</p>

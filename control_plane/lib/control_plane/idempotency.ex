@@ -33,6 +33,8 @@ defmodule ControlPlane.Idempotency do
   """
   import Ecto.Query
 
+  require Logger
+
   alias ControlPlane.Idempotency.Key
   alias ControlPlane.Repo
 
@@ -180,10 +182,48 @@ defmodule ControlPlane.Idempotency do
   end
 
   @doc "Legt vast dat deze sleutel tot `vps_id` heeft geleid."
-  @spec finish(Key.t(), binary()) :: :ok
-  def finish(%Key{} = rij, vps_id) do
-    rij |> Key.changeset(%{status: "done", vps_id: vps_id}) |> Repo.update()
-    :ok
+  @spec finish(Key.t(), binary(), pos_integer()) :: :ok
+  def finish(%Key{} = rij, vps_id, pogingen \\ 3) do
+    case rij |> Key.changeset(%{status: "done", vps_id: vps_id}) |> veilig_bijwerken() do
+      {:ok, _} ->
+        :ok
+
+      # De uitkomst werd weggegooid. Bleef de sleutel daardoor op in_flight
+      # staan, dan nam een herhaling hem na tien minuten over als verlaten -- en
+      # maakte een tweede VPS met een tweede afschrijving. Precies wat deze
+      # module moet voorkomen. Dus opnieuw, en lukt het niet, dan iemand laten
+      # weten welke sleutel en welke VPS.
+      {:error, _} when pogingen > 1 ->
+        Process.sleep(100)
+        finish(rij, vps_id, pogingen - 1)
+
+      {:error, reden} ->
+        Logger.error(
+          "idempotentiesleutel #{rij.id} niet afgesloten na vps #{vps_id}: #{inspect(reden)}"
+        )
+
+        ControlPlane.Notifier.deliver_operational_alert(
+          "Bestelsleutel niet afgesloten",
+          """
+          VPS #{vps_id} is aangemaakt, maar de idempotentiesleutel #{rij.id} kon niet
+          op "done" worden gezet (#{inspect(reden)}).
+
+          Herhaalt de klant dezelfde bestelling na tien minuten, dan wordt die
+          sleutel als verlaten overgenomen en ontstaat er een tweede VPS met een
+          tweede afschrijving. Zet de sleutel met de hand op done met dit vps_id.
+          """
+        )
+
+        :ok
+    end
+  end
+
+  defp veilig_bijwerken(changeset) do
+    Repo.update(changeset)
+  rescue
+    e -> {:error, Exception.message(e)}
+  catch
+    :exit, reden -> {:error, reden}
   end
 
   @doc """
