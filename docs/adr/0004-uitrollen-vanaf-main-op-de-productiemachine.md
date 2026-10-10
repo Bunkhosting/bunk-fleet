@@ -28,3 +28,13 @@ uitrollen (vergeten stappen, geen gate).
 
 **Gevolgen.** Bouwen kost productie CPU. Een aparte bouwmachine is de volgende
 stap als het platform groeit.
+
+**Agent-updates zijn niet ondertekend (besloten 2026-10-10).** Een node haalt de
+nieuwe binary en zijn checksum van het control plane en controleert alleen dat
+die twee bij elkaar passen. Een handtekening met een sleutel op VM102 zou
+beschermen tegen problemen onderweg (Cloudflare, de edge), maar niet tegen een
+overgenomen VM102, en die is het echte risico. Echte bescherming vraagt een
+sleutel buiten de server en een mens die elke release ondertekent, en dat past
+niet bij automatisch uitrollen. Opnieuw bekijken zodra er nodes van anderen bij
+komen: dan is het niet meer alleen onze eigen hardware die erop vertrouwt.
+
