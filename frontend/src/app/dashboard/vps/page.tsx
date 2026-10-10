@@ -1,6 +1,8 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { usePolling } from "@/hooks/use-polling";
+import { useNieuwste } from "@/hooks/use-nieuwste";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, PlusCircle, Server } from "lucide-react";
@@ -29,19 +31,23 @@ export default function VpsListPage() {
   // latere poll, dan blijft de laatste goede lijst staan.
   const [loadFailed, setLoadFailed] = useState(false);
 
+  const nieuwste = useNieuwste();
+
   const fetchVps = useCallback(async () => {
+    const isNieuwste = nieuwste();
     try {
       const response = await vpsApi.list();
+      if (!isNieuwste()) return;
       setVpsList(response.data.results);
       setLoadFailed(false);
     } catch {
       // Een 401 stuurt de layout naar het inlogscherm; al het andere hoort hier
       // zichtbaar te zijn en niet te lezen als "je hebt geen VPS'en".
-      setLoadFailed(true);
+      if (isNieuwste()) setLoadFailed(true);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [nieuwste]);
 
   useEffect(() => {
     // Via een microtask: dan kan een synchrone worp uit fetchVps nooit binnen
@@ -68,7 +74,7 @@ export default function VpsListPage() {
   if (loadFailed && vpsList.length === 0) {
     return (
       <div className="space-y-6">
-        <h1 className="text-3xl font-bold tracking-tight">Mijn VPS&apos;en</h1>
+        <PageHeader title="Mijn VPS'en" />
         <LoadError
           message="Je VPS'en konden niet worden opgehaald. Er is niets verloren gegaan; probeer het zo opnieuw."
           onRetry={() => {
@@ -82,20 +88,14 @@ export default function VpsListPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Mijn VPS&apos;en</h1>
-          <p className="text-muted-foreground">
-            Beheer en bekijk al je virtuele servers.
-          </p>
-        </div>
-        <Link href="/dashboard/vps/new">
-          <Button>
+      <PageHeader title="Mijn VPS'en" description="Beheer en bekijk al je virtuele servers.">
+        <Button asChild>
+          <Link href="/dashboard/vps/new">
             <PlusCircle className="mr-2 h-4 w-4" />
             Nieuwe VPS
-          </Button>
-        </Link>
-      </div>
+          </Link>
+        </Button>
+      </PageHeader>
 
       {vpsList.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -111,12 +111,12 @@ export default function VpsListPage() {
             <p className="text-muted-foreground mb-6 text-center">
               Je hebt nog geen VPS&apos;en. Vraag je eerste VPS aan!
             </p>
-            <Link href="/dashboard/vps/new">
-              <Button>
+            <Button asChild>
+              <Link href="/dashboard/vps/new">
                 <PlusCircle className="mr-2 h-4 w-4" />
                 Eerste VPS aanvragen
-              </Button>
-            </Link>
+              </Link>
+            </Button>
           </CardContent>
         </Card>
       )}

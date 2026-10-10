@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Server, ServerOff, PlusCircle, Wallet } from "lucide-react";
@@ -68,14 +69,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Welcome */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          Welkom terug{user ? `, ${user.name}` : ""}
-        </h1>
-        <p className="text-muted-foreground">
-          Hier is een overzicht van je VPS omgeving.
-        </p>
-      </div>
+      <PageHeader title={<>Welkom terug{user ? `, ${user.name}` : ""}</>} description="Hier is een overzicht van je VPS omgeving." />
 
       {vpsFailed && (
         <LoadError
@@ -139,11 +133,11 @@ export default function DashboardPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">Recente VPS&apos;en</h2>
-          <Link href="/dashboard/vps">
-            <Button variant="ghost" size="sm">
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/dashboard/vps">
               Bekijk alle VPS&apos;en
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
 
         {recentVps.length > 0 ? (
@@ -159,12 +153,12 @@ export default function DashboardPage() {
               <p className="text-muted-foreground mb-4">
                 Je hebt nog geen VPS&apos;en.
               </p>
-              <Link href="/dashboard/vps/new">
-                <Button>
+              <Button asChild>
+                <Link href="/dashboard/vps/new">
                   <PlusCircle className="mr-2 h-4 w-4" />
                   Nieuwe VPS aanvragen
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </CardContent>
           </Card>
         )}
@@ -174,12 +168,12 @@ export default function DashboardPage() {
       {/* Quick action */}
       {totalVps > 0 && (
         <div>
-          <Link href="/dashboard/vps/new">
-            <Button>
+          <Button asChild>
+            <Link href="/dashboard/vps/new">
               <PlusCircle className="mr-2 h-4 w-4" />
               Nieuwe VPS aanvragen
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, HardDrive, Loader2, RefreshCw, Save } from "lucide-react";
@@ -383,18 +384,11 @@ export default function MijnNodesPagina() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Mijn nodes</h1>
-          <p className="text-muted-foreground">
-            De machines die jij beheert. Een wijziging is binnen een halve minuut actief; je hoeft
-            niet op de machine in te loggen.
-          </p>
-        </div>
+      <PageHeader title="Mijn nodes" description={<>De machines die jij beheert. Een wijziging is binnen een halve minuut actief; je hoeft niet op de machine in te loggen.</>}>
         <Button variant="ghost" size="sm" className="gap-2" onClick={laden}>
           <RefreshCw className="h-4 w-4" /> Vernieuwen
         </Button>
-      </div>
+      </PageHeader>
 
       {nodes.length === 0 ? (
         <Card>

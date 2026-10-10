@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, HardDrive, Trash2, Plus, Copy, Check, AlertTriangle } from "lucide-react";
@@ -192,12 +193,8 @@ function NodesInner() {
     <>
       {dialoog}
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Nodes</h1>
-          <p className="text-muted-foreground">{nodes.length} nodes — datacenter (gedeeld) en community.</p>
-        </div>
-        <div className="flex gap-2">
+      <PageHeader title="Nodes" description={<>{nodes.length} nodes — datacenter (gedeeld) en community.</>}>
+        <div className="flex flex-wrap gap-2">
           <Button variant="ghost" size="sm" className="gap-2" onClick={load}>
             <RefreshCw className="h-4 w-4" /> Ververs
           </Button>
@@ -226,7 +223,7 @@ function NodesInner() {
             Node toevoegen
           </Button>
         </div>
-      </div>
+      </PageHeader>
 
       {enroll && (
         <Card className="border-primary/40">

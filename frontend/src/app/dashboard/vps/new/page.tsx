@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -173,12 +174,7 @@ export default function NewVpsPage() {
 
   return (
     <div className="mx-auto max-w-4xl space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Nieuwe VPS aanvragen</h1>
-        <p className="text-muted-foreground">
-          Kies een pakket en geef je VPS optioneel een naam.
-        </p>
-      </div>
+      <PageHeader title="Nieuwe VPS aanvragen" description="Kies een pakket en geef je VPS optioneel een naam." />
 
       {/* Pakket kiezen */}
       {/* Een echte keuzegroep: met de pijltjestoetsen te bedienen en door een

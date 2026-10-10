@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import * as React from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -245,10 +246,7 @@ function BeveiligingContent() {
     <>
       {dialoog}
     <div className="max-w-2xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-display font-bold">Beveiliging</h1>
-        <p className="text-muted-foreground mt-1">Kies hoe je inlogt: een authenticator-app, een passkey, of allebei.</p>
-      </div>
+      <PageHeader title="Beveiliging" description={<>Kies hoe je inlogt: een authenticator-app, een passkey, of allebei.</>} />
 
       {/* Wachtwoord wijzigen */}
       <form onSubmit={wijzigWachtwoord} className="card-gradient-border rounded-xl p-6 bg-card space-y-4">

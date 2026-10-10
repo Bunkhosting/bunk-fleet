@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { AdminGuard } from "@/components/admin/admin-guard";
+import { useNieuwste } from "@/hooks/use-nieuwste";
 import { adminApi, type AdminCommand } from "@/lib/api";
 
 const FILTERS = [
@@ -31,35 +33,37 @@ function ActiviteitInner() {
   const [commands, setCommands] = useState<AdminCommand[] | null>(null);
   const [filter, setFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const nieuwste = useNieuwste();
 
   const load = useCallback(
     // Geen setLoading hier: loading begint op true en een synchrone setState in
     // een effect kost een extra rendercyclus. De knoppen hieronder zetten hem,
     // want dan staat er al een tabel op het scherm die vervangen wordt.
     (status: string) => {
+      // Snel van filter wisselen: alleen het laatste antwoord telt.
+      const isNieuwste = nieuwste();
       adminApi
         .commands(status || undefined)
-        .then(setCommands)
-        .catch(() =>
-          toast({ title: "Fout", description: "Kon de activiteit niet laden.", variant: "destructive" }),
-        )
-        .finally(() => setLoading(false));
+        .then((c) => {
+          if (isNieuwste()) setCommands(c);
+        })
+        .catch(() => {
+          if (isNieuwste())
+            toast({ title: "Fout", description: "Kon de activiteit niet laden.", variant: "destructive" });
+        })
+        .finally(() => {
+          if (isNieuwste()) setLoading(false);
+        });
     },
-    [toast],
+    [toast, nieuwste],
   );
 
   useEffect(() => load(filter), [load, filter]);
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Activiteit</h1>
-          <p className="text-muted-foreground">
-            Wat de fleet heeft gedaan. Bij een mislukking staat hier de reden, niet alleen het aantal.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+      <PageHeader title="Activiteit" description="Wat de fleet heeft gedaan. Bij een mislukking staat hier de reden, niet alleen het aantal.">
+        <div className="flex flex-wrap items-center gap-2">
           {FILTERS.map((f) => (
             <Button
               key={f.key}
@@ -87,7 +91,7 @@ function ActiviteitInner() {
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
-      </div>
+      </PageHeader>
 
       <Card>
         <CardContent className="p-4">

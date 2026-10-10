@@ -1,6 +1,7 @@
 "use client";
 
 import { usePolling } from "@/hooks/use-polling";
+import { useNieuwste } from "@/hooks/use-nieuwste";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -70,13 +71,18 @@ export default function VpsDetailPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [pollUntil, setPollUntil] = useState<number | null>(null);
 
+  const nieuwste = useNieuwste();
+
   const fetchVps = useCallback(
     async (silent = false) => {
+      // Een peiling die al liep vóór een klik op Start mag de verse status
+      // daarna niet terugzetten.
+      const isNieuwste = nieuwste();
       try {
         const response = await vpsApi.get(id);
-        setVps(response.data);
+        if (isNieuwste()) setVps(response.data);
       } catch {
-        if (!silent) {
+        if (!silent && isNieuwste()) {
           toast({
             title: "Fout",
             description: "Kon VPS gegevens niet laden.",
@@ -87,7 +93,7 @@ export default function VpsDetailPage() {
         setLoading(false);
       }
     },
-    [id, toast]
+    [id, toast, nieuwste]
   );
 
   const fetchBackups = useCallback(async () => {
@@ -371,7 +377,7 @@ export default function VpsDetailPage() {
               </Button>
             </form>
           ) : (
-            <h1 className="flex flex-wrap items-center gap-2 text-3xl font-bold tracking-tight">
+            <h1 className="flex flex-wrap items-center gap-2 break-words text-2xl font-bold tracking-tight sm:text-3xl">
               {vps.label || `VPS #${vps.id}`}
               {vps.status !== "DELETED" && (
                 <Button
@@ -396,18 +402,35 @@ export default function VpsDetailPage() {
         {/* Action buttons */}
         <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           {/* Terminal button */}
-          <Link href={`/dashboard/vps/${id}/terminal`}>
-            <Button variant="outline" disabled={vps.status !== "ACTIVE"} aria-label="Terminal">
+          {/* De terminal is waarvoor iemand hier meestal komt, dus bij een
+              draaiende VPS is dat de hoofdknop; bij een gestopte is dat Starten.
+              Nooit twee tegelijk. Een uitgeschakelde knop in een Link bleef met
+              Tab en Enter gewoon een werkende link, dus zonder terminal is er
+              geen link. */}
+          {vps.status === "ACTIVE" ? (
+            <Button asChild aria-label="Terminal">
+              <Link href={`/dashboard/vps/${id}/terminal`}>
+                <Terminal className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Terminal</span>
+              </Link>
+            </Button>
+          ) : (
+            <Button variant="outline" disabled aria-label="Terminal">
               <Terminal className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">Terminal</span>
             </Button>
-          </Link>
+          )}
 
           {/* Start */}
           {/* Starten zonder bevestiging: er gaat niets verloren, en "weet je het
               zeker?" bij iets onschuldigs leert mensen de vraag weg te klikken
               -- ook bij stoppen en verwijderen, waar hij er wel toe doet. */}
-          <Button disabled={!canStart || actionLoading} aria-label="Starten" onClick={handleStart}>
+          <Button
+            variant={canStart ? "default" : "outline"}
+            disabled={!canStart || actionLoading}
+            aria-label="Starten"
+            onClick={handleStart}
+          >
             {actionLoading ? (
               <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
             ) : (
@@ -508,16 +531,7 @@ export default function VpsDetailPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Label</span>
-              <span className="font-medium">
-                {vps.label || `VPS #${vps.id}`}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Status</span>
-              <StatusBadge status={vps.status} />
-            </div>
+            {/* Naam en status staan al bovenaan de pagina. */}
             <div className="flex justify-between">
               <span className="text-muted-foreground">Locatie</span>
               <span className="font-medium">{vps.location ?? "—"}</span>
@@ -541,12 +555,20 @@ export default function VpsDetailPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href={`/dashboard/vps/${vps.id}/terminal`}>
-              <Button className="w-full gap-2" disabled={vps.status !== "ACTIVE"}>
-                <Terminal className="h-4 w-4" />
-                Webterminal openen
+            {vps.status === "ACTIVE" ? (
+              <Button asChild variant="outline" className="w-full gap-2">
+                <Link href={`/dashboard/vps/${vps.id}/terminal`}>
+                  <Terminal className="h-4 w-4" />
+                  Webterminal openen
+                </Link>
               </Button>
-            </Link>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {canStart
+                  ? "Start de VPS om de terminal te openen."
+                  : "De terminal is beschikbaar zodra de VPS draait."}
+              </p>
+            )}
           </CardContent>
         </Card>
 

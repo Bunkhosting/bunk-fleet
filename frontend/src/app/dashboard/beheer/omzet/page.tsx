@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw, Download } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,13 +90,7 @@ function OmzetInner() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Omzet &amp; btw</h1>
-          <p className="text-muted-foreground">
-            Wat er in de periode is ontvangen, met de btw eruit gerekend.
-          </p>
-        </div>
+      <PageHeader title={<>Omzet &amp; btw</>} description="Wat er in de periode is ontvangen, met de btw eruit gerekend.">
         <div className="flex flex-wrap items-end gap-2">
           <div>
             <label className="text-xs text-muted-foreground">Van</label>
@@ -120,7 +115,7 @@ function OmzetInner() {
             <Download className="h-4 w-4" /> CSV
           </Button>
         </div>
-      </div>
+      </PageHeader>
 
       {loading || !data ? (
         <div className="flex justify-center py-20">

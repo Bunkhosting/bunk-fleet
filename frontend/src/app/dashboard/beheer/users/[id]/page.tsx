@@ -59,7 +59,7 @@ function KlantDetail() {
           <Button variant="ghost" size="sm" className="mb-2 gap-2 px-0" onClick={() => router.push("/dashboard/beheer/users")}>
             <ArrowLeft className="h-4 w-4" /> Terug naar gebruikers
           </Button>
-          <h1 className="text-2xl font-bold tracking-tight">{u.email}</h1>
+          <h1 className="break-all text-2xl font-bold tracking-tight sm:text-3xl">{u.email}</h1>
           <p className="text-muted-foreground">
             {u.name || "geen naam"} · klant sinds {dag(u.created_at)}
           </p>

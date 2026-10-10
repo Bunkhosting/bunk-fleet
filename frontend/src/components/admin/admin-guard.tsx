@@ -63,9 +63,9 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
             log daarna opnieuw in.
           </p>
         </div>
-        <Link href="/dashboard/beveiliging">
-          <Button>Naar Beveiliging</Button>
-        </Link>
+        <Button asChild>
+          <Link href="/dashboard/beveiliging">Naar Beveiliging</Link>
+        </Button>
       </div>
     );
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -169,12 +170,7 @@ function UsersInner() {
     <>
       {dialoog}
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Gebruikers</h1>
-        <p className="text-muted-foreground">
-          {users.length - aantalVerwijderd} accounts — rol wijzigen en tegoed aanpassen.
-        </p>
-      </div>
+      <PageHeader title="Gebruikers" description={<>{users.length - aantalVerwijderd} accounts — rol wijzigen en tegoed aanpassen.</>} />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative max-w-sm flex-1">

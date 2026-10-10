@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, MapPin, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -266,18 +267,11 @@ function RegiosInner() {
     <>
       {dialoog}
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Locaties</h1>
-          <p className="text-muted-foreground">
-            Waar klanten hun VPS kunnen laten draaien. Een node hoort bij één locatie; de eigenaar
-            van die node bepaalt welke.
-          </p>
-        </div>
+      <PageHeader title="Locaties" description={<>Waar klanten hun VPS kunnen laten draaien. Een node hoort bij één locatie; de eigenaar van die node bepaalt welke.</>}>
         <Button variant="ghost" size="sm" className="gap-2" onClick={laden}>
           <RefreshCw className="h-4 w-4" /> Vernieuwen
         </Button>
-      </div>
+      </PageHeader>
 
       <Card>
         <CardContent className="space-y-4 p-6">

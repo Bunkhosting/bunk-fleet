@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import * as React from "react";
 import { Activity, Cpu, HardDrive, Loader2, MemoryStick, ShieldCheck } from "lucide-react";
 import { AdminGuard } from "@/components/admin/admin-guard";
@@ -91,14 +92,7 @@ export default function MetricsPage() {
   return (
     <AdminGuard>
       <div className="space-y-8">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Cijfers</h1>
-          <p className="text-muted-foreground">
-            Alles op deze pagina is een totaal. Er staat geen enkele gebruiker in — niet in
-            de inloggegevens, niet in de vlootcijfers — zodat dit overzicht geen persoonlijke
-            gegevens verwerkt.
-          </p>
-        </div>
+        <PageHeader title="Cijfers" description="Alles op deze pagina is een totaal. Er staat geen enkele gebruiker in — niet in de inloggegevens, niet in de vlootcijfers — zodat dit overzicht geen persoonlijke gegevens verwerkt." />
 
         <Card>
           <CardHeader className="pb-3">

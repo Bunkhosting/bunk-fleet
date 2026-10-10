@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useEffect, useState } from "react";
 import {
   Wallet as WalletIcon,
@@ -101,7 +102,7 @@ export default function TegoedPage() {
   if (loadFailed || !wallet) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold tracking-tight">Tegoed</h1>
+        <PageHeader title="Tegoed" />
         <LoadError
           message="Je tegoed kon niet worden opgehaald. Je saldo is niet veranderd; probeer het zo opnieuw."
           onRetry={() => {
@@ -118,12 +119,7 @@ export default function TegoedPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Tegoed</h1>
-        <p className="text-muted-foreground">
-          Je saldo, opwaarderen en een overzicht van je transacties.
-        </p>
-      </div>
+      <PageHeader title="Tegoed" description="Je saldo, opwaarderen en een overzicht van je transacties." />
 
       {/* Hoe werkt betalen? */}
       <div className="flex items-start gap-3 rounded-lg border bg-muted/40 px-4 py-3">

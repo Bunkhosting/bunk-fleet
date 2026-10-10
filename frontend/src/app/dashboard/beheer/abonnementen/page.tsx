@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, RefreshCw, AlertTriangle } from "lucide-react";
@@ -47,11 +48,7 @@ function AbonnementenInner() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Abonnementen</h1>
-          <p className="text-muted-foreground">Wat er loopt, en wat er niet meer geïnd wordt.</p>
-        </div>
+      <PageHeader title="Abonnementen" description="Wat er loopt, en wat er niet meer geïnd wordt.">
         <Button
           variant="ghost"
           size="sm"
@@ -63,7 +60,7 @@ function AbonnementenInner() {
         >
           <RefreshCw className="h-4 w-4" /> Ververs
         </Button>
-      </div>
+      </PageHeader>
 
       <div className="grid gap-4 sm:grid-cols-3">
         {[

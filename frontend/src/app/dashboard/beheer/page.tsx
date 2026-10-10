@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Users, Server, HardDrive, Wallet, Loader2, ArrowRight } from "lucide-react";
@@ -41,17 +42,13 @@ function Overview() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Beheer</h1>
-          <p className="text-muted-foreground">Platform-overzicht en beheer.</p>
-        </div>
+      <PageHeader title="Beheer" description="Platform-overzicht en beheer.">
         <Button variant="outline" size="sm" asChild>
           <Link href="/dashboard/beheer/metrics">
             Cijfers <ArrowRight className="ml-1 h-4 w-4" />
           </Link>
         </Button>
-      </div>
+      </PageHeader>
 
       {stats && (
         <div className="grid gap-6 lg:grid-cols-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import { PageHeader } from "@/components/layout/page-header";
 import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
 import { Loader2, Search, Play, Square, Trash2, RefreshCw } from "lucide-react";
@@ -87,15 +88,11 @@ function VpsInner() {
     <>
       {dialoog}
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">VPS-beheer</h1>
-          <p className="text-muted-foreground">{vpses.length} VPS&apos;en over alle klanten.</p>
-        </div>
+      <PageHeader title="VPS-beheer" description={<>{vpses.length} VPS&apos;en over alle klanten.</>}>
         <Button variant="ghost" size="sm" className="gap-2" onClick={load}>
           <RefreshCw className="h-4 w-4" /> Ververs
         </Button>
-      </div>
+      </PageHeader>
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
