@@ -5,6 +5,7 @@ Gebruik (op VM102, waar het control plane rechtstreeks bereikbaar is):
     python3 fwproef.py bestel <regiocode>   -> drukt het id van een nieuwe test-VPS af
     python3 fwproef.py proef <vps_id> <buur_ip>
     python3 fwproef.py stil <vps_id> <seconden>  -> leeft een stille terminal nog?
+    python3 fwproef.py stroom <vps_id>          -> komt veel uitvoer heelhuids aan?
     python3 fwproef.py weg <vps_id>
 
 `proef` opent de webterminal van de test-VPS en kijkt drie dingen na: komt hij
@@ -82,6 +83,19 @@ def stil(vid, seconden):
     print("UIT=LEEFT" if "UIT=LEEFT" in uit else "DICHT na stilte; staart: " + uit[-200:].replace("\n", " "))
 
 
+def stroom(vid):
+    """Stuurt ~2 MB uitvoer door de terminal en kijkt of alles aankomt."""
+    token = inloggen()
+    status, body, _, _ = roep("POST", f"/vpses/{vid}/console-ticket", {}, token=token)
+    if status != 200:
+        sys.exit(f"geen ticket: {status} {body}")
+    pad = f"/ws/console/{vid}/?ticket={urllib.parse.quote(body['ticket'])}"
+    uit = sessie(CP_HOST, CP_POORT, pad, ["seq 1 300000; echo UIT=KLAAR"], per_opdracht=40.0)
+    print(f"{len(uit)} tekens ontvangen;",
+          "laatste getal aangekomen" if "\n300000" in uit.replace("\r", "") else "laatste getal NIET aangekomen",
+          "UIT=KLAAR" if "UIT=KLAAR" in uit else "geen UIT=KLAAR")
+
+
 def weg(vid):
     token = inloggen()
     status, body, _, _ = roep("DELETE", f"/vpses/{vid}", token=token)
@@ -98,4 +112,5 @@ def weg(vid):
 if __name__ == "__main__":
     {"bestel": lambda: bestel(sys.argv[2]), "proef": lambda: proef(sys.argv[2], sys.argv[3]),
      "stil": lambda: stil(sys.argv[2], sys.argv[3]),
+     "stroom": lambda: stroom(sys.argv[2]),
      "weg": lambda: weg(sys.argv[2])}[sys.argv[1]]()
