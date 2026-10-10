@@ -53,7 +53,7 @@ defmodule ControlPlane.MislukteUitrolTerugbetalingTest do
 
   test "de klant krijgt terug wat er is afgeschreven, niet wat het pakket kost" do
     %{user: user, region: region} = opstelling()
-    {:ok, _} = Credits.add_entry(user.id, 10_000, "test_bonus", "startsaldo")
+    {:ok, _} = Credits.add_entry(user.id, 10_000, "admin_adjustment", "startsaldo")
 
     {:ok, %{vps: vps, command: command}} =
       Provisioning.create_vps(%{
@@ -92,7 +92,7 @@ defmodule ControlPlane.MislukteUitrolTerugbetalingTest do
     # Een VPS die intern is aangemaakt zonder dat er iemand voor betaald heeft.
     # De abonnementsprijs terugbetalen zou hier geld geven dat nooit is betaald.
     %{user: user, region: region} = opstelling()
-    {:ok, _} = Credits.add_entry(user.id, 10_000, "test_bonus", "startsaldo")
+    {:ok, _} = Credits.add_entry(user.id, 10_000, "admin_adjustment", "startsaldo")
 
     {:ok, %{vps: vps, command: command}} =
       Provisioning.create_vps(%{

@@ -398,7 +398,7 @@ defmodule ControlPlaneWeb.VpsControllerTest do
     } do
       # Four creates cost more than the signup bonus; the wallet is not what this
       # test is about.
-      {:ok, _} = ControlPlane.Credits.add_entry(user.id, 5_000, "test_topup", "test")
+      {:ok, _} = ControlPlane.Credits.add_entry(user.id, 5_000, "admin_adjustment", "test")
 
       for junk <- ["een string", 42, ["lijst"], nil] do
         params = %{

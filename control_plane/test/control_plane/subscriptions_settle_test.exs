@@ -21,7 +21,14 @@ defmodule ControlPlane.SubscriptionsSettleTest do
 
     # Drain the signup bonus so every test starts from a 0 balance and the
     # charged/uncharged expectations are deterministic.
-    {:ok, _} = Credits.add_entry(user.id, -Credits.balance_cents(user.id), "adjust", "test reset")
+    {:ok, _} =
+      Credits.add_entry(
+        user.id,
+        -Credits.balance_cents(user.id),
+        "admin_adjustment",
+        "test reset"
+      )
+
     user
   end
 

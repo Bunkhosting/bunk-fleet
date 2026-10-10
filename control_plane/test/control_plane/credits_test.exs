@@ -29,7 +29,7 @@ defmodule ControlPlane.CreditsTest do
     assert {:ok, _} = Credits.charge(u.id, 300, "vps_charge", "x")
     assert Credits.balance_cents(u.id) == Credits.signup_bonus_cents() - 300
 
-    {:ok, _} = Credits.charge(u.id, Credits.balance_cents(u.id), "drain", "x")
+    {:ok, _} = Credits.charge(u.id, Credits.balance_cents(u.id), "vps_charge", "x")
     assert Credits.balance_cents(u.id) == 0
     assert {:error, :insufficient_credits} = Credits.charge(u.id, 1, "vps_charge", "x")
     # rejected charge left no entry
@@ -51,7 +51,7 @@ defmodule ControlPlane.CreditsTest do
 
   test "list_entries returns newest first" do
     u = confirmed_user_fixture("c5@bunk.test")
-    {:ok, _} = Credits.charge(u.id, 100, "later", "second")
-    assert hd(Credits.list_entries(u.id)).kind == "later"
+    {:ok, _} = Credits.charge(u.id, 100, "vps_charge", "second")
+    assert hd(Credits.list_entries(u.id)).kind == "vps_charge"
   end
 end

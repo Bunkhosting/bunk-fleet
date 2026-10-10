@@ -31,7 +31,7 @@ defmodule ControlPlaneWeb.RegioGeslotenTest do
 
   setup %{conn: conn} do
     user = confirmed_user_fixture()
-    {:ok, _} = Credits.add_entry(user.id, 50_000, "test_bonus", "ruim tegoed")
+    {:ok, _} = Credits.add_entry(user.id, 50_000, "admin_adjustment", "ruim tegoed")
 
     token = user |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
 

@@ -21,7 +21,7 @@ defmodule ControlPlaneWeb.VpsIdempotentieTest do
 
   setup %{conn: conn} do
     user = confirmed_user_fixture()
-    {:ok, _} = Credits.add_entry(user.id, 50_000, "test_bonus", "ruim tegoed")
+    {:ok, _} = Credits.add_entry(user.id, 50_000, "admin_adjustment", "ruim tegoed")
 
     token =
       user
@@ -157,7 +157,7 @@ defmodule ControlPlaneWeb.VpsIdempotentieTest do
     # De sleutel is per gebruiker uniek, niet globaal. Anders kan een klant met
     # een geraden sleutel de bestelling van een ander tegenhouden.
     ander = confirmed_user_fixture()
-    {:ok, _} = Credits.add_entry(ander.id, 50_000, "test_bonus", "ruim tegoed")
+    {:ok, _} = Credits.add_entry(ander.id, 50_000, "admin_adjustment", "ruim tegoed")
 
     token =
       ander

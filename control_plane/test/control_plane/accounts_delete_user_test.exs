@@ -161,7 +161,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
 
     # Deze gebruiker heeft financiële geschiedenis, dus hij wordt geanonimiseerd
     # en niet verwijderd -- dat is het pad waarop het label bleef staan.
-    {:ok, _} = Credits.add_entry(user.id, 500, "test_bonus", "geschiedenis")
+    {:ok, _} = Credits.add_entry(user.id, 500, "admin_adjustment", "geschiedenis")
     {:ok, :anonymised} = Accounts.delete_or_anonymise_user(user)
 
     bijgewerkt = Repo.get!(Vps, vps.id)

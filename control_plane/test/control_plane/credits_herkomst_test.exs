@@ -4,6 +4,7 @@ defmodule ControlPlane.CreditsHerkomstTest do
   import ControlPlane.Fixtures
 
   alias ControlPlane.Credits
+  alias ControlPlane.Credits.LedgerEntry
 
   # Bij elkaar opgeteld maakt één getal handmatig toegekend testsaldo net zo echt
   # als geld dat een klant heeft overgemaakt. Deze uitsplitsing is het verschil,
@@ -30,14 +31,24 @@ defmodule ControlPlane.CreditsHerkomstTest do
     assert totaal == Credits.balance_cents(u.id)
   end
 
-  test "een onbekende soort komt onder overig en niet bij het betaalde geld" do
+  test "een onbekende soort kan niet geboekt worden" do
+    # Vroeger kwam die onder "overig" terecht. Sinds de CHECK-constraint op
+    # ledger_entries.kind bestaat hij niet meer: een nieuwe soort moet eerst in
+    # LedgerEntry.soorten (en de migratie) staan.
     u = confirmed_user_fixture("herkomst2@bunk.test")
-    {:ok, _} = Credits.add_entry(u.id, 5_000, "kortingsactie_2027", "Iets nieuws")
+    assert {:error, _} = Credits.add_entry(u.id, 5_000, "kortingsactie_2027", "Iets nieuws")
+  end
 
-    h = Credits.saldo_naar_herkomst()
+  test "elke soort die geboekt mag worden, heeft een herkomst" do
+    # Wie een soort aan de lijst toevoegt maar vergeet hem in te delen, ziet
+    # dat geld onder "overig" verdwijnen. Hier valt het op.
+    u = confirmed_user_fixture("herkomst3@bunk.test")
+    voor = Credits.saldo_naar_herkomst().overig
 
-    assert h.overig == 5_000
-    assert h.betaald == 0
-    assert h.handmatig == 0
+    for soort <- LedgerEntry.soorten() do
+      {:ok, _} = Credits.add_entry(u.id, 1, soort, "proef")
+    end
+
+    assert Credits.saldo_naar_herkomst().overig == voor
   end
 end

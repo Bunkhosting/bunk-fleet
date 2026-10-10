@@ -151,8 +151,8 @@ defmodule ControlPlane.GrenswaardenTest do
       # Het saldo tot op de cent leegtrekken en er daarna precies de prijs van
       # één bestelling in zetten.
       staat_er_nu = Credits.balance_cents(u.id)
-      {:ok, _} = Credits.charge(u.id, staat_er_nu, "drain", "leeg")
-      {:ok, _} = Credits.add_entry(u.id, 500, "test_bonus", "precies één bestelling")
+      {:ok, _} = Credits.charge(u.id, staat_er_nu, "vps_charge", "leeg")
+      {:ok, _} = Credits.add_entry(u.id, 500, "admin_adjustment", "precies één bestelling")
 
       assert {:ok, _} = Credits.charge(u.id, 500, "vps_charge", "VPS")
       assert Credits.balance_cents(u.id) == 0
