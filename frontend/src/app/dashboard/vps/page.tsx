@@ -1,5 +1,6 @@
 "use client";
 
+import { usePolling } from "@/hooks/use-polling";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, PlusCircle, Server } from "lucide-react";
@@ -10,9 +11,13 @@ import { LoadError } from "@/components/feedback/load-error";
 import { vpsApi } from "@/lib/api";
 import type { Vps, VpsStatus } from "@/lib/types";
 
+// Dezelfde lijst als op de detailpagina. RESTORING ontbrak hier: een VPS die
+// werd teruggezet, bleef in de lijst op "terugzetten" staan tot iemand de
+// pagina herlaadde.
 const TRANSITIONAL_STATUSES: VpsStatus[] = [
   "PENDING",
   "PROVISIONING",
+  "RESTORING",
   "DELETING",
 ];
 const POLL_INTERVAL_MS = 10_000;
@@ -50,11 +55,7 @@ export default function VpsListPage() {
     TRANSITIONAL_STATUSES.includes(vps.status)
   );
 
-  useEffect(() => {
-    if (!hasTransitional) return;
-    const interval = setInterval(fetchVps, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [hasTransitional, fetchVps]);
+  usePolling(fetchVps, POLL_INTERVAL_MS, hasTransitional);
 
   if (loading) {
     return (

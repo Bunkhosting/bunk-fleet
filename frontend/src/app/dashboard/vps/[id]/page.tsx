@@ -1,5 +1,6 @@
 "use client";
 
+import { usePolling } from "@/hooks/use-polling";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -163,16 +164,14 @@ export default function VpsDetailPage() {
     vps !== null && TRANSITIONAL_STATUSES.includes(vps.status);
   const shouldPoll = isTransitional || pollUntil !== null;
 
-  useEffect(() => {
-    if (!shouldPoll) return;
-    const interval = setInterval(() => {
-      setPollUntil((until) =>
-        until !== null && Date.now() >= until ? null : until
-      );
+  usePolling(
+    () => {
+      setPollUntil((until) => (until !== null && Date.now() >= until ? null : until));
       fetchVps(true);
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [shouldPoll, fetchVps]);
+    },
+    POLL_INTERVAL_MS,
+    shouldPoll,
+  );
 
   const handleStart = async () => {
     setActionLoading(true);
