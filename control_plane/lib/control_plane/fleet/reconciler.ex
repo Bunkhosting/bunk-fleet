@@ -187,6 +187,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     reclaim_reservations()
     fail_stuck_creates()
     fail_stuck_provisionings()
+    fail_stuck_restores()
     refund_orphan_charges()
     retry_stuck_deletes()
     state = maybe_meter_usage(state)
@@ -615,6 +616,19 @@ defmodule ControlPlane.Fleet.Reconciler do
     exception ->
       Logger.error(
         "fleet reconciler stuck-create sweep failed: #{Exception.message(exception)}",
+        crash_reason: {exception, __STACKTRACE__}
+      )
+  end
+
+  defp fail_stuck_restores do
+    case Provisioning.fail_stuck_restores() do
+      0 -> :ok
+      n -> Logger.error("#{n} vps(en) losgemaakt uit :restoring waar ze nooit meer uit kwamen")
+    end
+  rescue
+    exception ->
+      Logger.error(
+        "losmaken van vastgelopen terugzetacties faalde: #{Exception.message(exception)}",
         crash_reason: {exception, __STACKTRACE__}
       )
   end

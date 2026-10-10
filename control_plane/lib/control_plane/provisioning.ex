@@ -250,7 +250,12 @@ defmodule ControlPlane.Provisioning do
           join: n in Node,
           on: n.id == c.node_id,
           where: c.kind == :provision and c.status in [:pending, :delivered],
-          where: v.status == :provisioning,
+          # :deleting hoort erbij: een klant die verwijderde terwijl de uitrol
+          # liep, krijgt een uitgestelde afbraak die op het resultaat van die
+          # uitrol wacht. Valt de node weg, dan komt dat resultaat nooit, en
+          # bleef de VPS voorgoed op "wordt verwijderd" staan, met de capaciteit
+          # geboekt.
+          where: v.status in [:provisioning, :deleting],
           where: n.status == :offline,
           where: c.inserted_at < ^cutoff
       )
@@ -268,6 +273,66 @@ defmodule ControlPlane.Provisioning do
     end)
 
     length(gestrand)
+  end
+
+  @doc """
+  Haalt VPS'en uit `:restoring` die daar nooit meer uit zouden komen.
+
+  Een terugzetactie wordt alleen afgesloten door het resultaat van de agent.
+  Komt dat nooit -- de node valt weg, het resultaat gaat verloren -- dan stond
+  de VPS voorgoed op "terugzetten", en blokkeerde dat elke andere knop.
+
+  Twee gevallen:
+
+    * het commando loopt al langer dan `uren` uur: dan wordt het als mislukt
+      afgehandeld, wat de VPS op `:stopped` zet (niet op `:active`: de schijf
+      kan half geschreven zijn);
+    * er is geen lopend terugzetcommando meer, maar de VPS staat er al een half
+      uur op: dan is er niets meer dat hem verplaatst, en gaat hij direct naar
+      `:stopped`.
+
+  Geeft het aantal losgemaakte VPS'en terug.
+  """
+  @spec fail_stuck_restores(pos_integer()) :: non_neg_integer()
+  def fail_stuck_restores(uren \\ 6) do
+    grens = Clock.shift(-uren * 3600)
+
+    te_lang =
+      Repo.all(
+        from c in Command,
+          join: v in Vps,
+          on: v.id == c.vps_id,
+          where: c.kind == :restore_backup and c.status in [:pending, :delivered],
+          where: v.status == :restoring and c.inserted_at < ^grens
+      )
+
+    Enum.each(te_lang, fn command ->
+      Logger.error("terugzetten van vps #{command.vps_id} meldde niets terug binnen #{uren} uur")
+
+      apply_result(command, %{
+        "status" => "failed",
+        "error" => "de node meldde niets terug binnen #{uren} uur"
+      })
+    end)
+
+    lopend =
+      from c in Command,
+        where:
+          c.vps_id == parent_as(:vps).id and c.kind == :restore_backup and
+            c.status in [:pending, :delivered],
+        select: 1
+
+    {zwevend, _} =
+      Repo.update_all(
+        from(v in Vps,
+          as: :vps,
+          where: v.status == :restoring and v.updated_at < ^Clock.shift(-1800),
+          where: not exists(lopend)
+        ),
+        set: [status: :stopped, updated_at: Clock.now()]
+      )
+
+    length(te_lang) + zwevend
   end
 
   @doc """
