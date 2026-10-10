@@ -75,7 +75,7 @@ function AbonnementenInner() {
             <CardContent className="p-4">
               <p className="text-xs uppercase tracking-wide text-muted-foreground">{k.label}</p>
               <p
-                className={`mt-1 text-2xl font-bold tabular-nums ${k.alarm ? "text-destructive" : ""}`}
+                className={`mt-1 text-2xl font-bold tabular-nums ${k.alarm ? "text-destructive-text" : ""}`}
               >
                 {k.value}
               </p>

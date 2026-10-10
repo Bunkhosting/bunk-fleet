@@ -296,7 +296,7 @@ export default function VpsTerminalPage() {
             </span>
           )}
           {(connState === "closed" || connState === "error") && (
-            <span className="flex items-center gap-1.5 text-destructive">
+            <span className="flex items-center gap-1.5 text-destructive-text">
               <WifiOff className="h-3 w-3" />
               {errorMsg || "Verbroken"}
             </span>

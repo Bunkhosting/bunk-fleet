@@ -60,7 +60,7 @@ export function VpsCard({ vps }: VpsCardProps) {
               vraag van een klant niet "wat ging er mis" maar "waar is mijn
               geld". Dat antwoord hoort niet achter een klik te zitten. */}
           {vps.status === "ERROR" && (
-            <p className="text-destructive">
+            <p className="text-destructive-text">
               Aanmaken is mislukt &mdash; het bedrag staat terug op je tegoed.
             </p>
           )}

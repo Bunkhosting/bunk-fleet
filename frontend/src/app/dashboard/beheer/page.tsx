@@ -127,7 +127,7 @@ function Overview() {
                 )}
               </div>
               {stats.credit_breakdown.verbruikt > 0 && (
-                <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive-text">
                   Er is meer terugbetaald dan er ooit is afgeschreven. Verbruik hoort een
                   negatief getal te zijn; staat het in de plus, dan is er ergens dubbel
                   terugbetaald.

@@ -234,7 +234,7 @@ function KlantDetail() {
                       <td className="py-2 pr-4 font-mono text-xs">{e.kind}</td>
                       <td className="py-2 pr-4 text-muted-foreground">{e.description ?? "—"}</td>
                       <td
-                        className={`py-2 text-right tabular-nums ${e.amount_cents < 0 ? "text-destructive" : ""}`}
+                        className={`py-2 text-right tabular-nums ${e.amount_cents < 0 ? "text-destructive-text" : ""}`}
                       >
                         {euro(e.amount_cents)}
                       </td>

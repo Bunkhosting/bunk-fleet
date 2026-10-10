@@ -176,7 +176,7 @@ function RegisterForm() {
                       onError={() => setTurnstileToken(null)}
                     />
                   ) : (
-                    <p className="text-sm text-destructive">
+                    <p className="text-sm text-destructive-text">
                       CAPTCHA configuratie ontbreekt. Zet NEXT_PUBLIC_TURNSTILE_SITE_KEY.
                     </p>
                   )}
@@ -200,7 +200,7 @@ function RegisterForm() {
 
                 <p className="text-center text-sm text-muted-foreground">
                   Al een account?{" "}
-                  <a href="/login" className="text-primary underline-offset-4 hover:underline">
+                  <a href="/login" className="text-primary-text underline-offset-4 hover:underline">
                     Inloggen
                   </a>
                 </p>

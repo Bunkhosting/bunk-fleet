@@ -166,7 +166,7 @@ export default function MetricsPage() {
                     <span className="font-mono">
                       {d.successes} ok
                       {d.failures > 0 && (
-                        <span className="text-destructive"> · {d.failures} mislukt</span>
+                        <span className="text-destructive-text"> · {d.failures} mislukt</span>
                       )}
                     </span>
                   </div>
@@ -201,7 +201,7 @@ export default function MetricsPage() {
                     >
                       <span className="font-mono">{c.kind}</span>
                       <span
-                        className={`font-mono ${c.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+                        className={`font-mono ${c.status === "failed" ? "text-destructive-text" : "text-muted-foreground"}`}
                       >
                         {c.count} {c.status}
                       </span>
@@ -229,12 +229,12 @@ export default function MetricsPage() {
                     <span className="font-mono">{b.name}</span>
                     <span className="font-mono text-muted-foreground">
                       {b.hours_since_success === null ? (
-                        <span className="text-destructive">nog nooit</span>
+                        <span className="text-destructive-text">nog nooit</span>
                       ) : (
                         <>{b.hours_since_success} uur geleden</>
                       )}
                       {b.failures > 0 && (
-                        <span className="text-destructive"> · {b.failures} mislukt</span>
+                        <span className="text-destructive-text"> · {b.failures} mislukt</span>
                       )}
                     </span>
                   </div>

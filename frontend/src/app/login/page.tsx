@@ -260,7 +260,7 @@ function LoginForm() {
                       onError={() => setTurnstileToken(null)}
                     />
                   ) : (
-                    <p className="text-sm text-destructive">
+                    <p className="text-sm text-destructive-text">
                       CAPTCHA configuratie ontbreekt. Zet NEXT_PUBLIC_TURNSTILE_SITE_KEY.
                     </p>
                   )}
@@ -277,7 +277,7 @@ function LoginForm() {
 
                 <p className="text-center text-sm text-muted-foreground">
                   Nog geen account?{" "}
-                  <a href="/register" className="text-primary underline-offset-4 hover:underline">
+                  <a href="/register" className="text-primary-text underline-offset-4 hover:underline">
                     Registreren
                   </a>
                 </p>

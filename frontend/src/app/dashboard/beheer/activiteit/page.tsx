@@ -120,7 +120,7 @@ function ActiviteitInner() {
                       </td>
                       <td className="py-2 pr-4">{c.node ?? "—"}</td>
                       <td className="py-2 pr-4">{c.vps_name ?? "—"}</td>
-                      <td className="py-2 text-destructive">{c.error ?? ""}</td>
+                      <td className="py-2 text-destructive-text">{c.error ?? ""}</td>
                     </tr>
                   ))}
                 </tbody>

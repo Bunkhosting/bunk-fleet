@@ -21,6 +21,12 @@
     --accent-foreground: 225 18% 8%;    /* #111318 */
     --destructive: 0 70% 50%;
     --destructive-foreground: 0 0% 98%;
+    /* Gekleurde TEKST op de donkere achtergrond. --primary en --destructive
+       halen als tekstkleur 3,5-3,8:1, onder de 4,5:1 die WCAG voor tekst vraagt.
+       Deze twee halen ruim 6:1 op de achtergrond en op kaarten. Voor vlakken en
+       iconen blijven de gewone tokens. */
+    --primary-text: 214 100% 66%;
+    --destructive-text: 0 85% 70%;
     --border: 229 13% 24%;             /* #333539 */
     --input: 229 13% 24%;              /* #333539 */
     --ring: 214 100% 47%;             /* #006af2 */

@@ -491,7 +491,7 @@ export default function VpsDetailPage() {
         <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
           <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
           <div className="space-y-1">
-            <p className="font-medium text-destructive">Deze VPS kon niet worden aangemaakt.</p>
+            <p className="font-medium text-destructive-text">Deze VPS kon niet worden aangemaakt.</p>
             <p className="text-muted-foreground">
               Het bedrag is automatisch teruggestort op je tegoed; je vindt de boeking terug op{" "}
               <Link href="/dashboard/billing" className="font-medium underline underline-offset-2">

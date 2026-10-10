@@ -199,7 +199,7 @@ export default function NewVpsPage() {
                   <p>{pkg.disk_gb} GB NVMe opslag</p>
                   <p>{formatBandbreedte(pkg.bandwidth_mbit)} netwerk</p>
                 </div>
-                <p className="mt-3 text-lg font-bold text-primary">
+                <p className="mt-3 text-lg font-bold text-primary-text">
                   {formatEuro(pkg.price_monthly)}/maand
                 </p>
               </CardContent>
@@ -312,7 +312,7 @@ export default function NewVpsPage() {
                 </span>
               </div>
               {insufficient && (
-                <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-destructive">
+                <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-destructive-text">
                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
                     Je tegoed is niet toereikend.{" "}

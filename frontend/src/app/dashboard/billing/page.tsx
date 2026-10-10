@@ -151,13 +151,13 @@ export default function TegoedPage() {
           <CardContent>
             <p
               className={`text-4xl font-bold ${
-                lowBalance ? "text-destructive" : "text-primary"
+                lowBalance ? "text-destructive-text" : "text-primary-text"
               }`}
             >
               {formatBalance(balance)}
             </p>
             {lowBalance && (
-              <p className="mt-2 flex items-center gap-1.5 text-xs text-destructive">
+              <p className="mt-2 flex items-center gap-1.5 text-xs text-destructive-text">
                 <AlertCircle className="h-3.5 w-3.5" />
                 Je tegoed is laag. Waardeer op om een VPS te kunnen aanmaken.
               </p>
