@@ -1,5 +1,6 @@
 "use client";
 
+import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
 import { Loader2, RefreshCw, HardDrive, Trash2, Plus, Copy, Check, AlertTriangle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +46,7 @@ function Bar({ used, total }: { used: number | null; total: number | null }) {
 const gb = (mb: number | null) => (mb === null ? null : Math.round(mb / 1024));
 
 function NodesInner() {
+  const { dialoog, bevestig } = useBevestig();
   const { toast } = useToast();
   const [nodes, setNodes] = useState<AdminNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -146,7 +148,13 @@ function NodesInner() {
   };
 
   const removeNode = async (n: AdminNode) => {
-    if (!window.confirm(`Node "${n.name}" definitief verwijderen uit de fleet?`)) return;
+    const ok = await bevestig({
+      titel: `Node "${n.name}" definitief verwijderen?`,
+      uitleg: "Hij verdwijnt uit de fleet. Dat lukt alleen als er geen VPS meer op draait.",
+      bevestigLabel: "Verwijderen",
+      variant: "destructive",
+    });
+    if (!ok) return;
     setRemoving(n.id);
     try {
       await adminApi.nodeDelete(n.id);
@@ -181,6 +189,8 @@ function NodesInner() {
   }
 
   return (
+    <>
+      {dialoog}
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -409,6 +419,7 @@ function NodesInner() {
         })}
       </div>
     </div>
+    </>
   );
 }
 

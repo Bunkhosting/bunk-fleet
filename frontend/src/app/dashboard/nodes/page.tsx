@@ -1,5 +1,6 @@
 "use client";
 
+import { useBevestig } from "@/components/ui/use-bevestig";
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, HardDrive, Loader2, RefreshCw, Save } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -82,6 +83,7 @@ function NodeKaart({
   regions: NodeRegion[];
   onSaved: (n: MyNode) => void;
 }) {
+  const { dialoog, bevestig, vraag } = useBevestig();
   const { toast } = useToast();
   const [form, setForm] = useState<Formulier>(() => naarFormulier(node.settings));
   const [locatie, setLocatie] = useState(node.region?.name ?? "");
@@ -103,12 +105,14 @@ function NodeKaart({
     if (!gewenst || gewenst.toLowerCase() === (node.region?.name ?? "").toLowerCase()) return;
 
     const bestaat = regions.some((r) => r.name.toLowerCase() === gewenst.toLowerCase());
-    const bevestigd = window.confirm(
-      `${node.name} verplaatsen naar ${gewenst}?\n\n` +
-        (bestaat ? "" : `"${gewenst}" bestaat nog niet en wordt aangemaakt.\n\n`) +
+    const bevestigd = await bevestig({
+      titel: `${node.name} verplaatsen naar ${gewenst}?`,
+      uitleg:
+        (bestaat ? "" : `"${gewenst}" bestaat nog niet en wordt aangemaakt. `) +
         "De VPS'en die op deze machine draaien verhuizen mee: hun locatie verandert " +
         "met de machine, want ze staan er fysiek op.",
-    );
+      bevestigLabel: "Verplaatsen",
+    });
     if (!bevestigd) return;
 
     setSaving(true);
@@ -135,13 +139,15 @@ function NodeKaart({
   // zodra een node een eigenaar heeft, gaat alleen die erover. De keerzijde staat
   // in de bevestiging, want daarna kun je er zelf niet meer bij.
   const overdragen = async () => {
-    const email = window.prompt(
-      `${node.name} overdragen aan wie?\n\n` +
-        "Vul het e-mailadres in van het Bunk-account dat deze node overneemt. " +
-        "Laat leeg om de node zonder eigenaar achter te laten.\n\n" +
-        "Let op: na het overdragen kun jij de instellingen van deze node niet meer wijzigen.",
-      "",
-    );
+    const email = await vraag({
+      titel: `${node.name} overdragen`,
+      uitleg:
+        "Het Bunk-account dat je hier invult, neemt deze node over. Laat leeg om hem " +
+        "zonder eigenaar achter te laten. Daarna kun jij de instellingen niet meer wijzigen.",
+      bevestigLabel: "Overdragen",
+      variant: "destructive",
+      invoer: { label: "E-mailadres van de nieuwe eigenaar", placeholder: "naam@voorbeeld.nl" },
+    });
     if (email === null) return;
 
     setSaving(true);
@@ -185,6 +191,8 @@ function NodeKaart({
   };
 
   return (
+    <>
+      {dialoog}
     <Card>
       <CardContent className="space-y-6 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -341,6 +349,7 @@ function NodeKaart({
         </div>
       </CardContent>
     </Card>
+    </>
   );
 }
 

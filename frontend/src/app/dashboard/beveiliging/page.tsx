@@ -1,5 +1,6 @@
 "use client";
 
+import { useBevestig } from "@/components/ui/use-bevestig";
 import * as React from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { ShieldCheck, ShieldOff, ShieldAlert, Loader2, Copy, Check, KeyRound, Trash2, Plus } from "lucide-react";
@@ -36,6 +37,7 @@ const UITLEG = [
 ];
 
 function BeveiligingContent() {
+  const { dialoog, bevestig, vraag } = useBevestig();
   const { user, refresh } = useUser();
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -74,7 +76,12 @@ function BeveiligingContent() {
   }, [loadPasskeys]);
 
   async function addPasskey() {
-    const label = window.prompt("Naam voor deze passkey (bijv. Telefoon of Laptop):", "")?.trim();
+    const label = await vraag({
+      titel: "Passkey toevoegen",
+      uitleg: "Geef hem een naam, zodat je hem later herkent.",
+      bevestigLabel: "Verder",
+      invoer: { label: "Naam", placeholder: "Telefoon of Laptop" },
+    });
     if (!label) return;
     setPasskeyBusy(true);
     try {
@@ -105,7 +112,13 @@ function BeveiligingContent() {
   }
 
   async function removePasskey(pk: Passkey) {
-    if (!window.confirm(`Passkey "${pk.label}" verwijderen?`)) return;
+    const ok = await bevestig({
+      titel: `Passkey "${pk.label}" verwijderen?`,
+      uitleg: "Je kunt er daarna niet meer mee inloggen.",
+      bevestigLabel: "Verwijderen",
+      variant: "destructive",
+    });
+    if (!ok) return;
     try {
       await authApi.passkey.remove(pk.id);
       toast({ title: "Passkey verwijderd" });
@@ -229,6 +242,8 @@ function BeveiligingContent() {
   if (!user) return null;
 
   return (
+    <>
+      {dialoog}
     <div className="max-w-2xl space-y-6">
       <div>
         <h1 className="text-2xl font-display font-bold">Beveiliging</h1>
@@ -538,6 +553,7 @@ function BeveiligingContent() {
         ))}
       </dl>
     </div>
+    </>
   );
 }
 

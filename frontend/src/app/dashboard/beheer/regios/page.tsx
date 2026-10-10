@@ -1,5 +1,6 @@
 "use client";
 
+import { useBevestig } from "@/components/ui/use-bevestig";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, MapPin, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -109,6 +110,7 @@ function RegioRij({
 }
 
 function RegiosInner() {
+  const { dialoog, bevestig } = useBevestig();
   const { toast } = useToast();
   const [regions, setRegions] = useState<AdminRegion[] | null>(null);
   const [code, setCode] = useState("");
@@ -180,12 +182,13 @@ function RegiosInner() {
 
     if (
       nieuweCode !== huidigeCode &&
-      !window.confirm(
-        `De code van "${r.name}" wordt ${r.code} → ${nieuweCode}.\n\n` +
+      !(await bevestig({
+        titel: `Code van "${r.name}" wijzigen naar ${nieuweCode}?`,
+        uitleg:
           "Bestaande nodes en VPS'en blijven werken; die verwijzen niet op code. " +
-          "Wat wél breekt is een script of instructie waar " +
-          `${r.code} met de hand in staat.`,
-      )
+          `Wat wél breekt is een script of instructie waar ${r.code} met de hand in staat.`,
+        bevestigLabel: "Wijzigen",
+      }))
     ) {
       return;
     }
@@ -225,7 +228,13 @@ function RegiosInner() {
   };
 
   const verwijderen = async (r: AdminRegion) => {
-    if (!window.confirm(`Locatie "${r.name}" verwijderen? Dit kan alleen als er nooit iets in heeft gedraaid.`)) {
+    const ok = await bevestig({
+      titel: `Locatie "${r.name}" verwijderen?`,
+      uitleg: "Dit kan alleen als er nooit iets in heeft gedraaid.",
+      bevestigLabel: "Verwijderen",
+      variant: "destructive",
+    });
+    if (!ok) {
       return;
     }
 
@@ -254,6 +263,8 @@ function RegiosInner() {
   }
 
   return (
+    <>
+      {dialoog}
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -312,6 +323,7 @@ function RegiosInner() {
         &ldquo;automatisch&rdquo; kiest.
       </p>
     </div>
+    </>
   );
 }
 

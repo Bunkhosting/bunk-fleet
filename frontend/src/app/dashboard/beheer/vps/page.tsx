@@ -1,5 +1,6 @@
 "use client";
 
+import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
 import { Loader2, Search, Play, Square, Trash2, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,6 +13,7 @@ import { adminApi, parseApiError, vpsStatusFromApi, type AdminVps } from "@/lib/
 
 
 function VpsInner() {
+  const { dialoog, bevestig } = useBevestig();
   const { toast } = useToast();
   const [vpses, setVpses] = useState<AdminVps[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,13 +33,33 @@ function VpsInner() {
   }, []);
 
   async function act(v: AdminVps, kind: "start" | "stop" | "delete") {
-    if (kind === "delete" && !window.confirm(`VPS "${v.name}" van ${v.owner_email} definitief verwijderen?`)) return;
+    // Stoppen en verwijderen raken de machine van een klant; dat vraagt een
+    // bevestiging. Starten niet.
+    if (kind === "delete") {
+      const ok = await bevestig({
+        titel: `VPS "${v.name}" definitief verwijderen?`,
+        uitleg: `Van ${v.owner_email}. De machine en zijn schijf zijn daarna weg.`,
+        bevestigLabel: "Verwijderen",
+        variant: "destructive",
+      });
+      if (!ok) return;
+    }
+    if (kind === "stop") {
+      const ok = await bevestig({
+        titel: `VPS "${v.name}" stoppen?`,
+        uitleg: `Van ${v.owner_email}. Wat er op draait, valt direct weg.`,
+        bevestigLabel: "Stoppen",
+        variant: "destructive",
+      });
+      if (!ok) return;
+    }
     setBusy(v.id);
     try {
       if (kind === "start") await adminApi.vpsStart(v.id);
       else if (kind === "stop") await adminApi.vpsStop(v.id);
       else await adminApi.vpsDelete(v.id);
-      toast({ title: "Verzoek ingediend", description: `${v.name}: ${kind}` });
+      const actie = { start: "starten", stop: "stoppen", delete: "verwijderen" }[kind];
+      toast({ title: "Verzoek ingediend", description: `${v.name}: ${actie}` });
       await load();
     } catch (e) {
       toast({ title: "Mislukt", description: parseApiError(e, "Actie mislukt."), variant: "destructive" });
@@ -62,6 +84,8 @@ function VpsInner() {
   }
 
   return (
+    <>
+      {dialoog}
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -131,6 +155,7 @@ function VpsInner() {
         </CardContent>
       </Card>
     </div>
+    </>
   );
 }
 

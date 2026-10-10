@@ -1,5 +1,6 @@
 "use client";
 
+import { useBevestig } from "@/components/ui/use-bevestig";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Search, Plus, Trash2 } from "lucide-react";
@@ -23,6 +24,7 @@ const ROLES = ["user", "admin"] as const;
 const ROL_LABEL: Record<(typeof ROLES)[number], string> = { user: "Klant", admin: "Beheerder" };
 
 function UsersInner() {
+  const { dialoog, bevestig, vraag } = useBevestig();
   const { toast } = useToast();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,10 +51,12 @@ function UsersInner() {
     // dus hier wel een bevestiging -- de andere kant op niet.
     if (
       role === "admin" &&
-      !window.confirm(
-        `${u.email} beheerder maken?\n\nDeze persoon kan dan elk account en elke VPS zien en ` +
-          "beheren, en tegoed bijboeken."
-      )
+      !(await bevestig({
+        titel: `${u.email} beheerder maken?`,
+        uitleg: "Deze persoon kan dan elk account en elke VPS zien en beheren, en tegoed bijboeken.",
+        bevestigLabel: "Beheerder maken",
+        variant: "destructive",
+      }))
     ) {
       return;
     }
@@ -74,12 +78,15 @@ function UsersInner() {
   // grootboek blijven staan omdat die administratie zeven jaar bewaard moet
   // blijven en de btw-aangifte erop rust.
   async function removeUser(u: AdminUser) {
-    const bevestigd = window.confirm(
-      `Account ${u.email} verwijderen?\n\n` +
+    const bevestigd = await bevestig({
+      titel: `Account ${u.email} verwijderen?`,
+      uitleg:
         "Heeft deze gebruiker ooit betaald, dan blijven de facturen en het grootboek staan " +
         "en worden alleen de persoonsgegevens gewist. Zonder betaalgeschiedenis wordt het " +
-        "account echt verwijderd.\n\nDraait er nog een VPS, dan lukt het niet: ruim die eerst op.",
-    );
+        "account echt verwijderd. Draait er nog een VPS, dan lukt het niet: ruim die eerst op.",
+      bevestigLabel: "Verwijderen",
+      variant: "destructive",
+    });
     if (!bevestigd) return;
 
     setBusy(u.id);
@@ -111,7 +118,12 @@ function UsersInner() {
   }
 
   async function addCredit(u: AdminUser) {
-    const input = window.prompt(`Tegoed aanpassen voor ${u.email} (in euro, bijv. 10 of -5):`, "10");
+    const input = await vraag({
+      titel: `Tegoed aanpassen voor ${u.email}`,
+      uitleg: "Een positief bedrag boekt bij, een negatief bedrag haalt af. Het komt in het auditlogboek.",
+      bevestigLabel: "Aanpassen",
+      invoer: { label: "Bedrag in euro", standaard: "10", placeholder: "10 of -5" },
+    });
     if (input === null) return;
     const euros = Number(input.replace(",", "."));
     if (!Number.isFinite(euros) || euros === 0) {
@@ -154,6 +166,8 @@ function UsersInner() {
   }
 
   return (
+    <>
+      {dialoog}
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Gebruikers</h1>
@@ -254,6 +268,7 @@ function UsersInner() {
         </CardContent>
       </Card>
     </div>
+    </>
   );
 }
 

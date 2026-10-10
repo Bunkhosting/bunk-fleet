@@ -66,7 +66,6 @@ export default function VpsDetailPage() {
   const [hernoemen, setHernoemen] = useState(false);
   const [nieuweNaam, setNieuweNaam] = useState("");
   const [naamBezig, setNaamBezig] = useState(false);
-  const [startDialogOpen, setStartDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [pollUntil, setPollUntil] = useState<number | null>(null);
 
@@ -183,13 +182,12 @@ export default function VpsDetailPage() {
         title: "Verzoek ingediend",
         description: "De VPS wordt gestart.",
       });
-      setStartDialogOpen(false);
       setPollUntil(Date.now() + POST_ACTION_POLL_MS);
       await fetchVps();
-    } catch {
+    } catch (error: unknown) {
       toast({
         title: "Fout",
-        description: "Kon de VPS niet starten.",
+        description: parseApiError(error, "Kon de VPS niet starten."),
         variant: "destructive",
       });
     } finally {
@@ -259,10 +257,10 @@ export default function VpsDetailPage() {
       setStopDialogOpen(false);
       setPollUntil(Date.now() + POST_ACTION_POLL_MS);
       await fetchVps();
-    } catch {
+    } catch (error: unknown) {
       toast({
         title: "Fout",
-        description: "Kon de VPS niet stoppen.",
+        description: parseApiError(error, "Kon de VPS niet stoppen."),
         variant: "destructive",
       });
     } finally {
@@ -280,10 +278,10 @@ export default function VpsDetailPage() {
       });
       setDeleteDialogOpen(false);
       router.push("/dashboard/vps");
-    } catch {
+    } catch (error: unknown) {
       toast({
         title: "Fout",
-        description: "Kon de VPS niet verwijderen.",
+        description: parseApiError(error, "Kon de VPS niet verwijderen."),
         variant: "destructive",
       });
     } finally {
@@ -407,21 +405,17 @@ export default function VpsDetailPage() {
           </Link>
 
           {/* Start */}
-          <ConfirmDialog
-            open={startDialogOpen}
-            onOpenChange={setStartDialogOpen}
-            trigger={
-              <Button disabled={!canStart} aria-label="Starten">
-                <Play className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Starten</span>
-              </Button>
-            }
-            title="VPS starten"
-            description="Weet je zeker dat je deze VPS wilt starten?"
-            confirmLabel="Starten"
-            onConfirm={handleStart}
-            loading={actionLoading}
-          />
+          {/* Starten zonder bevestiging: er gaat niets verloren, en "weet je het
+              zeker?" bij iets onschuldigs leert mensen de vraag weg te klikken
+              -- ook bij stoppen en verwijderen, waar hij er wel toe doet. */}
+          <Button disabled={!canStart || actionLoading} aria-label="Starten" onClick={handleStart}>
+            {actionLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
+            ) : (
+              <Play className="h-4 w-4 sm:mr-2" />
+            )}
+            <span className="hidden sm:inline">Starten</span>
+          </Button>
 
           {/* Herstart */}
           <ConfirmDialog
