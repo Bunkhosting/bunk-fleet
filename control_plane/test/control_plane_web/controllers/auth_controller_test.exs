@@ -41,6 +41,22 @@ defmodule ControlPlaneWeb.AuthControllerTest do
 
       assert %{"errors" => %{"password" => [_ | _]}} = json_response(conn, 422)
     end
+
+    test "422s a taken e-mail address under errors.email", %{conn: conn} do
+      register_user(nil)
+
+      conn =
+        post(conn, ~p"/api/v1/auth/register", %{
+          "email" => String.upcase(@email),
+          "password" => @password,
+          "name" => "Op"
+        })
+
+      # Het registratiescherm herkent "taken" en zegt het in het Nederlands
+      # onder het e-mailveld (frontend/src/app/register/page.tsx, veldFoutenUit).
+      assert %{"errors" => %{"email" => messages}} = json_response(conn, 422)
+      assert Enum.any?(messages, &String.contains?(&1, "taken"))
+    end
   end
 
   describe "POST /api/v1/auth/login" do
@@ -287,7 +303,9 @@ defmodule ControlPlaneWeb.AuthControllerTest do
           "password" => "short"
         })
 
-      assert json_response(out, 422)["errors"]
+      # Het resetscherm toont dit onder het wachtwoordveld en laat het formulier
+      # staan; dat hangt aan deze vorm.
+      assert %{"password" => [_ | _]} = json_response(out, 422)["errors"]
 
       # The token survives a rejected attempt, so the user can retry with a
       # stronger password using the SAME link.

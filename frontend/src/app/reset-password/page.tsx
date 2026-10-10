@@ -7,6 +7,7 @@ import { Loader2, CheckCircle, XCircle, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import axios from "axios";
 import { authApi, parseApiError } from "@/lib/api";
 
 function ResetPasswordContent() {
@@ -25,23 +26,35 @@ function ResetPasswordContent() {
   const [errorMessage, setErrorMessage] = React.useState(
     token ? "" : "Geen resettoken gevonden in de link. Vraag een nieuwe resetlink aan.",
   );
-
+  // Een fout die de gebruiker zelf kan herstellen (tikfout in de bevestiging,
+  // te kort wachtwoord) hoort bij het formulier. Alleen een dode link is een
+  // eindstation; eerder kreeg je bij elke fout "vraag een nieuwe link aan",
+  // terwijl de link nog gewoon werkte.
+  const [veldFout, setVeldFout] = React.useState<{ veld: "password" | "password_confirm"; tekst: string } | null>(
+    null,
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== passwordConfirm) {
-      setErrorMessage("Wachtwoorden komen niet overeen.");
-      setStatus("error");
+      setVeldFout({ veld: "password_confirm", tekst: "De twee wachtwoorden zijn niet gelijk." });
       return;
     }
+    setVeldFout(null);
     setLoading(true);
     try {
       await authApi.confirmPasswordReset(token, password, passwordConfirm);
       setStatus("success");
       setTimeout(() => router.push("/login"), 3000);
     } catch (err: unknown) {
-      setErrorMessage(parseApiError(err, "De resetlink is ongeldig of verlopen. Vraag een nieuwe aan."));
-      setStatus("error");
+      const data = axios.isAxiosError(err) ? err.response?.data : undefined;
+      if (data && typeof data === "object" && "errors" in data && data.errors?.password) {
+        // De server zegt dit in het Engels; de regel zelf is bekend.
+        setVeldFout({ veld: "password", tekst: "Je wachtwoord moet tussen de 12 en 72 tekens lang zijn." });
+      } else {
+        setErrorMessage(parseApiError(err, "De resetlink is ongeldig of verlopen. Vraag een nieuwe aan."));
+        setStatus("error");
+      }
     } finally {
       setLoading(false);
     }
@@ -101,9 +114,21 @@ function ResetPasswordContent() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    minLength={12}
+                    maxLength={72}
+                    aria-invalid={veldFout?.veld === "password" || undefined}
+                    aria-describedby={veldFout?.veld === "password" ? "password-fout password-eis" : "password-eis"}
                     disabled={loading}
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
+                  <p id="password-eis" className="text-xs text-muted-foreground">
+                    Minimaal 12 tekens.
+                  </p>
+                  {veldFout?.veld === "password" && (
+                    <p id="password-fout" role="alert" className="text-sm text-destructive-text">
+                      {veldFout.tekst}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password_confirm">Wachtwoord bevestigen</Label>
@@ -114,9 +139,16 @@ function ResetPasswordContent() {
                     value={passwordConfirm}
                     onChange={(e) => setPasswordConfirm(e.target.value)}
                     required
+                    aria-invalid={veldFout?.veld === "password_confirm" || undefined}
+                    aria-describedby={veldFout?.veld === "password_confirm" ? "bevestig-fout" : undefined}
                     disabled={loading}
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
+                  {veldFout?.veld === "password_confirm" && (
+                    <p id="bevestig-fout" role="alert" className="text-sm text-destructive-text">
+                      {veldFout.tekst}
+                    </p>
+                  )}
                 </div>
                 <Button type="submit" className="w-full py-5" disabled={loading}>
                   {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

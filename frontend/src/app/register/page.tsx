@@ -1,5 +1,6 @@
 "use client";
 
+import axios from "axios";
 import * as React from "react";
 import { Loader2, MailCheck, Server } from "lucide-react";
 import { Turnstile } from "@marsidev/react-turnstile";
@@ -8,6 +9,34 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authApi, parseApiError } from "@/lib/api";
 import { useToast } from "@/components/ui/use-toast";
+
+
+type Veld = "name" | "email" | "password" | "password_confirm";
+
+function VeldFout({ id, tekst }: { id: string; tekst?: string }) {
+  if (!tekst) return null;
+  return (
+    <p id={id} role="alert" className="text-sm text-destructive-text">
+      {tekst}
+    </p>
+  );
+}
+
+/** Vertaalt de changeset-fouten van de server naar een melding per veld, of null. */
+function veldFoutenUit(err: unknown): Partial<Record<Veld, string>> | null {
+  if (!axios.isAxiosError(err)) return null;
+  const errors = (err.response?.data as { errors?: Record<string, string[]> } | undefined)?.errors;
+  if (!errors || typeof errors !== "object") return null;
+  const uit: Partial<Record<Veld, string>> = {};
+  if (errors.email) {
+    uit.email = errors.email.some((m) => m.includes("taken"))
+      ? "Dit e-mailadres is al in gebruik. Log in, of vraag een nieuw wachtwoord aan."
+      : "Vul een geldig e-mailadres in.";
+  }
+  if (errors.password) uit.password = "Je wachtwoord moet tussen de 12 en 72 tekens lang zijn.";
+  if (errors.name) uit.name = "Je naam mag hoogstens 100 tekens lang zijn.";
+  return Object.keys(uit).length > 0 ? uit : null;
+}
 
 function RegisterForm() {
   const { toast } = useToast();
@@ -20,18 +49,21 @@ function RegisterForm() {
   const [done, setDone] = React.useState(false);
   const [turnstileToken, setTurnstileToken] = React.useState<string | null>(null);
 
+  // Fouten die bij één veld horen staan onder dat veld, in het Nederlands. De
+  // server geeft Ecto-meldingen in het Engels ("has already been taken"), en
+  // die kwamen eerder letterlijk in een melding die na een paar seconden weg was.
+  const [veldFouten, setVeldFouten] = React.useState<Partial<Record<Veld, string>>>({});
+
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (password !== passwordConfirm) {
-      toast({
-        variant: "destructive",
-        title: "Wachtwoorden komen niet overeen",
-      });
+      setVeldFouten({ password_confirm: "De twee wachtwoorden zijn niet gelijk." });
       return;
     }
+    setVeldFouten({});
     setLoading(true);
     try {
       await authApi.register(
@@ -47,6 +79,11 @@ function RegisterForm() {
       const data = (err as { response?: { data?: { turnstile_required?: boolean } } })?.response?.data;
       if (data?.turnstile_required) {
         setTurnstileToken(null);
+      }
+      const perVeld = veldFoutenUit(err);
+      if (perVeld) {
+        setVeldFouten(perVeld);
+        return;
       }
       toast({
         variant: "destructive",
@@ -98,9 +135,9 @@ function RegisterForm() {
                 <p className="text-sm text-muted-foreground">
                   Welkom bij Bunk Hosting. Je bent automatisch ingelogd en kunt direct aan de slag.
                 </p>
-                <a href="/dashboard">
-                  <Button className="w-full py-5">Naar dashboard</Button>
-                </a>
+                <Button asChild className="w-full py-5">
+                  <a href="/dashboard">Naar dashboard</a>
+                </Button>
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-5">
@@ -108,6 +145,8 @@ function RegisterForm() {
                   <Label htmlFor="name">Naam</Label>
                   <Input
                     id="name"
+                    aria-invalid={veldFouten.name ? true : undefined}
+                    aria-describedby={veldFouten.name ? "name-fout" : undefined}
                     type="text"
                     placeholder="Jan de Vries"
                     value={name}
@@ -116,11 +155,14 @@ function RegisterForm() {
                     disabled={loading}
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
+                  <VeldFout id="name-fout" tekst={veldFouten.name} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">E-mailadres</Label>
                   <Input
                     id="email"
+                    aria-invalid={veldFouten.email ? true : undefined}
+                    aria-describedby={veldFouten.email ? "email-fout" : undefined}
                     type="email"
                     placeholder="naam@voorbeeld.nl"
                     value={email}
@@ -129,11 +171,13 @@ function RegisterForm() {
                     disabled={loading}
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
+                  <VeldFout id="email-fout" tekst={veldFouten.email} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password">Wachtwoord</Label>
                   <Input
                     id="password"
+                    aria-invalid={veldFouten.password ? true : undefined}
                     type="password"
                     placeholder="••••••••"
                     value={password}
@@ -144,7 +188,7 @@ function RegisterForm() {
                        verzenden -- en kreeg dán pas te horen dat het te kort
                        was, inclusief een nieuwe captcha-ronde. */
                     minLength={12}
-                    aria-describedby="password-eis"
+                    aria-describedby={veldFouten.password ? "password-fout password-eis" : "password-eis"}
                     disabled={loading}
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
@@ -152,11 +196,14 @@ function RegisterForm() {
                     Minimaal 12 tekens. Een zin die je onthoudt is veiliger dan een
                     kort wachtwoord met tekens erdoor.
                   </p>
+                  <VeldFout id="password-fout" tekst={veldFouten.password} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password_confirm">Wachtwoord bevestigen</Label>
                   <Input
                     id="password_confirm"
+                    aria-invalid={veldFouten.password_confirm ? true : undefined}
+                    aria-describedby={veldFouten.password_confirm ? "password_confirm-fout" : undefined}
                     type="password"
                     placeholder="••••••••"
                     value={passwordConfirm}
@@ -165,6 +212,7 @@ function RegisterForm() {
                     disabled={loading}
                     className="bg-background/60 border-border/60 focus:border-primary/60"
                   />
+                  <VeldFout id="password_confirm-fout" tekst={veldFouten.password_confirm} />
                 </div>
 
                 <div className="flex justify-center">
