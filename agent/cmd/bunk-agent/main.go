@@ -146,7 +146,8 @@ func run(logger *slog.Logger) error {
 		consumentKlaar = make(chan struct{})
 		go func() {
 			defer close(consumentKlaar)
-			consumeCommands(ctx, werkCtx, logger, prov, cp, cmds, subnet, cfg.ParallelCommands())
+			consumeCommands(ctx, werkCtx, logger, prov, cp, cmds, subnet, cfg.ParallelCommands(),
+				filepath.Join(cfg.StateDir, "memo.json"))
 		}()
 		afbreken = stopWerk
 		logger.Info("command consumer started")
@@ -462,7 +463,7 @@ func wachtOpLopendWerk(logger *slog.Logger, klaar <-chan struct{}, afbreken func
 //
 // `ctx` stopt het ophalen; `werkCtx` is de context waarop commando's draaien.
 // Die zijn bewust verschillend: zie run().
-func consumeCommands(ctx, werkCtx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, cmds <-chan transport.Command, assigned func() *net.IPNet, parallel int) {
+func consumeCommands(ctx, werkCtx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, cmds <-chan transport.Command, assigned func() *net.IPNet, parallel int, memoPad string) {
 	// Replay protection. A MITM on a cleartext channel (or a buggy CP) could
 	// re-deliver a previously-seen command — e.g. replay a delete{vm_id} after
 	// that VMID has been reassigned to another tenant. Each Command.ID is executed
@@ -470,8 +471,11 @@ func consumeCommands(ctx, werkCtx context.Context, logger *slog.Logger, prov pro
 	// redelivery of a FINISHED command is answered with the result it produced,
 	// because the control plane only asks again when it never got one. See
 	// commandMemos.
+	//
+	// Afgeronde resultaten staan ook op schijf (memoPad), zodat dat antwoord een
+	// herstart overleeft. Zie commandMemos.bewaar.
 	const maxSeen = 1024
-	memos := newCommandMemos(maxSeen)
+	memos := laadCommandMemos(maxSeen, memoPad)
 
 	// Commando's voor verschillende VPS'en lopen naast elkaar, voor dezelfde VPS
 	// op volgorde. Zie werkers.go voor waarom dat onderscheid nodig is.

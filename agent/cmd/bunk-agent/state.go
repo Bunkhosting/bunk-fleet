@@ -38,12 +38,19 @@ func loadState(path string) (persistedState, bool) {
 // is de identiteit van de node; kwijt betekent opnieuw inschrijven met een
 // token dat al gebruikt is.
 func saveState(path string, st persistedState) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
 	b, err := json.Marshal(st)
 	if err != nil {
+		return err
+	}
+	return schrijfAtomisch(path, b)
+}
+
+// schrijfAtomisch zet b in path zodat er na een stroomstoring ofwel de oude
+// ofwel de nieuwe inhoud staat, nooit een half bestand. Alleen de eigenaar mag
+// lezen.
+func schrijfAtomisch(path string, b []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"

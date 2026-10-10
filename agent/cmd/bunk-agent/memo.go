@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"os"
 	"sync"
 
 	"github.com/Bunk-Hosting/bunk-fleet/agent/internal/transport"
@@ -27,6 +29,10 @@ type commandMemos struct {
 	byID  map[string]*commandMemo
 	order []string
 	max   int
+
+	// pad is waar afgeronde resultaten bewaard worden; leeg = alleen in het
+	// geheugen. Zie bewaar.
+	pad string
 }
 
 type commandMemo struct {
@@ -83,4 +89,69 @@ func (m *commandMemos) record(id string, res transport.CommandResult) {
 	}
 	memo.done = true
 	memo.result = res
+	m.bewaar()
+}
+
+// bewaarde is een afgerond commando zoals het op schijf staat.
+type bewaarde struct {
+	ID     string                  `json:"id"`
+	Result transport.CommandResult `json:"result"`
+}
+
+// bewaar schrijft de afgeronde resultaten naar schijf. Aanroepen met m.mu vast.
+//
+// Waarom: het geheugen van de agent herhaalt een resultaat als het control
+// plane er opnieuw om vraagt. Stond dat alleen in RAM, dan was het na een
+// herstart weg, en voerde de agent een herleverd commando gewoon nog een keer
+// uit. Voor een terugzetactie betekent dat: klaar, resultaat niet afgeleverd
+// (het control plane herstartte net), agent herstart, terugzetten nog een keer
+// -- en alles wat de klant in de tussentijd schreef is weg. Alleen afgeronde
+// commando's: wat nog liep, moet na een herstart echt opnieuw.
+func (m *commandMemos) bewaar() {
+	if m.pad == "" {
+		return
+	}
+	lijst := make([]bewaarde, 0, len(m.order))
+	for _, id := range m.order {
+		if memo := m.byID[id]; memo != nil && memo.done {
+			lijst = append(lijst, bewaarde{ID: id, Result: memo.result})
+		}
+	}
+	b, err := json.Marshal(lijst)
+	if err != nil {
+		return
+	}
+	// Mislukt het schrijven, dan geldt het geheugen nog steeds tot de
+	// herstart; dat is hoe het altijd was.
+	_ = schrijfAtomisch(m.pad, b)
+}
+
+// laadCommandMemos maakt het geheugen aan en vult het met wat er bij een
+// vorige run is bewaard. Een ontbrekend of onleesbaar bestand is een leeg
+// geheugen, geen fout: de agent moet altijd kunnen starten.
+func laadCommandMemos(max int, pad string) *commandMemos {
+	m := newCommandMemos(max)
+	m.pad = pad
+	if pad == "" {
+		return m
+	}
+	b, err := os.ReadFile(pad)
+	if err != nil {
+		return m
+	}
+	var lijst []bewaarde
+	if json.Unmarshal(b, &lijst) != nil {
+		return m
+	}
+	if len(lijst) > max {
+		lijst = lijst[len(lijst)-max:]
+	}
+	for _, e := range lijst {
+		if e.ID == "" {
+			continue
+		}
+		m.byID[e.ID] = &commandMemo{done: true, result: e.Result}
+		m.order = append(m.order, e.ID)
+	}
+	return m
 }

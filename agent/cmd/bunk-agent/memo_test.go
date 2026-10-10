@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -103,4 +105,37 @@ func TestConcurrentUseIsSafe(t *testing.T) {
 		go func() { defer wg.Done(); m.record(id, transport.CommandResult{Status: "done"}) }()
 	}
 	wg.Wait()
+}
+
+// Een afgerond commando overleeft een herstart. Zonder dit voerde de agent een
+// herleverde terugzetactie na een herstart gewoon nog een keer uit.
+func TestEenAfgerondResultaatOverleeftEenHerstart(t *testing.T) {
+	pad := filepath.Join(t.TempDir(), "memo.json")
+
+	voor := laadCommandMemos(16, pad)
+	voor.accept("restore-1")
+	voor.record("restore-1", transport.CommandResult{Status: "done", VMID: "131"})
+	voor.accept("loopt-nog")
+
+	na := laadCommandMemos(16, pad)
+
+	prior := na.accept("restore-1")
+	if prior == nil || !prior.done || prior.result.VMID != "131" {
+		t.Fatalf("na herstart: %+v; wilde het afgeronde resultaat terug", prior)
+	}
+	// Wat nog liep toen de agent stopte, moet na een herstart echt opnieuw.
+	if na.accept("loopt-nog") != nil {
+		t.Error("een commando dat nog liep, wordt na een herstart niet opnieuw uitgevoerd")
+	}
+}
+
+func TestEenKapotMemobestandHoudtDeAgentNietTegen(t *testing.T) {
+	pad := filepath.Join(t.TempDir(), "memo.json")
+	if err := os.WriteFile(pad, []byte("{kapot"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := laadCommandMemos(16, pad)
+	if m.accept("nieuw") != nil {
+		t.Error("een nieuw commando werd als bekend gezien")
+	}
 }
