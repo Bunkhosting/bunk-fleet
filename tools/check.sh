@@ -69,7 +69,7 @@ start_test_pg() {
 check_shell() {
   echo "=== shellscripts: shellcheck ==="
   docker run --rm -v "$ROOT":/mnt -w /mnt koalaman/shellcheck-alpine:stable \
-    sh -c 'shellcheck -S warning *.sh tools/*.sh provisioning/*/*.sh'
+    sh -c 'shellcheck -S warning *.sh tools/*.sh provisioning/*/*.sh control_plane/priv/agent-update/bunk-agent-update provisioning/vps-welcome/welcome'
 }
 
 check_elixir() {

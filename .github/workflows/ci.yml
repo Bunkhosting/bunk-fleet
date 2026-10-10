@@ -200,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Shellcheck
-        run: shellcheck -S warning *.sh tools/*.sh provisioning/*/*.sh
+        run: shellcheck -S warning *.sh tools/*.sh provisioning/*/*.sh control_plane/priv/agent-update/bunk-agent-update provisioning/vps-welcome/welcome
 
   # De enige controle die over de grens tussen Elixir en TypeScript heen kijkt.
   # `mix test` ziet frontend/ niet en de e2e-suite kent de foutentabel niet;
