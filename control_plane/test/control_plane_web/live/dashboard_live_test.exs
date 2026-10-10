@@ -18,8 +18,11 @@ defmodule ControlPlaneWeb.DashboardLiveTest do
         name: "Admin"
       })
 
-    {:ok, _admin} = Accounts.update_user_role(admin, :admin)
-    token = Accounts.generate_user_session_token(admin)
+    {:ok, admin} = Accounts.update_user_role(admin, :admin)
+    admin = ControlPlane.Fixtures.with_second_factor(admin)
+    # Zoals een login met code die uitgeeft: het dashboard eist een sessie die
+    # met een tweede factor begon.
+    token = Accounts.generate_user_session_token(admin, mfa: true)
 
     conn
     |> Plug.Test.init_test_session(%{})
@@ -103,5 +106,22 @@ defmodule ControlPlaneWeb.DashboardLiveTest do
     Events.broadcast_changed(:node)
 
     assert render(view) =~ "node-broadcast"
+  end
+
+  test "een beheerder met een sessie zonder tweede factor komt er niet in", %{conn: _} do
+    # Wachtwoord alleen is te weinig voor een scherm met elke klant en elke node.
+    {:ok, admin} =
+      Accounts.register_user(%{email: "admin-zonder@bunk.test", password: "super-secret-pw-123"})
+
+    {:ok, admin} = Accounts.update_user_role(admin, :admin)
+    admin = ControlPlane.Fixtures.with_second_factor(admin)
+    token = Accounts.generate_user_session_token(admin)
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Test.init_test_session(%{})
+      |> Plug.Conn.put_session(:user_token, token)
+
+    assert {:error, {:redirect, %{to: "/login"}}} = live(conn, "/")
   end
 end

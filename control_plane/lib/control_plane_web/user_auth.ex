@@ -11,9 +11,14 @@ defmodule ControlPlaneWeb.UserAuth do
 
   alias ControlPlane.Accounts
 
-  @doc "Logs the user in: issues a session token, stores it, renews the session."
-  def log_in_user(conn, user, _params \\ %{}) do
-    token = Accounts.generate_user_session_token(user)
+  @doc """
+  Logs the user in: issues a session token, stores it, renews the session.
+
+  `mfa: true` als de gebruiker net zijn tweede factor liet zien; het dashboard
+  van beheerders eist dat van de sessie (zie on_mount(:ensure_staff)).
+  """
+  def log_in_user(conn, user, opts \\ []) do
+    token = Accounts.generate_user_session_token(user, mfa: Keyword.get(opts, :mfa, false))
     return_to = get_session(conn, :user_return_to)
 
     conn
@@ -99,7 +104,11 @@ defmodule ControlPlaneWeb.UserAuth do
     # ADMIN ONLY. This dashboard renders every tenant's VPS + node unscoped, so
     # nothing short of :admin may reach it — admitting any customer role here
     # would be a cross-tenant leak.
-    if user && user.role == :admin do
+    #
+    # En de SESSIE moet met een tweede factor begonnen zijn, net als bij het
+    # beheerpaneel van de API (Plugs.RequireAdminMfa). Dit dashboard toont elke
+    # klant en elke node; een wachtwoord alleen is daar te weinig.
+    if user && user.role == :admin && Accounts.session_mfa?(session["user_token"]) do
       {:cont, socket}
     else
       socket =
