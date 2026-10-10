@@ -307,6 +307,27 @@ func (b *netwerkBeheer) bijwerken(logger *slog.Logger, s transport.NodeSettings)
 	}
 }
 
+// zonderAntwoord is wat de hartslaglus doet als het control plane niet
+// antwoordde. Het netwerk krijgt dan een kans met de laatst bekende
+// instellingen: bij de eerste hartslag na het opstarten zijn dat er geen en
+// geldt de omgeving, zodat een node die het dashboard nooit bereikt toch
+// netwerk heeft.
+//
+// Het was een lege set instellingen. Dan telde één gemiste hartslag als "de
+// eigenaar heeft de bridge weggehaald": de agent viel terug op de bridge uit de
+// omgeving, zette daar de gateway en de regels op (of meldde de node uit de
+// verkoop als die leeg was), en zette het bij het volgende antwoord weer terug
+// -- met het gateway-adres achtergebleven op de verkeerde bridge.
+func (b *netwerkBeheer) zonderAntwoord(logger *slog.Logger) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	laatste := b.instellingen
+	b.mu.Unlock()
+	b.bijwerken(logger, laatste)
+}
+
 // oordeel verzamelt de feiten van dit moment en beoordeelt ze. Het draait elke
 // hartslag, zodat een notitie vanzelf verdwijnt zodra de operator iets heeft
 // rechtgezet in plaats van tot de volgende herstart te blijven staan.

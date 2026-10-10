@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -119,11 +120,17 @@ func (m *commandMemos) bewaar() {
 	}
 	b, err := json.Marshal(lijst)
 	if err != nil {
+		slog.Warn("command memo: kon het geheugen niet omzetten naar json", "err", err)
 		return
 	}
 	// Mislukt het schrijven, dan geldt het geheugen nog steeds tot de
-	// herstart; dat is hoe het altijd was.
-	_ = schrijfAtomisch(m.pad, b)
+	// herstart. Maar wel zichtbaar: een volle schijf betekent dat afgeronde
+	// commando's een herstart niet meer overleven, en dat merkt anders niemand
+	// tot een terugzetactie twee keer draait.
+	if err := schrijfAtomisch(m.pad, b); err != nil {
+		slog.Warn("command memo: kon het geheugen niet bewaren; het geldt tot de volgende herstart",
+			"pad", m.pad, "err", err)
+	}
 }
 
 // laadCommandMemos maakt het geheugen aan en vult het met wat er bij een
@@ -137,10 +144,14 @@ func laadCommandMemos(max int, pad string) *commandMemos {
 	}
 	b, err := os.ReadFile(pad)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("command memo: bewaard geheugen onleesbaar; begonnen met een leeg", "pad", pad, "err", err)
+		}
 		return m
 	}
 	var lijst []bewaarde
-	if json.Unmarshal(b, &lijst) != nil {
+	if err := json.Unmarshal(b, &lijst); err != nil {
+		slog.Warn("command memo: bewaard geheugen beschadigd; begonnen met een leeg", "pad", pad, "err", err)
 		return m
 	}
 	if len(lijst) > max {

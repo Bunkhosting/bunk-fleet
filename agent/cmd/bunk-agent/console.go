@@ -86,6 +86,7 @@ func handleConsoleConnect(ctx context.Context, logger *slog.Logger, cp *transpor
 	}
 
 	go func() {
+		defer vangPaniek(logger, "console")
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), consoleSessionTimeout)
 		defer cancel()
 

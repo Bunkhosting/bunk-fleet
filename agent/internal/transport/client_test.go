@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -401,5 +402,26 @@ func TestSpreidBlijftBinnenDeMarge(t *testing.T) {
 	}
 	if spreid(0) != 0 {
 		t.Error("spreid(0) is niet 0")
+	}
+}
+
+// Een mislukte relay-verbinding mag het relay-token niet in de foutmelding
+// hebben: die gaat de log van de node in.
+func TestEenMislukteRelayVerbindingLektHetTokenNiet(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil)
+	c.SetCredentials("node-1", "agent-token")
+	const geheim = "relay+geheim/123=="
+
+	_, err := c.DialConsoleRelay(context.Background(), geheim)
+	if err == nil {
+		t.Fatal("de verbinding lukte tegen een server die 403 geeft")
+	}
+	if strings.Contains(err.Error(), geheim) || strings.Contains(err.Error(), url.QueryEscape(geheim)) {
+		t.Errorf("het token staat in de fout: %v", err)
 	}
 }

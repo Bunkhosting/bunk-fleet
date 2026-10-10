@@ -27,12 +27,18 @@ type werkers struct {
 	mu    sync.Mutex
 	rijen map[string]chan transport.Command
 
-	// Hoeveel banen er tegelijk mogen lopen. Niet oneindig: een provision is op
-	// Proxmox vooral schijfwerk, en tien klonen tegelijk maakt een node niet
-	// sneller maar alleen trager voor iedereen. Zit het vol, dan wordt het
-	// commando uitgevoerd op de plek waar het binnenkwam -- precies het gedrag
-	// van vóór dit bestand, dus druk worden is traag worden en niet stuk gaan.
-	max int
+	// Hoeveel commando's er tegelijk mogen lopen. Niet oneindig: een provision
+	// is op Proxmox vooral schijfwerk, en tien klonen tegelijk maakt een node
+	// niet sneller maar alleen trager voor iedereen.
+	//
+	// De grens zit op het uitvoeren, niet op het aantal banen. Zat hij op de
+	// banen, dan werd een commando bij een volle node uitgevoerd op de plek waar
+	// het binnenkwam: in de consumer. Die las dan minutenlang niets -- ook geen
+	// console_connect, dus de terminal van een klant bleef hangen omdat een
+	// ander een VPS bestelde. Nu krijgt elk commando meteen een baan en wacht
+	// het daar op een vrije plek; de consumer wacht nooit.
+	max     int
+	plekken chan struct{}
 
 	uitvoeren func(transport.Command)
 	klaar     sync.WaitGroup
@@ -50,6 +56,7 @@ func nieuweWerkers(max int, uitvoeren func(transport.Command)) *werkers {
 	return &werkers{
 		rijen:     make(map[string]chan transport.Command, max),
 		max:       max,
+		plekken:   make(chan struct{}, max),
 		uitvoeren: uitvoeren,
 	}
 }
@@ -72,11 +79,6 @@ func (w *werkers) stuur(cmd transport.Command) {
 	w.mu.Lock()
 	rij, bestaat := w.rijen[sleutel]
 	if !bestaat {
-		if len(w.rijen) >= w.max {
-			w.mu.Unlock()
-			w.uitvoeren(cmd)
-			return
-		}
 		rij = make(chan transport.Command, rijDiepte)
 		w.rijen[sleutel] = rij
 		w.klaar.Add(1)
@@ -97,7 +99,9 @@ func (w *werkers) draai(sleutel string, rij chan transport.Command) {
 	for {
 		select {
 		case cmd := <-rij:
+			w.plekken <- struct{}{}
 			w.uitvoeren(cmd)
+			<-w.plekken
 		default:
 			// Leeg. Onder het slot nog één keer kijken, want tussen het lezen
 			// hierboven en het slot hieronder kan er iets bij zijn gekomen.

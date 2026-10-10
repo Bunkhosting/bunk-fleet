@@ -517,13 +517,25 @@ func (c *Client) DialConsoleRelay(ctx context.Context, relayToken string) (net.C
 		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + c.token}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("transport: console relay dial: %w", err)
+		// De fout van de websocket-bibliotheek bevat de URL, en daarmee het
+		// relay-token uit de query. Dat hoort niet in de log van de node.
+		return nil, fmt.Errorf("transport: console relay dial: %s", zonderToken(err.Error(), relayToken))
 	}
 
 	// The SSH stream is arbitrary binary and can be long-lived and idle (someone
 	// leaves a terminal open), so no read limit and no message-size assumptions.
 	conn.SetReadLimit(-1)
 	return websocket.NetConn(context.WithoutCancel(ctx), conn, websocket.MessageBinary), nil
+}
+
+// zonderToken vervangt een token in een foutmelding door ***, zowel letterlijk
+// als zoals het in een query staat.
+func zonderToken(tekst, token string) string {
+	if token == "" {
+		return tekst
+	}
+	tekst = strings.ReplaceAll(tekst, url.QueryEscape(token), "***")
+	return strings.ReplaceAll(tekst, token, "***")
 }
 
 // consoleRelayURL turns the control-plane base URL into the ws:// or wss:// URL

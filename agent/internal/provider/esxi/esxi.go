@@ -123,7 +123,19 @@ func isNotFound(err error) bool {
 		break
 	}
 
-	return strings.Contains(strings.ToLower(err.Error()), "not found")
+	// De tekstcontrole alleen voor een antwoord van vSphere zelf. Een fout op
+	// transportniveau, of een HTTP-404 van een proxy of een verkeerd /sdk-pad,
+	// bevat ook "not found" -- en dan meldde een verwijdering "klaar" terwijl de
+	// VM er nog stond, en gaf de inventaris een lege lijst: "alles is weg".
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "404") {
+		return false
+	}
+	return strings.Contains(msg, "not found")
 }
 
 // CreateVM clones the configured template into a new powered-on VM.
@@ -294,9 +306,14 @@ func (c *Client) DeleteVM(ctx context.Context, id string, _ string) error {
 		return fmt.Errorf("esxi: power state: %w", err)
 	}
 
+	// Zie de Proxmox-provider: een mislukte stop is nog geen reden om op te
+	// geven, maar hij hoort wel in de fout als de destroy daarna faalt.
+	var stopFout error
 	if state != types.VirtualMachinePowerStatePoweredOff {
-		if t, err := vm.PowerOff(ctx); err == nil {
-			_ = t.Wait(ctx)
+		if t, err := vm.PowerOff(ctx); err != nil {
+			stopFout = err
+		} else if err := t.Wait(ctx); err != nil {
+			stopFout = err
 		}
 	}
 
@@ -304,6 +321,9 @@ func (c *Client) DeleteVM(ctx context.Context, id string, _ string) error {
 	if err != nil {
 		if isNotFound(err) {
 			return nil
+		}
+		if stopFout != nil {
+			return fmt.Errorf("esxi: destroy: %w (daarvoor mislukte het uitzetten al: %v)", err, stopFout)
 		}
 		return fmt.Errorf("esxi: destroy: %w", err)
 	}
@@ -519,12 +539,14 @@ func (c *Client) Capacity(ctx context.Context) (provider.Capacity, error) {
 	usedVCPU, usedRAM := 0, 0
 	if len(hs.Vm) > 0 {
 		var vms []mo.VirtualMachine
-		if err := pc.Retrieve(ctx, hs.Vm, []string{"summary.config", "summary.runtime"}, &vms); err == nil {
-			for _, vm := range vms {
-				if vm.Summary.Runtime.PowerState == types.VirtualMachinePowerStatePoweredOn {
-					usedVCPU += int(vm.Summary.Config.NumCpu)
-					usedRAM += int(vm.Summary.Config.MemorySizeMB)
-				}
+		// Zie de Proxmox-provider: zonder VM-lijst is het gebruik onbekend, niet nul.
+		if err := pc.Retrieve(ctx, hs.Vm, []string{"summary.config", "summary.runtime"}, &vms); err != nil {
+			return provider.Capacity{}, fmt.Errorf("esxi: vm-lijst ophalen voor de capaciteit: %w", err)
+		}
+		for _, vm := range vms {
+			if vm.Summary.Runtime.PowerState == types.VirtualMachinePowerStatePoweredOn {
+				usedVCPU += int(vm.Summary.Config.NumCpu)
+				usedRAM += int(vm.Summary.Config.MemorySizeMB)
 			}
 		}
 	}

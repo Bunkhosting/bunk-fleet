@@ -715,3 +715,87 @@ func TestDeleteVMGaatDoorAlsDeGastNietBestaat(t *testing.T) {
 		t.Fatalf("een ontbrekende gast gaf een fout: %v", err)
 	}
 }
+
+// Een VM-lijst die niet opgehaald kan worden, maakte het gebruik nul: een volle
+// node meldde dan al zijn geheugen als vrij.
+func TestCapacityMetEenOntbrekendeGastenlijstIsEenFout(t *testing.T) {
+	r := newRecorder(t)
+	r.on("GET /nodes/pve/status", `{"data":{"cpuinfo":{"cpus":4},"memory":{"total":8589934592},"rootfs":{"total":107374182400,"avail":53687091200}}}`)
+	r.on("GET /nodes/pve/qemu", `{"data":[{"vmid":101,"status":"running","cpus":2,"maxmem":4294967296}]}`)
+	r.onStatus("GET /nodes/pve/lxc", http.StatusInternalServerError, `{"errors":"stuk"}`)
+
+	_, err := r.client(t).Capacity(context.Background())
+	if err == nil {
+		t.Fatal("een mislukte lxc-lijst gaf toch een capaciteit")
+	}
+	if !strings.Contains(err.Error(), "lxc") {
+		t.Errorf("de fout noemt niet welke lijst ontbrak: %v", err)
+	}
+
+	// En de controle kan ook groen: met beide lijsten is er gewoon capaciteit.
+	r.on("GET /nodes/pve/lxc", `{"data":[]}`)
+	got, err := r.client(t).Capacity(context.Background())
+	if err != nil {
+		t.Fatalf("met beide lijsten: %v", err)
+	}
+	if got.AvailRAMMB != 4096 {
+		t.Errorf("AvailRAMMB = %d, wil 4096", got.AvailRAMMB)
+	}
+}
+
+// Een ipset die al bestaat is geen fout (herhaalde uitrol); een geweigerde wel.
+// Die werd ingeslikt, en dan startte de afscherming op een half fundament.
+func TestEenGeweigerdeIpsetStoptDeUitrol(t *testing.T) {
+	for naam, tc := range map[string]struct {
+		status  int
+		body    string
+		wilFout bool
+	}{
+		"bestaat al": {http.StatusInternalServerError, `{"errors":"ipset 'ipfilter-net0' already exists"}`, false},
+		"geweigerd":  {http.StatusForbidden, `{"errors":"permission denied"}`, true},
+	} {
+		t.Run(naam, func(t *testing.T) {
+			r := newRecorder(t)
+			r.on("GET /cluster/nextid", `{"data":"133"}`)
+			r.on("POST /nodes/pve/qemu/9000/clone", okTask)
+			r.on("PUT /nodes/pve/qemu/133/resize", okTask)
+			r.on("POST /nodes/pve/qemu/133/config", `{"data":null}`)
+			r.firewallVoor("133")
+			r.onStatus("POST /nodes/pve/qemu/133/firewall/ipset", tc.status, tc.body)
+			r.on("POST /nodes/pve/qemu/133/status/start", okTask)
+			r.on("GET /nodes/pve/qemu/133/status/current", `{"data":{"status":"stopped"}}`)
+			r.on("DELETE /nodes/pve/qemu/133", okTask)
+			r.taskSucceeds()
+
+			_, err := r.client(t).CreateVM(context.Background(), provider.VMSpec{
+				Name: "x", TemplateID: 9000, DiskGB: 40, IPConfig: "ip=10.10.0.23/22,gw=10.10.0.1",
+			})
+			if tc.wilFout && err == nil {
+				t.Fatal("CreateVM slaagde terwijl de ipset geweigerd werd")
+			}
+			if !tc.wilFout && err != nil {
+				t.Fatalf("een bestaande ipset liet de uitrol falen: %v", err)
+			}
+			if tc.wilFout && r.count("POST", "/nodes/pve/qemu/133/status/start") != 0 {
+				t.Error("de gast is gestart zonder afscherming")
+			}
+		})
+	}
+}
+
+// Faalt de destroy na een mislukte stop, dan hoort de reden van de stop erbij.
+func TestEenMislukteStopStaatInDeFoutVanDeVerwijdering(t *testing.T) {
+	r := newRecorder(t)
+	r.on("GET /nodes/pve/qemu/140/config", `{"data":{}}`)
+	r.on("GET /nodes/pve/qemu/140/status/current", `{"data":{"status":"running"}}`)
+	r.onStatus("POST /nodes/pve/qemu/140/status/stop", http.StatusForbidden, `{"errors":"geen VM.PowerMgmt"}`)
+	r.onStatus("DELETE /nodes/pve/qemu/140", http.StatusInternalServerError, `{"errors":"VM is running"}`)
+
+	err := r.client(t).DeleteVM(context.Background(), "140", "")
+	if err == nil {
+		t.Fatal("DeleteVM slaagde")
+	}
+	if !strings.Contains(err.Error(), "stoppen") {
+		t.Errorf("de oorzaak (de stop) ontbreekt in de fout: %v", err)
+	}
+}

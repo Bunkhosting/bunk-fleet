@@ -306,6 +306,61 @@ func TestEenOnbeheerdeNodeOnthoudtHetPaneelWelMaarPastNietsToe(t *testing.T) {
 	}
 }
 
+func TestEenGemisteHartslagVergeetDeBridgeVanHetPaneelNiet(t *testing.T) {
+	b := beheerVoor(true, "bunkomgeving9")
+	paneel := "bunktest9"
+	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+
+	b.bijwerken(logger, transport.NodeSettings{Bridge: &paneel})
+	eerste := b.laatstePog
+	if b.toegepast != paneel {
+		t.Fatalf("voorwaarde: de bridge van het paneel werd niet toegepast maar %q", b.toegepast)
+	}
+
+	b.zonderAntwoord(logger)
+
+	if b.toegepast != paneel {
+		t.Errorf("na een gemiste hartslag werd %q toegepast in plaats van de bridge van het paneel", b.toegepast)
+	}
+	if !b.laatstePog.Equal(eerste) {
+		t.Error("een gemiste hartslag zette het netwerk opnieuw op")
+	}
+	if got := effectieveBridge(b.cfg.Bridge, b.instellingen); got != paneel {
+		t.Errorf("het paneel is vergeten: %q", got)
+	}
+}
+
+func TestZonderOoitEenAntwoordGeldtDeOmgeving(t *testing.T) {
+	b := beheerVoor(true, "bunkomgeving9")
+	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+
+	b.zonderAntwoord(logger)
+
+	if b.toegepast != "bunkomgeving9" {
+		t.Errorf("een node die het control plane nooit bereikte, kreeg %q in plaats van de bridge uit de omgeving", b.toegepast)
+	}
+}
+
+func TestEenMislukteHartslagGaatNietNaarDeOmgeving(t *testing.T) {
+	b := beheerVoor(true, "bunkomgeving9")
+	paneel := "bunktest9"
+	logger := slog.New(slog.NewTextHandler(new(strings.Builder), nil))
+	b.bijwerken(logger, transport.NodeSettings{Bridge: &paneel})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	cp := transport.New(srv.URL, nil)
+	cp.SetCredentials("node-1", "token-1")
+
+	sendHeartbeat(context.Background(), logger, stubProvider{capacity: provider.Capacity{TotalVCPU: 4, AvailVCPU: 4}}, cp, &offerHolder{v: config.OfferConfig{}}, b, nil)
+
+	if b.toegepast != paneel {
+		t.Errorf("na een 503 op de hartslag staat het netwerk op %q", b.toegepast)
+	}
+}
+
 // collectMetNetwerk draait één heartbeat met een netwerkbeheerder en geeft terug
 // wat er bij het control plane aankwam.
 func collectMetNetwerk(t *testing.T, prov provider.Provider, nb *netwerkBeheer) *transport.Heartbeat {

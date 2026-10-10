@@ -512,16 +512,18 @@ func (c *Client) Capacity(ctx context.Context) (provider.Capacity, error) {
 		return provider.Capacity{}, err
 	}
 
-	// A failure to list one kind is non-fatal: we still report node totals and
-	// whatever the other list gave. It does make the node look emptier than it
-	// is, so the heartbeat that follows is the pessimistic case, not a silent
-	// overstatement of a whole node.
+	// Een lijst die niet opgehaald kon worden is een fout, geen lege lijst. Wat
+	// gasten gebruiken wordt van het totaal afgetrokken; een ontbrekende lijst
+	// telde als nul, en dan meldde een volle node al zijn geheugen als vrij en
+	// plaatste de scheduler er VPS'en op die niet konden starten. Liever een
+	// hartslag zonder capaciteit (de node krijgt even niets, met de reden erbij)
+	// dan een te mooie.
 	guests := make([]guestEntry, 0, 8)
 	for _, kind := range []string{"qemu", "lxc"} {
 		var gl guestList
 		path := "/nodes/" + url.PathEscape(c.cfg.Node) + "/" + kind
 		if err := c.doJSON(ctx, http.MethodGet, path, nil, &gl); err != nil {
-			continue
+			return provider.Capacity{}, fmt.Errorf("proxmox: %s-lijst ophalen voor de capaciteit: %w", kind, err)
 		}
 		guests = append(guests, gl.Data...)
 	}
@@ -998,8 +1000,12 @@ func (c *Client) isoleerGast(ctx context.Context, node string, vmid int, spec pr
 	ipset := url.Values{}
 	ipset.Set("name", "ipfilter-net0")
 	if err := c.doJSON(ctx, http.MethodPost, base+"/ipset", ipset, nil); err != nil {
-		// Bestaat al is geen fout: dit draait ook bij een herhaalde uitrol.
-		_ = err
+		// Bestaat al is geen fout: dit draait ook bij een herhaalde uitrol. Elke
+		// andere fout (een 403, een storing) wel; die werd ingeslikt, en dan
+		// faalde de volgende stap met een melding die niets over de oorzaak zei.
+		if !strings.Contains(strings.ToLower(err.Error()), "exist") {
+			return fmt.Errorf("proxmox: ipset vm %d: %w", vmid, err)
+		}
 	}
 	entry := url.Values{}
 	entry.Set("cidr", ip)
@@ -1136,12 +1142,27 @@ func (c *Client) DeleteVM(ctx context.Context, id string, vpsID string) error {
 
 	// A destroy on a running VM is rejected ("VM is running"). Stop it first
 	// and WAIT for the stop task to finish before deleting.
-	if status, _, err := c.currentState(ctx, vmid); err == nil && status != "stopped" {
+	//
+	// Een mislukte stop is nog geen reden om op te geven: de destroy kan alsnog
+	// lukken (de gast was net uit). Maar faalt de destroy daarna, dan hoort de
+	// reden van de stop erbij; anders staat er alleen "VM is running".
+	var stopFout error
+	if status, _, err := c.currentState(ctx, vmid); err != nil {
+		stopFout = fmt.Errorf("status lezen: %w", err)
+	} else if status != "stopped" {
 		stopPath := fmt.Sprintf("/nodes/%s/qemu/%d/status/stop", node, vmid)
 		var stopTask taskResponse
-		if err := c.doJSON(ctx, http.MethodPost, stopPath, url.Values{}, &stopTask); err == nil {
-			_ = c.waitTask(ctx, stopTask.Data)
+		if err := c.doJSON(ctx, http.MethodPost, stopPath, url.Values{}, &stopTask); err != nil {
+			stopFout = fmt.Errorf("stoppen: %w", err)
+		} else if err := c.waitTask(ctx, stopTask.Data); err != nil {
+			stopFout = fmt.Errorf("wachten op stoppen: %w", err)
 		}
+	}
+	metStop := func(err error) error {
+		if stopFout == nil {
+			return err
+		}
+		return fmt.Errorf("%w (daarvoor mislukte al: %v)", err, stopFout)
 	}
 
 	delPath := fmt.Sprintf("/nodes/%s/qemu/%d", node, vmid)
@@ -1152,12 +1173,12 @@ func (c *Client) DeleteVM(ctx context.Context, id string, vpsID string) error {
 		if strings.Contains(err.Error(), "does not exist") {
 			return nil
 		}
-		return err
+		return metStop(err)
 	}
 	// Destroy is asynchronous: wait on the returned UPID so callers only see
 	// success once the guest is actually gone.
 	if err := c.waitTask(ctx, delTask.Data); err != nil {
-		return fmt.Errorf("proxmox: destroy vm %d: %w", vmid, err)
+		return metStop(fmt.Errorf("proxmox: destroy vm %d: %w", vmid, err))
 	}
 	return nil
 }

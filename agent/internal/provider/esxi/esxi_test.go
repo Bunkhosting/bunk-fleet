@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"testing"
 
 	"github.com/vmware/govmomi/find"
@@ -223,13 +224,15 @@ func TestIsNotFoundSeesThroughWrapping(t *testing.T) {
 		err  error
 		want bool
 	}{
-		"nil":               {nil, false},
-		"bare not-found":    {bare, true},
-		"wrapped once":      {fmt.Errorf("esxi: power state: %w", bare), true},
-		"wrapped twice":     {fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", bare)), true},
-		"plain message":     {errors.New("vm not found on host"), true},
-		"unrelated failure": {errors.New("connection refused"), false},
-		"wrapped unrelated": {fmt.Errorf("esxi: destroy: %w", errors.New("permission denied")), false},
+		"nil":                    {nil, false},
+		"bare not-found":         {bare, true},
+		"wrapped once":           {fmt.Errorf("esxi: power state: %w", bare), true},
+		"wrapped twice":          {fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", bare)), true},
+		"plain message":          {errors.New("vm not found on host"), true},
+		"unrelated failure":      {errors.New("connection refused"), false},
+		"wrapped unrelated":      {fmt.Errorf("esxi: destroy: %w", errors.New("permission denied")), false},
+		"http 404 van een proxy": {errors.New("esxi: connect: 404 Not Found"), false},
+		"transportfout":          {fmt.Errorf("esxi: power state: %w", &url.Error{Op: "Post", URL: "https://esx/sdk", Err: errors.New("host not found")}), false},
 	}
 
 	for name, tc := range cases {

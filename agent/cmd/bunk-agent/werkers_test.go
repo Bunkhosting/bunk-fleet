@@ -106,9 +106,7 @@ func TestWerkersZonderVPSIDInEenBaan(t *testing.T) {
 	}
 }
 
-// Meer VPS'en dan banen mag niets laten liggen. Het wordt dan trager -- het
-// commando wordt uitgevoerd op de plek waar het binnenkwam -- maar dat is
-// precies het gedrag van vóór dit bestand.
+// Meer VPS'en dan plekken mag niets laten liggen: het wordt trager, niet stuk.
 func TestWerkersVoerenAllesUitOokBovenDeGrens(t *testing.T) {
 	var uitgevoerd int32
 
@@ -139,4 +137,55 @@ func TestWerkersRuimenLegeBanenOp(t *testing.T) {
 	if len(w.rijen) != 0 {
 		t.Fatalf("er staan nog %d banen open", len(w.rijen))
 	}
+}
+
+// De grens geldt voor het uitvoeren: nooit meer dan max tegelijk, ook met meer
+// VPS'en dan plekken.
+func TestWerkersOverschrijdenDeGrensNooit(t *testing.T) {
+	var tegelijk, piek int32
+	w := nieuweWerkers(2, func(transport.Command) {
+		n := atomic.AddInt32(&tegelijk, 1)
+		for {
+			oud := atomic.LoadInt32(&piek)
+			if n <= oud || atomic.CompareAndSwapInt32(&piek, oud, n) {
+				break
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+		atomic.AddInt32(&tegelijk, -1)
+	})
+	for i := 0; i < 20; i++ {
+		w.stuur(transport.Command{ID: fmt.Sprintf("c%d", i), VPSID: fmt.Sprintf("vps%d", i), Kind: transport.CmdStop})
+	}
+	w.wacht()
+	if piek > 2 {
+		t.Fatalf("%d commando's liepen tegelijk bij een grens van 2", piek)
+	}
+	if piek < 2 {
+		t.Fatalf("piek %d: de proef liet niets naast elkaar lopen, dus bewijst hij niets", piek)
+	}
+}
+
+// Bij een volle node mag de aanleveraar niet wachten. Die leest ook de
+// console_connects; voerde hij zelf een uitrol uit, dan bleef de terminal van
+// een klant minutenlang hangen.
+func TestEenVolleNodeHoudtDeAanleveraarNietVast(t *testing.T) {
+	los := make(chan struct{})
+	w := nieuweWerkers(1, func(transport.Command) { <-los })
+
+	klaar := make(chan struct{})
+	go func() {
+		w.stuur(transport.Command{ID: "a", VPSID: "vps-a", Kind: transport.CmdProvision})
+		w.stuur(transport.Command{ID: "b", VPSID: "vps-b", Kind: transport.CmdProvision})
+		w.stuur(transport.Command{ID: "c", VPSID: "vps-c", Kind: transport.CmdStop})
+		close(klaar)
+	}()
+
+	select {
+	case <-klaar:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stuur bleef hangen terwijl de enige plek bezet was")
+	}
+	close(los)
+	w.wacht()
 }

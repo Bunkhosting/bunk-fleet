@@ -155,7 +155,15 @@ jobs:
         run: mix credo --strict
 
       - name: Known vulnerabilities
-        run: mix deps.audit
+        # Twee bronnen: mix_audit leest de elixir-security-advisories-database,
+        # hex.audit die van Hex zelf (EEF/OSV). Die tweede had in oktober 2026
+        # vier advisories op mint, waaronder een HIGH, die de eerste niet kende;
+        # ze stonden alleen als regel in de uitvoer van deps.get. Een advisory
+        # die ons niet raakt, hoort met reden in mix.exs onder
+        # hex: [ignore_advisories: ...].
+        run: |
+          mix deps.audit
+          mix hex.audit
 
       - name: Run tests
         run: mix test

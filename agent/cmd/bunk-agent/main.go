@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -73,6 +74,13 @@ func run(logger *slog.Logger) error {
 		state = st
 		cp.SetCredentials(st.NodeID, st.AgentToken)
 		logger.Info("loaded persisted enrollment", "node_id", st.NodeID)
+	} else if _, err := os.Stat(statePath); err == nil {
+		// Het bestand is er, maar onleesbaar of onvolledig. Opnieuw inschrijven
+		// is dan het verkeerde antwoord: met het oude token lukt dat niet (het
+		// is eenmalig), en met een nieuw maakt het een tweede node naast de
+		// eerste, met diens VPS'en zonder eigenaar. Stoppen, met de reden.
+		return fmt.Errorf("%s bestaat maar is onleesbaar of onvolledig; niet opnieuw ingeschreven. "+
+			"Herstel het bestand, of verwijder het bewust om deze machine als nieuwe node in te schrijven", statePath)
 	} else if cfg.EnrollToken != "" {
 		enrollCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		resp, err := cp.Enroll(enrollCtx, cfg.EnrollToken, cfg.Hypervisor, cfg.OwnerEmail, transport.VpsNetwork{
@@ -154,7 +162,9 @@ func run(logger *slog.Logger) error {
 
 		// Inbound access for this node's customers. Its own loop rather than a
 		// command, because it is state to converge on, not an event to react to.
-		go syncForwards(ctx, logger, cp, subnet, cfg.ManageNetwork)
+		go blijfDraaien(ctx, logger, "port forwards", func() {
+			syncForwards(ctx, logger, cp, subnet, cfg.ManageNetwork)
+		})
 	} else {
 		logger.Warn("not enrolled; command consumer not started")
 	}
@@ -375,10 +385,7 @@ func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provi
 	settings, err := cp.SendHeartbeat(sendCtx, hb)
 	if err != nil {
 		logger.Error("heartbeat send failed", "err", err)
-		// Ook zonder antwoord van het control plane moet het netwerk een kans
-		// krijgen met wat de omgeving zegt; anders blijft een node die het
-		// dashboard niet bereikt zonder netwerk tot de volgende herstart.
-		netwerk.bijwerken(logger, transport.NodeSettings{})
+		netwerk.zonderAntwoord(logger)
 		return
 	}
 	netwerk.bijwerken(logger, settings)
@@ -785,6 +792,14 @@ func payloadVMID(c command, what string) (string, bool) {
 	}
 	if err := json.Unmarshal(c.cmd.Payload, &payload); err != nil {
 		c.failed(what+": bad payload", "", err)
+		return "", false
+	}
+	// Zonder id is er niets aan te wijzen. Proxmox weigerde dat al bij het
+	// parsen, maar ESXi zocht een VM met een lege referentie op en kon een
+	// "niet gevonden" als "al weg" lezen: een verwijdering die klaar heette
+	// zonder dat er iets gebeurd was.
+	if strings.TrimSpace(payload.VMID) == "" {
+		c.failed(what+": geen vm_id", "", errors.New(what+": de opdracht heeft geen vm_id"))
 		return "", false
 	}
 	return payload.VMID, true
