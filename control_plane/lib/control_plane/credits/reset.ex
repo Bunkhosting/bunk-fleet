@@ -55,15 +55,50 @@ defmodule ControlPlane.Credits.Reset do
   Geeft de regels terug die zijn weggeboekt, zodat de aanroeper kan laten zien
   wat er gebeurd is in plaats van alleen dát er iets gebeurd is.
   """
-  @spec apply!() :: [saldo()]
-  def apply! do
-    regels = plan()
+  #
+  # Alles of niets, onder een slot op het grootboek. Het waren losse boekingen
+  # na een losse telling: een fout halverwege liet een deel van de saldi op
+  # nul en de rest niet, en een opwaardering die tussen tellen en boeken
+  # binnenkwam werd mee weggeboekt.
+  #
+  # En niet meer zonder meer: sinds 14 september staat er echt geld op de
+  # saldi. Deze taak deed precies wat hij moest bij de overgang naar echte
+  # betalingen; nu zou hij betaald tegoed van klanten wissen. Daarom weigert
+  # hij zodra er een echte Mollie-betaling is bijgeschreven, tenzij de
+  # aanroeper uitdrukkelijk zegt dat dat de bedoeling is.
+  @spec apply!(keyword()) :: [saldo()]
+  def apply!(opts \\ []) do
+    if echte_betalingen?() and not Keyword.get(opts, :ook_echte_betalingen, false) do
+      raise ArgumentError,
+            "er zijn echte Mollie-betalingen bijgeschreven; dit zou betaald tegoed van " <>
+              "klanten wissen. Geef ook_echte_betalingen: true mee als dat echt de bedoeling is."
+    end
 
-    Enum.each(regels, fn %{user_id: user_id, saldo: saldo} ->
-      {:ok, _} = Credits.add_entry(user_id, -saldo, @kind, @description)
-    end)
+    {:ok, regels} =
+      Repo.transaction(fn ->
+        Repo.query!("LOCK TABLE ledger_entries IN SHARE ROW EXCLUSIVE MODE")
+        regels = plan()
+        Enum.each(regels, &boek_weg/1)
+        regels
+      end)
 
     regels
+  end
+
+  defp boek_weg(%{user_id: user_id, saldo: saldo}) do
+    case Credits.add_entry(user_id, -saldo, @kind, @description) do
+      {:ok, _} -> :ok
+      {:error, reden} -> Repo.rollback(reden)
+    end
+  end
+
+  @live_sinds ~U[2026-09-14 00:00:00.000000Z]
+
+  defp echte_betalingen? do
+    Repo.exists?(
+      from t in ControlPlane.Credits.TopupRequest,
+        where: t.status == :paid and t.paid_via == "mollie" and t.inserted_at > ^@live_sinds
+    )
   end
 
   @doc "Een bedrag in centen als leesbaar euroteken-loos bedrag."

@@ -25,7 +25,7 @@ defmodule ControlPlaneWeb.Admin.CreditController do
     end
   end
 
-  def show(conn, _), do: bad_request(conn, "email query parameter is required")
+  def show(conn, _), do: bad_request(conn, "missing_email", "email query parameter is required")
 
   # POST /admin/v1/credits  {email, amount_cents, description?}
   # amount_cents > 0 tops up, < 0 is a manual correction. Accepts the amount as a
@@ -35,15 +35,28 @@ defmodule ControlPlaneWeb.Admin.CreditController do
          %_{} = user <- Accounts.get_user_by_email(email) do
       kind = if cents > 0, do: "admin_topup", else: "admin_adjustment"
       desc = blank_to_default(params["description"])
-      {:ok, _} = Credits.add_entry(user.id, cents, kind, desc)
-      json(conn, %{email: email, balance_cents: Credits.balance_cents(user.id)})
+
+      # Geen `{:ok, _} =`: een omschrijving die de changeset weigert (te lang)
+      # werd zo een kale 500 zonder reden.
+      case Credits.add_entry(user.id, cents, kind, desc) do
+        {:ok, _} ->
+          json(conn, %{email: email, balance_cents: Credits.balance_cents(user.id)})
+
+        {:error, _changeset} ->
+          bad_request(
+            conn,
+            "invalid_entry",
+            "the ledger entry was refused (description too long?)"
+          )
+      end
     else
       nil -> conn |> put_status(:not_found) |> json(%{error: "user_not_found"})
-      _ -> bad_request(conn, "amount_cents must be a non-zero integer")
+      _ -> bad_request(conn, "invalid_amount", "amount_cents must be a non-zero integer")
     end
   end
 
-  def create(conn, _), do: bad_request(conn, "email and amount_cents are required")
+  def create(conn, _),
+    do: bad_request(conn, "missing_params", "email and amount_cents are required")
 
   defp to_cents(n) when is_integer(n), do: {:ok, n}
 
@@ -62,8 +75,10 @@ defmodule ControlPlaneWeb.Admin.CreditController do
 
   defp blank_to_default(_), do: "Handmatige bijboeking door beheerder"
 
-  defp bad_request(conn, msg),
-    do: conn |> put_status(:unprocessable_entity) |> json(%{error: msg})
+  # Een code in `error` en de zin in `detail`, zoals overal. Hier stond de zin
+  # in `error`, en dat glipte langs de codetest omdat hij uit een variabele kwam.
+  defp bad_request(conn, code, detail),
+    do: conn |> put_status(:unprocessable_entity) |> json(%{error: code, detail: detail})
 
   defp entry_json(e) do
     %{amount_cents: e.amount_cents, kind: e.kind, description: e.description, at: e.inserted_at}

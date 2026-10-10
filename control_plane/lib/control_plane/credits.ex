@@ -362,11 +362,26 @@ defmodule ControlPlane.Credits do
     )
   end
 
-  @doc "Number of still-pending top-up requests for a user (used to cap abuse)."
+  @doc """
+  Number of still-pending top-up requests for a user (used to cap abuse).
+
+  Een rij zonder Mollie-id telt na een uur niet meer mee. Die ontstaat als het
+  proces omvalt tussen het aanmaken van de betaling en het vastleggen van het
+  id. De verzoening kan hem niet nalopen (er is geen id om naar te vragen) en
+  een annulering van Mollie vindt hem niet, dus hij bleef voorgoed op :pending
+  staan -- en vijf daarvan sloten een klant buiten van opwaarderen. Hij wordt
+  niet geannuleerd: een betaald-webhook vindt hem nog via de metadata.
+  """
   @spec count_pending_topups(binary()) :: non_neg_integer()
   def count_pending_topups(user_id) do
+    zonder_id_telt_tot = DateTime.add(DateTime.utc_now(), -3600, :second)
+
     Repo.aggregate(
-      from(t in TopupRequest, where: t.user_id == ^user_id and t.status == :pending),
+      from(t in TopupRequest,
+        where:
+          t.user_id == ^user_id and t.status == :pending and
+            (not is_nil(t.mollie_payment_id) or t.inserted_at > ^zonder_id_telt_tot)
+      ),
       :count
     )
   end

@@ -35,5 +35,8 @@ defmodule ControlPlane.Credits.LedgerEntry do
     # tekst; een onbekende soort viel stil buiten beide.
     |> validate_inclusion(:kind, @soorten)
     |> check_constraint(:kind, name: :ledger_entries_kind_geldig)
+    # De kolom is varchar(255). Langer gaf een exceptie uit de database in
+    # plaats van een fout die een aanroeper kan afhandelen.
+    |> validate_length(:description, max: 255)
   end
 end

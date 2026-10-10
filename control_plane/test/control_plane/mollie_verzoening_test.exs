@@ -197,6 +197,18 @@ defmodule ControlPlane.MollieVerzoeningTest do
     refute_received {:email, %{subject: "[Bunk] Betaling met een ander bedrag" <> _}}
   end
 
+  # Dit draait in de tik van de reconciler. Zonder budget hield een Mollie die
+  # niet antwoordde de tik minutenlang vast.
+  test "een op budget is de rest voor de volgende ronde", %{user: user} do
+    id = "tr_#{System.unique_integer([:positive])}"
+    tr = openstaand(user, 2500, id) |> verouder(3600)
+    Req.Test.stub(Mollie, fn _conn -> raise "Mollie gevraagd zonder budget" end)
+
+    log = capture_log(fn -> assert MollieAfhandeling.verzoen(900, 0) == 0 end)
+    assert log =~ "tijdsbudget op"
+    assert stand(tr) == :pending
+  end
+
   test "een Mollie die niet antwoordt laat alles staan", %{user: user} do
     id = "tr_#{System.unique_integer([:positive])}"
     tr = openstaand(user, 2500, id) |> verouder(3600)

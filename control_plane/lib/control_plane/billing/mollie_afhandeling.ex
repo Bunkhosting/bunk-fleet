@@ -51,17 +51,33 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   module moet dichten. Betalingen lopen vanzelf dood -- Mollie zet ze op
   "expired" en dan sluit de rij zich -- dus het blijft vanzelf een handvol.
 
-  Geeft terug hoeveel rijen zijn nagevraagd. Wat die navraag oplevert staat in
+  Geeft terug hoeveel rijen zijn nagevraagd (binnen het tijdsbudget). Wat die
+  navraag oplevert staat in
   de logs, want dat is per rij iets anders en alleen de bijschrijvingen zijn
   nieuws.
   """
-  @spec verzoen(non_neg_integer()) :: non_neg_integer()
-  def verzoen(ouder_dan_seconden \\ 900) do
+  @spec verzoen(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def verzoen(ouder_dan_seconden \\ 900, budget_ms \\ 20_000) do
     openstaand = Credits.openstaande_topups_om_te_verzoenen(ouder_dan_seconden)
+    tot = System.monotonic_time(:millisecond) + budget_ms
 
-    Enum.each(openstaand, &verzoen_een/1)
+    # Een tijdsbudget per ronde. Dit draait in de tik van de reconciler, en
+    # elke vraag aan een Mollie die niet antwoordt kost tot twaalf seconden.
+    # Met tien openstaande betalingen stond de tik dan twee minuten stil: geen
+    # nodes offline zetten, geen levensteken naar buiten. Wat over is, komt de
+    # volgende ronde -- oudste eerst, dus niets blijft achteraan hangen.
+    Enum.reduce_while(openstaand, 0, fn topup, gedaan ->
+      if System.monotonic_time(:millisecond) >= tot do
+        Logger.warning(
+          "mollie verzoening: tijdsbudget op na #{gedaan} van #{length(openstaand)}; de rest volgende ronde"
+        )
 
-    length(openstaand)
+        {:halt, gedaan}
+      else
+        verzoen_een(topup)
+        {:cont, gedaan + 1}
+      end
+    end)
   end
 
   # Eén rij die faalt mag de rest niet tegenhouden. De rijen komen oudste

@@ -83,8 +83,40 @@ defmodule ControlPlaneWeb.MollieTopupTest do
     resp =
       conn |> post(~p"/api/v1/billing/topup", %{"amount_cents" => 2500}) |> json_response(422)
 
-    assert resp["error"] == "payment_rejected" or is_binary(resp["detail"])
+    assert resp["error"] == "payment_rejected"
+    # Mollies eigen tekst gaat over onze configuratie; die hoort in de log.
+    refute resp["detail"]
     assert Repo.aggregate(from(t in TopupRequest, where: t.user_id == ^u.id), :count) == 0
+  end
+
+  # Een rij die nooit een Mollie-id kreeg (proces viel om tussen de betaling
+  # en het vastleggen) bleef voorgoed meetellen; vijf daarvan en de klant kon
+  # niet meer opwaarderen.
+  test "een oude opwaardering zonder Mollie-id houdt de klant niet tegen", %{conn: conn, user: u} do
+    oud = DateTime.add(DateTime.utc_now(), -7200, :second)
+
+    for _ <- 1..5 do
+      {:ok, tr} = ControlPlane.Credits.create_topup_request(u.id, 2500)
+      Repo.update_all(from(t in TopupRequest, where: t.id == ^tr.id), set: [inserted_at: oud])
+    end
+
+    mollie_antwoordt(geslaagde_betaling())
+
+    resp =
+      conn |> post(~p"/api/v1/billing/topup", %{"amount_cents" => 2500}) |> json_response(200)
+
+    assert resp["checkout_url"]
+  end
+
+  test "verse opwaarderingen zonder Mollie-id tellen wel mee", %{conn: conn, user: u} do
+    for _ <- 1..5, do: {:ok, _} = ControlPlane.Credits.create_topup_request(u.id, 2500)
+
+    mollie_antwoordt(geslaagde_betaling())
+
+    resp =
+      conn |> post(~p"/api/v1/billing/topup", %{"amount_cents" => 2500}) |> json_response(429)
+
+    assert resp["error"] == "too_many_pending_topups"
   end
 
   test "een storing bij Mollie is geen 500 maar een nette melding", %{conn: conn} do

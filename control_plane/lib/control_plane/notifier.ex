@@ -189,10 +189,15 @@ defmodule ControlPlane.Notifier do
   defp verstuur_begrensd(email) do
     taak =
       Task.async(fn ->
+        # Ook throw en exit: de taak hangt aan de aanroeper (Task.async
+        # linkt), en een exit die hier ontsnapt neemt die mee -- de
+        # reconciler, of het verzoek van een klant die zich registreert.
         try do
           Mailer.deliver(email)
         rescue
           exception -> {:error, {:exception, Exception.message(exception)}}
+        catch
+          soort, reden -> {:error, {soort, reden}}
         end
       end)
 

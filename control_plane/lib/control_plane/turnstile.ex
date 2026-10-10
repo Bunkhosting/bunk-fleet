@@ -43,20 +43,37 @@ defmodule ControlPlane.Turnstile do
   defp do_verify(token, remote_ip) do
     form = %{secret: secret(), response: token} |> put_ip(remote_ip)
 
+    # Ook een grens op het verbinden: receive_timeout begint pas te tellen
+    # als er een verbinding is, en zonder deze wachtte een registratie tot
+    # de standaard van de client op een Cloudflare die niet opnam.
     options =
-      [url: @endpoint, form: form, receive_timeout: 5_000, retry: false] ++
+      [
+        url: @endpoint,
+        form: form,
+        receive_timeout: 5_000,
+        connect_options: [timeout: 3_000],
+        retry: false
+      ] ++
         (config(:req_options) || [])
 
     case Req.post(options) do
       {:ok, %{status: 200, body: %{"success" => true}}} ->
         :ok
 
-      {:ok, %{body: body}} ->
+      {:ok, %{status: 200, body: body}} ->
         Logger.warning(
           "turnstile verify rejected: #{inspect(is_map(body) && body["error-codes"])}"
         )
 
         {:error, :captcha_failed}
+
+      # Een 5xx of 429 van Cloudflare is een storing bij hen, geen afgewezen
+      # captcha. Als afwijzing telde hij mee voor de melding "de site key hoort
+      # niet bij het geheim" -- iemand ging een configuratie zitten controleren
+      # die niets mankeerde.
+      {:ok, %{status: status}} ->
+        Logger.warning("turnstile verify unavailable: HTTP #{status}")
+        {:error, :captcha_unavailable}
 
       {:error, reason} ->
         Logger.warning("turnstile verify unavailable: #{inspect(reason)}")

@@ -102,4 +102,22 @@ defmodule ControlPlane.CreditsResetTest do
       assert length(regels(u.id)) == aantal
     end
   end
+
+  describe "met echt geld in het systeem" do
+    # Sinds de live-sleutel staat er betaald tegoed op de saldi. Deze taak
+    # wiste dat zonder te vragen.
+    test "weigert zolang er een echte Mollie-betaling is bijgeschreven" do
+      u = user("echt-#{System.unique_integer([:positive])}@example.com")
+      id = "tr_#{System.unique_integer([:positive])}"
+      {:ok, tr} = Credits.create_mollie_topup(u.id, 2500, id)
+      {:ok, _} = Credits.mark_topup_paid(tr.id, "mollie")
+      voor = Credits.balance_cents(u.id)
+
+      assert_raise ArgumentError, ~r/echte Mollie-betalingen/, fn -> Reset.apply!() end
+      assert Credits.balance_cents(u.id) == voor
+
+      assert [_ | _] = Reset.apply!(ook_echte_betalingen: true)
+      assert Credits.balance_cents(u.id) == 0
+    end
+  end
 end

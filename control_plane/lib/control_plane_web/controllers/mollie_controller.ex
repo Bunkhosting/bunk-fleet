@@ -47,12 +47,15 @@ defmodule ControlPlaneWeb.MollieController do
         # A 4xx from Mollie is a rejected request (e.g. an unregistered redirect
         # domain), not a gateway outage — surface the reason as 422 so it reaches
         # the client (Cloudflare replaces 5xx bodies with its own error page).
-        detail = (is_map(body) && body["detail"]) || "betaling geweigerd"
+        #
+        # Mollies eigen `detail` blijft in de log. Het is Engels, gaat over onze
+        # configuratie (een redirect- of webhookdomein) en zegt de klant niets
+        # wat hij kan doen; de code geeft hem een zin die dat wel doet.
         Logger.warning("mollie rejected topup: #{inspect(body)}")
 
         conn
         |> put_status(:unprocessable_entity)
-        |> json(%{error: "payment_rejected", detail: detail})
+        |> json(%{error: "payment_rejected"})
 
       # Alles wat hierna komt is ofwel een reden die de tabel kent (een te klein
       # bedrag, te veel openstaande opwaarderingen, geen sleutel ingesteld),

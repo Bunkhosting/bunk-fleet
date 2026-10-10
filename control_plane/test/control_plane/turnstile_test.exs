@@ -71,6 +71,15 @@ defmodule ControlPlane.TurnstileTest do
     assert Turnstile.verify("token") == {:error, :captcha_unavailable}
   end
 
+  # Een 5xx van Cloudflare is hun storing, geen afgewezen token. Als
+  # afwijzing telde hij mee voor de alarmmail over een verkeerde site key.
+  # Nog steeds dicht: storing of niet, zonder bevestiging komt niemand binnen.
+  test "a Cloudflare 5xx is an outage, not a rejection" do
+    enable(fn conn -> Plug.Conn.send_resp(conn, 503, "upstream") end)
+
+    assert Turnstile.verify("token") == {:error, :captcha_unavailable}
+  end
+
   test "the caller's IP is forwarded when there is one" do
     test_pid = self()
 
