@@ -1116,8 +1116,18 @@ func (c *Client) DeleteVM(ctx context.Context, id string, vpsID string) error {
 	// Alleen weigeren bij een aantoonbaar ANDERE eigenaar. Staat er niets op de
 	// gast -- een machine van voor deze controle -- dan is het nummer alles wat
 	// we hebben, en dan doen we wat er gevraagd is.
+	//
+	// En niet verwijderen als de eigenaar niet te lezen viel. Eerst gold een
+	// mislukte opvraging als "geen eigenaar", en ging de verwijdering door: een
+	// herlevering na hergebruik van het nummer, op een moment dat de API even
+	// hapert, sloopte zo de machine van een ander. Een mislukte verwijdering
+	// wordt opnieuw geprobeerd; een gesloopte machine niet.
 	if vpsID != "" {
-		if eigenaar, ok := c.eigenaarVan(ctx, vmid); ok && eigenaar != vpsID {
+		eigenaar, ok, err := c.eigenaarVan(ctx, vmid)
+		if err != nil {
+			return fmt.Errorf("proxmox: eigenaar van vmid %d niet te lezen; niet verwijderd: %w", vmid, err)
+		}
+		if ok && eigenaar != vpsID {
 			return fmt.Errorf(
 				"proxmox: vmid %d hoort bij vps %s en niet bij %s; niet verwijderd",
 				vmid, eigenaar, vpsID)
@@ -1424,7 +1434,11 @@ func eigenaarsregel(vpsID string) string {
 // eigenaarVan leest terug welke VPS op deze gast is gezet. `ok` is false als er
 // niets staat, als de gast niet bestaat, of als de API niet te bereiken is --
 // alle drie zijn "ik weet het niet", en daarop weigeren we niets.
-func (c *Client) eigenaarVan(ctx context.Context, vmid int) (string, bool) {
+//
+// Drie uitkomsten: een eigenaar (ok), geen eigenaar op de gast of geen gast
+// (niet ok, geen fout), of de vraag mislukte (fout). Dat laatste is iets anders
+// dan "geen eigenaar", en mag nooit als toestemming gelden.
+func (c *Client) eigenaarVan(ctx context.Context, vmid int) (string, bool, error) {
 	var resp struct {
 		Data struct {
 			Description string `json:"description"`
@@ -1433,16 +1447,21 @@ func (c *Client) eigenaarVan(ctx context.Context, vmid int) (string, bool) {
 
 	path := fmt.Sprintf("/nodes/%s/qemu/%d/config", url.PathEscape(c.cfg.Node), vmid)
 	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return "", false
+		// Een gast die niet bestaat heeft geen eigenaar, en verwijderen is dan
+		// een no-op. Proxmox meldt dat met een 500 "... does not exist".
+		if strings.Contains(err.Error(), "does not exist") {
+			return "", false, nil
+		}
+		return "", false, err
 	}
 
 	for _, regel := range strings.Split(resp.Data.Description, "\n") {
 		regel = strings.TrimSpace(regel)
 		if rest, gevonden := strings.CutPrefix(regel, "bunk-vps:"); gevonden {
-			return strings.TrimSpace(rest), true
+			return strings.TrimSpace(rest), true, nil
 		}
 	}
-	return "", false
+	return "", false, nil
 }
 
 // Afscherming zegt of de klanten op deze node van elkaar zijn afgeschermd, en

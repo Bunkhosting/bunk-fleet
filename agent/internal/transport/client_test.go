@@ -382,3 +382,24 @@ func TestPortForwardsUnwrapsTheEnvelope(t *testing.T) {
 		t.Errorf("Authorization = %q", cap.last().auth)
 	}
 }
+
+// De wachttijd na een mislukte poll ligt tussen 80% en 120% van de backoff, zodat
+// agents na een herstart van het control plane niet in hetzelfde ritme
+// terugkomen.
+func TestSpreidBlijftBinnenDeMarge(t *testing.T) {
+	d := 10 * time.Second
+	verschillend := map[time.Duration]bool{}
+	for i := 0; i < 200; i++ {
+		got := spreid(d)
+		if got < 8*time.Second || got > 12*time.Second {
+			t.Fatalf("spreid(%s) = %s, buiten 8s-12s", d, got)
+		}
+		verschillend[got] = true
+	}
+	if len(verschillend) < 10 {
+		t.Errorf("nauwelijks spreiding: %d verschillende waarden", len(verschillend))
+	}
+	if spreid(0) != 0 {
+		t.Error("spreid(0) is niet 0")
+	}
+}

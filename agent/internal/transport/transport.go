@@ -16,6 +16,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -200,6 +202,22 @@ type Client struct {
 	// token is the bearer credential set after Enroll (or supplied directly).
 	token  string
 	nodeID string
+
+	// logger is waar de commando-poll zijn fouten meldt. Zonder logger zag een
+	// operator wel mislukte hartslagen, maar nooit dat het ophalen van werk al
+	// een uur faalde (een ingetrokken token, een kapot antwoord).
+	logger *slog.Logger
+}
+
+// SetLogger geeft de client een logger voor fouten die anders onzichtbaar
+// blijven, zoals een commando-poll die blijft mislukken.
+func (c *Client) SetLogger(l *slog.Logger) { c.logger = l }
+
+func (c *Client) log() *slog.Logger {
+	if c.logger != nil {
+		return c.logger
+	}
+	return slog.Default()
 }
 
 // New returns a Client targeting the given control-plane base URL.
@@ -376,6 +394,7 @@ func (c *Client) Commands(ctx context.Context) (<-chan Command, error) {
 	go func() {
 		defer close(out)
 		backoff := time.Second
+		missers := 0
 		const maxBackoff = 30 * time.Second
 		const pollFloor = 2 * time.Second
 
@@ -389,11 +408,24 @@ func (c *Client) Commands(ctx context.Context) (<-chan Command, error) {
 				if ctx.Err() != nil {
 					return
 				}
-				// Transient error: back off and retry.
+				missers++
+				// De eerste fout en daarna elke tiende: zichtbaar, maar geen
+				// regel elke seconde zolang het control plane weg is.
+				if missers == 1 || missers%10 == 0 {
+					c.log().Warn("commands poll failing", "attempts", missers, "err", err)
+				}
+				// Een geweigerd token gaat niet vanzelf over. Langzaam blijven
+				// proberen (een operator kan het herstellen), maar niet elke seconde.
+				if strings.Contains(err.Error(), "status 401") || strings.Contains(err.Error(), "status 403") {
+					backoff = maxBackoff
+				}
+				// Transient error: back off and retry. Met spreiding: na een
+				// herstart van het control plane kwamen anders alle agents in
+				// precies hetzelfde ritme terug.
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(backoff):
+				case <-time.After(spreid(backoff)):
 				}
 				if backoff < maxBackoff {
 					backoff *= 2
@@ -402,6 +434,10 @@ func (c *Client) Commands(ctx context.Context) (<-chan Command, error) {
 					}
 				}
 				continue
+			}
+			if missers > 0 {
+				c.log().Info("commands poll recovered", "failed_attempts", missers)
+				missers = 0
 			}
 			backoff = time.Second // reset after a successful poll
 			for _, cmd := range cmds {
@@ -554,4 +590,12 @@ func (c *Client) PortForwards(ctx context.Context) ([]PortForward, error) {
 		return nil, fmt.Errorf("transport: decode port forwards: %w", err)
 	}
 	return out.Forwards, nil
+}
+
+// spreid geeft een wachttijd terug tussen 80% en 120% van d.
+func spreid(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	return d*8/10 + time.Duration(rand.Int64N(int64(d)*4/10+1))
 }

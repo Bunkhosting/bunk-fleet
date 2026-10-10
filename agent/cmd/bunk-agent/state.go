@@ -31,8 +31,15 @@ func loadState(path string) (persistedState, bool) {
 }
 
 // saveState writes the state atomically with owner-only perms.
+//
+// Met fsync van het bestand vóór de rename en van de map erna. Zonder die twee
+// kan een stroomstoring direct na het schrijven een leeg of half state.json
+// achterlaten: de rename staat dan op schijf maar de inhoud niet. Dit bestand
+// is de identiteit van de node; kwijt betekent opnieuw inschrijven met een
+// token dat al gebruikt is.
 func saveState(path string, st persistedState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	b, err := json.Marshal(st)
@@ -40,8 +47,27 @@ func saveState(path string, st persistedState) error {
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }

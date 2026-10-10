@@ -132,7 +132,7 @@ func (c *Client) CreateVM(ctx context.Context, spec provider.VMSpec) (provider.V
 	if err != nil {
 		return provider.VMStatus{}, err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	f, err := c.finder(ctx, gc)
 	if err != nil {
@@ -255,7 +255,7 @@ func (c *Client) rollbackClone(name string) string {
 	if err != nil {
 		return ""
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	f, err := c.finder(ctx, gc)
 	if err != nil {
@@ -282,7 +282,7 @@ func (c *Client) DeleteVM(ctx context.Context, id string, _ string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	vm := vmByID(gc, id)
 
@@ -315,7 +315,7 @@ func (c *Client) StatusVM(ctx context.Context, id string) (provider.VMStatus, er
 	if err != nil {
 		return provider.VMStatus{}, err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	vm := vmByID(gc, id)
 	return statusOf(ctx, gc, vm, id)
@@ -326,7 +326,7 @@ func (c *Client) FindByName(ctx context.Context, name string) (provider.VMStatus
 	if err != nil {
 		return provider.VMStatus{}, false, err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	f, err := c.finder(ctx, gc)
 	if err != nil {
@@ -392,7 +392,7 @@ func (c *Client) ListGuestIDs(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	f, err := c.finder(ctx, gc)
 	if err != nil {
@@ -427,7 +427,7 @@ func (c *Client) Reboot(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	vm := vmByID(gc, id)
 	state, err := vm.PowerState(ctx)
@@ -448,7 +448,7 @@ func (c *Client) power(ctx context.Context, id, op string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	vm := vmByID(gc, id)
 	state, err := vm.PowerState(ctx)
@@ -487,7 +487,7 @@ func (c *Client) Capacity(ctx context.Context) (provider.Capacity, error) {
 	if err != nil {
 		return provider.Capacity{}, err
 	}
-	defer func() { _ = gc.Logout(ctx) }()
+	defer logout(ctx, gc)
 
 	f, err := c.finder(ctx, gc)
 	if err != nil {
@@ -673,4 +673,15 @@ func networkConfig(ipConfig string) string {
 func (c *Client) Afscherming(context.Context) (string, error) {
 	return "ESXi schermt klanten op deze node niet van elkaar af; zet de VPS'en op een " +
 		"port group met private VLAN's of gebruik deze node voor één klant", nil
+}
+
+// logout sluit een vCenter/ESXi-sessie, ook als de context van de handeling al
+// verlopen is. Juist dan was het fout gegaan: Logout(ctx) faalde direct op de
+// verlopen context en de sessie bleef op de host openstaan. Een trage host liet
+// zo elke hartslag een sessie achter, tot hostd zijn maximum bereikte en ook
+// een operator er niet meer in kon.
+func logout(ctx context.Context, gc *govmomi.Client) {
+	lctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_ = gc.Logout(lctx)
 }

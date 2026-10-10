@@ -61,6 +61,7 @@ func run(logger *slog.Logger) error {
 
 	// Control-plane client.
 	cp := transport.New(cfg.ControlPlaneURL, nil)
+	cp.SetLogger(logger)
 
 	// Credentials: prefer persisted enrollment (survives restarts) over consuming
 	// a fresh single-use token; only enroll when no state exists yet.
@@ -320,7 +321,13 @@ func kies(vanCP, lokaal int) int {
 // control plane. Errors are logged but never fatal: a single failed heartbeat
 // must not take the agent down.
 func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provider, cp *transport.Client, offer *offerHolder, netwerk *netwerkBeheer, afscherming *afschermingsMelder) {
-	hbCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	// Twee budgetten, niet één. De capaciteitsvraag praat met de hypervisor, het
+	// versturen met het control plane, en die twee hebben niets met elkaar te
+	// maken. Met één gedeelde deadline van 15 seconden liet een trage maar
+	// werkende hypervisor (14 seconden) het versturen geen tijd meer over: geen
+	// hartslag, en na twee minuten stond de node offline -- terwijl het
+	// capacity_error-veld er juist voor is om een trage hypervisor te melden.
+	hbCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	hb := transport.Heartbeat{
@@ -362,7 +369,9 @@ func sendHeartbeat(ctx context.Context, logger *slog.Logger, prov provider.Provi
 		hb.CapacityError = afkappen(oordeel.Notitie)
 	}
 
-	settings, err := cp.SendHeartbeat(hbCtx, hb)
+	sendCtx, cancelSend := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelSend()
+	settings, err := cp.SendHeartbeat(sendCtx, hb)
 	if err != nil {
 		logger.Error("heartbeat send failed", "err", err)
 		// Ook zonder antwoord van het control plane moet het netwerk een kans

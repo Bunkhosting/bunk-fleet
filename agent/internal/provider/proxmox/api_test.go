@@ -681,3 +681,37 @@ func TestEenHaperendeStatusvraagLaatDeUitrolNietMislukken(t *testing.T) {
 		t.Errorf("ID = %q", got.ID)
 	}
 }
+
+// Een herlevering van een verwijdering, nadat het VMID aan een ander is gegeven,
+// terwijl de API even hapert: eerst gold "eigenaar niet te lezen" als "geen
+// eigenaar", en dan ging de machine van die ander eraan.
+func TestDeleteVMVerwijdertNietAlsDeEigenaarOnleesbaarIs(t *testing.T) {
+	r := newRecorder(t)
+	r.onStatus("GET /nodes/pve/qemu/131/config", http.StatusBadGateway, `{"errors":"pveproxy restarting"}`)
+	r.on("GET /nodes/pve/qemu/131/status/current", `{"data":{"status":"stopped"}}`)
+	r.on("DELETE /nodes/pve/qemu/131", okTask)
+	r.taskSucceeds()
+
+	err := r.client(t).DeleteVM(context.Background(), "131", "11111111-1111-1111-1111-111111111111")
+	if err == nil {
+		t.Fatal("verwijderd terwijl de eigenaar niet te lezen was")
+	}
+	if r.count("DELETE", "/nodes/pve/qemu/131") != 0 {
+		t.Error("DELETE is toch verstuurd")
+	}
+}
+
+// Een gast die niet (meer) bestaat: dan is er niets te beschermen en is de
+// verwijdering gewoon klaar.
+func TestDeleteVMGaatDoorAlsDeGastNietBestaat(t *testing.T) {
+	r := newRecorder(t)
+	r.onStatus("GET /nodes/pve/qemu/131/config", http.StatusInternalServerError,
+		`{"errors":"Configuration file 'nodes/pve/qemu-server/131.conf' does not exist"}`)
+	r.on("GET /nodes/pve/qemu/131/status/current", `{"data":{"status":"stopped"}}`)
+	r.onStatus("DELETE /nodes/pve/qemu/131", http.StatusInternalServerError,
+		`{"errors":"Configuration file 'nodes/pve/qemu-server/131.conf' does not exist"}`)
+
+	if err := r.client(t).DeleteVM(context.Background(), "131", "11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("een ontbrekende gast gaf een fout: %v", err)
+	}
+}
