@@ -94,6 +94,7 @@ defmodule ControlPlaneWeb.Router do
   pipeline :admin_api do
     plug :accepts, ["json"]
     plug ControlPlaneWeb.Plugs.AdminAuth
+    plug ControlPlaneWeb.Plugs.AdminAuditLog
   end
 
   # End-user API: JSON plus per-user session-token bearer authentication.
