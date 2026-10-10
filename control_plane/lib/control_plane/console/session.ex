@@ -230,8 +230,31 @@ defmodule ControlPlane.Console.Session do
   @impl true
   def handle_info({:ssh_cm, conn, {:data, chan, _type, data}}, st) do
     send(st.owner, {:console_output, data})
-    :ssh_connection.adjust_window(conn, chan, byte_size(data))
-    {:noreply, st}
+
+    case vrij_te_geven(Map.get(st, :achterstand, 0), byte_size(data), wachtrij(st.owner)) do
+      {:nu, n} ->
+        :ssh_connection.adjust_window(conn, chan, n)
+        {:noreply, Map.put(st, :achterstand, 0)}
+
+      {:wacht, achterstand} ->
+        {:noreply, st |> Map.put(:achterstand, achterstand) |> plan_herstel()}
+    end
+  end
+
+  def handle_info(:herstel_venster, st) do
+    st = Map.put(st, :herstel_gepland, false)
+
+    case vrij_te_geven(Map.get(st, :achterstand, 0), 0, wachtrij(st.owner)) do
+      {:nu, 0} ->
+        {:noreply, st}
+
+      {:nu, n} ->
+        :ssh_connection.adjust_window(st.conn, st.chan, n)
+        {:noreply, Map.put(st, :achterstand, 0)}
+
+      {:wacht, _} ->
+        {:noreply, plan_herstel(st)}
+    end
   end
 
   def handle_info({:ssh_cm, _conn, {:closed, _chan}}, st) do
@@ -242,6 +265,43 @@ defmodule ControlPlane.Console.Session do
   def handle_info({:ssh_cm, _conn, _msg}, st), do: {:noreply, st}
   def handle_info({:EXIT, _from, _reason}, st), do: {:stop, :normal, st}
   def handle_info(_other, st), do: {:noreply, st}
+
+  # --- flow control -----------------------------------------------------------
+  #
+  # Het SSH-venster ging na elk stuk uitvoer meteen weer open, ook als de browser
+  # het niet bijhield. Een klant die `yes` draaide over een trage verbinding liet
+  # zo de mailbox van zijn socketproces onbegrensd groeien, op een control plane
+  # met 4 GiB geheugen dat het met iedereen deelt.
+  #
+  # Nu geeft de sessie het venster pas vrij als er minder dan
+  # #{100} berichten op de socket wachten. Anders houdt hij het vast, en dan
+  # stopt de VPS vanzelf met zenden: dat is waar het SSH-venster voor is. Elke
+  # 50 ms wordt opnieuw gekeken.
+
+  @max_wachtrij 100
+
+  @doc false
+  # Pure beslissing, los te testen: hoeveel van het venster nu vrij mag.
+  @spec vrij_te_geven(non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {:nu, non_neg_integer()} | {:wacht, non_neg_integer()}
+  def vrij_te_geven(achterstand, nieuw, wachtrij) do
+    totaal = achterstand + nieuw
+    if wachtrij < @max_wachtrij, do: {:nu, totaal}, else: {:wacht, totaal}
+  end
+
+  defp wachtrij(pid) do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, n} -> n
+      nil -> 0
+    end
+  end
+
+  defp plan_herstel(%{herstel_gepland: true} = st), do: st
+
+  defp plan_herstel(st) do
+    Process.send_after(self(), :herstel_venster, 50)
+    Map.put(st, :herstel_gepland, true)
+  end
 
   @impl true
   def terminate(reason, st) do
