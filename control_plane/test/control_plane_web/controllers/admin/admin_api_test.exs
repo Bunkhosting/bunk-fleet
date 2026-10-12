@@ -303,6 +303,19 @@ defmodule ControlPlaneWeb.Admin.AdminApiTest do
       assert body["region"] == region.code
     end
 
+    test "deleting a vps that is already being deleted is a clean refusal", %{conn: conn} do
+      # Gaf een CaseClauseError -- een 500 -- omdat do_delete alleen :not_found
+      # en :no_node kende.
+      %{region: region} = create_region(%{})
+      _node = enroll_node_with_capacity(region)
+      vps = active_vps(region)
+
+      assert %{"vps" => _} = conn |> delete(~p"/admin/v1/vpses/#{vps.id}") |> json_response(202)
+
+      tweede = delete(conn, ~p"/admin/v1/vpses/#{vps.id}")
+      assert %{"error" => "already_deleting"} = json_response(tweede, 409)
+    end
+
     test "deleting an unknown vps returns 404", %{conn: conn} do
       conn = delete(conn, ~p"/admin/v1/vpses/#{Ecto.UUID.generate()}")
       assert %{"error" => "not_found"} = json_response(conn, 404)

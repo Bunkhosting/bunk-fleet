@@ -74,6 +74,12 @@ defmodule ControlPlaneWeb.Admin.VpsController do
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{error: "no_node"})
+
+      # Elke andere weigering (al bezig met verwijderen, toestand veranderd
+      # onder het slot, ...) via dezelfde vertaling als de klant-API. Zonder
+      # deze tak gaf :already_deleting hier een CaseClauseError en dus een 500.
+      anders ->
+        ControlPlaneWeb.Fouten.fout(conn, anders)
     end
   end
 
