@@ -35,6 +35,12 @@ _socket.getaddrinfo = _alleen_ipv4
 
 APP = "https://app.bunkhosting.nl"
 API = APP + "/api/v1"
+
+# Wat de browser bij inloggen en registreren meestuurt. De control plane weigert
+# die twee zonder herkomst (403 cross_origin_request): anders kon een andere site
+# een bezoeker met een formulier ongemerkt op het account van de aanvaller laten
+# inloggen. Dit harnas is geen browser en moet de Origin dus zelf zetten.
+VAN_DASHBOARD = {"Origin": APP}
 HIER = os.path.dirname(os.path.abspath(__file__))
 PW = open(os.path.join(os.path.dirname(HIER), ".testpw")).read().strip()
 EMAIL = "test@bunkhosting.nl"
@@ -179,7 +185,8 @@ def sessiecookie(headers):
 
 
 def inloggen():
-    status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW})
+    status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW},
+                                    headers=VAN_DASHBOARD)
     token = sessiecookie(headers) if status == 200 else None
     if not token:
         print(f"inloggen mislukt ({status}): {body}")

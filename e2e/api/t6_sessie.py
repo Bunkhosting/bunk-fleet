@@ -39,7 +39,19 @@ status, _, _, _ = roep("DELETE", "/auth/logout")
 controleer("uitloggen zonder sessie geeft geen 5xx", 0 < status < 500, f"status {status}", "MIDDEL")
 
 # --- de cookie -------------------------------------------------------------
-status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW})
+# Eerst de login-CSRF: met de juiste gegevens maar van een vreemde herkomst, of
+# zonder herkomst, hoort er geen sessie uit te komen. De geslaagde login hierna
+# is de tegenproef: alleen de Origin verschilt.
+for naam, kop in (("een vreemde herkomst", {"Origin": "https://kwaadwillend.example"}),
+                  ("een verzoek zonder herkomst", {})):
+    status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW},
+                                    headers=kop)
+    controleer(f"{naam} kan niet inloggen",
+               status == 403 and sessiecookie(headers) is None,
+               f"status {status}: {str(body)[:80]}", "HOOG")
+
+status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW},
+                                headers=VAN_DASHBOARD)
 cookie = next((c for c in headers.set_cookies if c.startswith("bunk_session=")), "")
 waarde = sessiecookie(headers)
 controleer("de login zet een sessiecookie", status == 200 and bool(waarde),
@@ -72,15 +84,19 @@ controleer("de sessiecookie heeft SameSite", "samesite" in cookie.lower(),
            f"Set-Cookie: {cookie[:160]}", "HOOG")
 
 # --- verkeerd wachtwoord ---------------------------------------------------
-status, body, _, _ = roep("POST", "/auth/login", {"email": EMAIL, "password": PW + "x"})
+status, body, _, _ = roep("POST", "/auth/login", {"email": EMAIL, "password": PW + "x"},
+                          headers=VAN_DASHBOARD)
 controleer("verkeerd wachtwoord geeft geen sessie", status >= 400 and "token" not in str(body),
            f"status {status}: {str(body)[:120]}", "KRITIEK")
 controleer("de foutmelding verraadt niet of het adres bestaat",
            "wachtwoord" not in str(body).lower() or "onbekend" not in str(body).lower(),
            f"antwoord: {str(body)[:160]}", "LAAG")
 
-status, body, _, _ = roep("POST", "/auth/login", {"email": "bestaatniet@bunk.test", "password": PW})
-status2, body2, _, _ = roep("POST", "/auth/login", {"email": EMAIL, "password": "fout"})
+status, body, _, _ = roep("POST", "/auth/login",
+                          {"email": "bestaatniet@bunk.test", "password": PW},
+                          headers=VAN_DASHBOARD)
+status2, body2, _, _ = roep("POST", "/auth/login", {"email": EMAIL, "password": "fout"},
+                            headers=VAN_DASHBOARD)
 controleer("onbekend adres en fout wachtwoord geven hetzelfde antwoord",
            status == status2 and str(body) == str(body2),
            f"{status}:{str(body)[:80]} vs {status2}:{str(body2)[:80]}", "MIDDEL")

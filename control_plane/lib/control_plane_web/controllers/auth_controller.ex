@@ -485,18 +485,32 @@ defmodule ControlPlaneWeb.AuthController do
   def passkey_register(conn, _params),
     do: conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_passkey"})
 
-  def passkey_delete(conn, %{"id" => id}) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} ->
-        case Accounts.delete_passkey(conn.assigns.current_user, uuid) do
-          {:ok, _} -> send_resp(conn, :no_content, "")
-          {:error, :not_found} -> conn |> put_status(:not_found) |> json(%{error: "not_found"})
-        end
+  @doc """
+  Verwijdert een passkey. Het huidige wachtwoord moet erbij, net als bij
+  wachtwoord wijzigen: een passkey kan de tweede factor zijn, en wie alleen een
+  sessie in handen heeft mag de 2FA niet kunnen uitzetten. Zie
+  `Accounts.delete_passkey/3`.
 
-      :error ->
+  Dezelfde codes als bij wachtwoord wijzigen, zodat het scherm ze al kent.
+  """
+  def passkey_delete(conn, %{"id" => id, "current_password" => huidig})
+      when is_binary(huidig) do
+    with {:ok, uuid} <- Ecto.UUID.cast(id),
+         {:ok, _} <- Accounts.delete_passkey(conn.assigns.current_user, uuid, huidig) do
+      send_resp(conn, :no_content, "")
+    else
+      {:error, :invalid_current_password} ->
+        conn |> put_status(:unprocessable_entity) |> json(%{error: "wrong_current_password"})
+
+      # Geen uuid, niet van jou of bestaat niet: één antwoord, zodat het niet
+      # verraadt welke id's van een ander zijn.
+      _ ->
         conn |> put_status(:not_found) |> json(%{error: "not_found"})
     end
   end
+
+  def passkey_delete(conn, _params),
+    do: conn |> put_status(:unprocessable_entity) |> json(%{error: "missing_password"})
 
   defp passkey_json(pk) do
     %{

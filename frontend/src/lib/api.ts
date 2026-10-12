@@ -622,7 +622,13 @@ export const authApi = {
         },
       });
     },
-    remove: (id: string) => api.delete(`/auth/passkeys/${id}`),
+    /**
+     * Het huidige wachtwoord moet erbij: een passkey kan de tweede factor zijn,
+     * en een open sessie alleen mag die niet kunnen weghalen. Fouten zijn
+     * `wrong_current_password` en `missing_password`, net als bij wachtwoord wijzigen.
+     */
+    remove: (id: string, currentPassword: string) =>
+      api.delete(`/auth/passkeys/${id}`, { data: { current_password: currentPassword } }),
     /** Vertaalt het resultaat van navigator.credentials.get() naar wat /auth/login verwacht. */
     assertion: (challenge_id: string, credential: PublicKeyCredential): PasskeyAssertion => {
       const r = credential.response as AuthenticatorAssertionResponse;

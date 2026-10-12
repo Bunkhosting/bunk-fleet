@@ -34,6 +34,7 @@ defmodule ControlPlaneWeb.Auth2faLimietTest do
   defp inloggen(user, code, n) do
     build_conn()
     |> put_req_header("cf-connecting-ip", "198.51.100.#{rem(n, 250) + 1}")
+    |> vanaf_dashboard()
     |> post(~p"/api/v1/auth/login", %{
       "email" => user.email,
       "password" => @wachtwoord,

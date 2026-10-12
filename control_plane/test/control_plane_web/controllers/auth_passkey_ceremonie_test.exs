@@ -73,6 +73,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
   defp login(user, extra \\ %{}, n \\ 1) do
     build_conn()
     |> put_req_header("cf-connecting-ip", "198.51.100.#{rem(n, 250) + 1}")
+    |> vanaf_dashboard()
     |> post(
       ~p"/api/v1/auth/login",
       Map.merge(%{"email" => user.email, "password" => valid_user_password()}, extra)
@@ -264,15 +265,62 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
   end
 
   describe "verwijderen" do
+    # Zoals het dashboard het doet: het huidige wachtwoord in de body van de
+    # DELETE. `nil` laat het veld weg.
+    defp verwijder(user, id, wachtwoord) do
+      body = if wachtwoord, do: %{"current_password" => wachtwoord}, else: %{}
+      user |> ingelogd() |> delete(~p"/api/v1/auth/passkeys/#{id}", body)
+    end
+
     test "je eigen passkey verwijderen haalt de tweede factor weg" do
       {user, _auth} = met_passkey()
       [pk] = Accounts.list_passkeys(user)
 
-      assert user |> ingelogd() |> delete(~p"/api/v1/auth/passkeys/#{pk.id}") |> response(204)
+      assert user |> verwijder(pk.id, valid_user_password()) |> response(204)
       assert Accounts.list_passkeys(user) == []
 
       # Zonder tweede factor is het wachtwoord weer genoeg.
       user |> login() |> ingelogd!()
+    end
+
+    test "zonder of met een fout wachtwoord blijft de passkey staan" do
+      # Het gat: met alleen een gekaapte sessie de passkey weghalen, en daarmee
+      # de tweede factor. De sessie hier is geldig; alleen het wachtwoord mist.
+      {user, auth} = met_passkey()
+      [pk] = Accounts.list_passkeys(user)
+
+      assert %{"error" => "missing_password"} =
+               user |> verwijder(pk.id, nil) |> json_response(422)
+
+      assert %{"error" => "wrong_current_password"} =
+               user |> verwijder(pk.id, "niet-het-wachtwoord") |> json_response(422)
+
+      assert [_] = Accounts.list_passkeys(user)
+
+      # En de passkey werkt nog: wachtwoord alleen geeft geen sessie, de
+      # passkey erbij wel.
+      challenge = inlog_challenge(user)
+      user |> met_assertie(auth, challenge) |> ingelogd!()
+
+      # De tegenproef op dezelfde sessie en hetzelfde id: met het juiste
+      # wachtwoord gaat hij wel weg. Zonder deze stap slaagden de weigeringen
+      # hierboven ook als de route om een andere reden kapot was.
+      assert user |> verwijder(pk.id, valid_user_password()) |> response(204)
+      assert Accounts.list_passkeys(user) == []
+    end
+
+    test "een fout wachtwoord telt mee voor het inlogslot" do
+      # Anders is dit de plek om met een gekaapte sessie ongelimiteerd naar het
+      # wachtwoord te raden. Na genoeg fouten helpt ook het goede even niet.
+      {user, _} = met_passkey()
+      [pk] = Accounts.list_passkeys(user)
+
+      for _ <- 1..10, do: verwijder(user, pk.id, "niet-het-wachtwoord")
+
+      assert %{"error" => "wrong_current_password"} =
+               user |> verwijder(pk.id, valid_user_password()) |> json_response(422)
+
+      assert [_] = Accounts.list_passkeys(user)
     end
 
     test "andermans passkey verwijderen kan niet, en verraadt niet dat hij bestaat" do
@@ -280,9 +328,10 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       [pk] = Accounts.list_passkeys(eigenaar)
       vreemde = confirmed_user_fixture()
 
-      bestaand = vreemde |> ingelogd() |> delete(~p"/api/v1/auth/passkeys/#{pk.id}")
-      verzonnen = Ecto.UUID.generate()
-      onbekend = vreemde |> ingelogd() |> delete(~p"/api/v1/auth/passkeys/#{verzonnen}")
+      # Met het eigen, juiste wachtwoord van de vreemde: anders strandt het al
+      # op het wachtwoord en zegt deze test niets over eigendom.
+      bestaand = verwijder(vreemde, pk.id, valid_user_password())
+      onbekend = verwijder(vreemde, Ecto.UUID.generate(), valid_user_password())
 
       # Hetzelfde antwoord voor "bestaat niet" en "niet van jou".
       assert json_response(bestaand, 404) == json_response(onbekend, 404)
@@ -292,13 +341,17 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
     test "een id dat geen uuid is, of geen sessie, levert niets op" do
       {user, _} = met_passkey()
 
-      geen_uuid = user |> ingelogd() |> delete(~p"/api/v1/auth/passkeys/geen-uuid")
+      geen_uuid = verwijder(user, "geen-uuid", valid_user_password())
       assert %{"error" => "not_found"} = json_response(geen_uuid, 404)
 
       [pk] = Accounts.list_passkeys(user)
 
       assert %{"error" => "unauthorized"} =
-               build_conn() |> delete(~p"/api/v1/auth/passkeys/#{pk.id}") |> json_response(401)
+               build_conn()
+               |> delete(~p"/api/v1/auth/passkeys/#{pk.id}", %{
+                 "current_password" => valid_user_password()
+               })
+               |> json_response(401)
 
       assert [_] = Accounts.list_passkeys(user)
     end

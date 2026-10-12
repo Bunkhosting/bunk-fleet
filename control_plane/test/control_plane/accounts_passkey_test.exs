@@ -132,11 +132,28 @@ defmodule ControlPlane.AccountsPasskeyTest do
       b = user("pk6b@bunk.test")
       pk = fake_passkey(a)
 
-      assert {:error, :not_found} = Accounts.delete_passkey(b, pk.id)
+      # b met zijn eigen, juiste wachtwoord: de weigering gaat dan over eigendom.
+      assert {:error, :not_found} = Accounts.delete_passkey(b, pk.id, @password)
       assert Accounts.passkeys_active?(a)
 
-      assert {:ok, _} = Accounts.delete_passkey(a, pk.id)
+      assert {:ok, _} = Accounts.delete_passkey(a, pk.id, @password)
       refute Accounts.passkeys_active?(a)
+    end
+
+    test "verwijderen vraagt het huidige wachtwoord" do
+      # Een passkey kan de tweede factor zijn; een sessie alleen mag hem niet
+      # weghalen. Een fout wachtwoord laat hem staan, het goede niet.
+      u = user("pk6c@bunk.test")
+      pk = fake_passkey(u)
+
+      assert {:error, :invalid_current_password} =
+               Accounts.delete_passkey(u, pk.id, "niet-het-wachtwoord")
+
+      assert {:error, :invalid_current_password} = Accounts.delete_passkey(u, pk.id, "")
+      assert Accounts.passkeys_active?(u)
+
+      assert {:ok, _} = Accounts.delete_passkey(u, pk.id, @password)
+      refute Accounts.passkeys_active?(u)
     end
 
     test "een sleutel verdwijnt met het account" do

@@ -91,4 +91,75 @@ defmodule ControlPlaneWeb.Plugs.SameOriginTest do
       assert %{"error" => "cross_origin_request"} = json_response(conn, 403), pad
     end
   end
+
+  describe "inloggen en registreren (login-CSRF)" do
+    # Hier is er nog geen cookie, en juist dat is de aanval: een andere site laat
+    # de bezoeker inloggen op het account van de aanvaller. Zonder controle op
+    # de herkomst kreeg hij diens sessiecookie gewoon gezet.
+    setup do
+      user = ControlPlane.Fixtures.confirmed_user_fixture()
+      inlog = %{"email" => user.email, "password" => ControlPlane.Fixtures.valid_user_password()}
+      %{user: user, inlog: inlog}
+    end
+
+    defp inloggen(conn, inlog), do: post(conn, ~p"/api/v1/auth/login", inlog)
+
+    defp aanmelding(email), do: %{"email" => email, "password" => "Str0ngPassphrase!42"}
+
+    test "een vreemde herkomst kan niet inloggen", %{inlog: inlog} do
+      conn =
+        build_conn()
+        |> put_req_header("origin", "https://kwaadwillend.example")
+        |> inloggen(inlog)
+
+      assert %{"error" => "cross_origin_request"} = json_response(conn, 403)
+      refute Map.has_key?(conn.resp_cookies, "bunk_session")
+    end
+
+    test "zonder Origin en Referer kan ook niet ingelogd worden", %{inlog: inlog} do
+      conn = build_conn() |> inloggen(inlog)
+      assert %{"error" => "cross_origin_request"} = json_response(conn, 403)
+    end
+
+    test "Origin: null telt als geen herkomst", %{inlog: inlog} do
+      # Wat een sandbox-iframe stuurt. Ging "null" door als "geen Origin, dus
+      # geen browser", dan was dat de weg eromheen.
+      conn = build_conn() |> put_req_header("origin", "null") |> inloggen(inlog)
+      assert %{"error" => "cross_origin_request"} = json_response(conn, 403)
+    end
+
+    test "vanaf het eigen dashboard werkt dezelfde login", %{inlog: inlog, user: user} do
+      # De tegenproef: dezelfde gegevens, alleen de herkomst verschilt. Zonder
+      # deze test slaagden de weigeringen hierboven ook bij een kapotte route.
+      conn = build_conn() |> vanaf_dashboard() |> inloggen(inlog)
+
+      assert %{"user" => %{"email" => email}} = json_response(conn, 200)
+      assert email == user.email
+      assert conn.resp_cookies["bunk_session"].value
+    end
+
+    test "een vreemde herkomst kan niet registreren" do
+      email = ControlPlane.Fixtures.unique_user_email()
+
+      conn =
+        build_conn()
+        |> put_req_header("origin", "https://kwaadwillend.example")
+        |> post(~p"/api/v1/auth/register", aanmelding(email))
+
+      assert %{"error" => "cross_origin_request"} = json_response(conn, 403)
+      refute Accounts.get_user_by_email(email)
+    end
+
+    test "vanaf het eigen dashboard werkt registreren" do
+      email = ControlPlane.Fixtures.unique_user_email()
+
+      conn =
+        build_conn()
+        |> vanaf_dashboard()
+        |> post(~p"/api/v1/auth/register", aanmelding(email))
+
+      assert json_response(conn, 201)
+      assert Accounts.get_user_by_email(email)
+    end
+  end
 end

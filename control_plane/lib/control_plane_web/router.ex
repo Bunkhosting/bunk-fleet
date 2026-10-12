@@ -158,6 +158,16 @@ defmodule ControlPlaneWeb.Router do
     plug ControlPlaneWeb.Plugs.RateLimit, bucket: "auth", max: 30, window_ms: 60_000
   end
 
+  # Inloggen en registreren zetten een sessiecookie. Zonder deze controle kon een
+  # andere site een bezoeker met een formulier-POST ongemerkt inloggen op het
+  # account van de aanvaller (login-CSRF). Los van :auth_public, want de andere
+  # routes daar geven geen sessie uit: een bevestigings- of resetlink is zelf
+  # het bewijs en wordt ook buiten het dashboard om geopend. De TOTP- en
+  # passkeystap lopen via POST /auth/login zelf en vallen er dus ook onder.
+  pipeline :login_herkomst do
+    plug ControlPlaneWeb.Plugs.SameOrigin, ook_zonder_cookie: true
+  end
+
   # CSP violation reports arrive from browsers with no credentials, so the only
   # control available is volume. Its own bucket: a page generating violations in
   # a loop must not exhaust the budget that protects login.
@@ -210,11 +220,17 @@ defmodule ControlPlaneWeb.Router do
     post "/billing/mollie/webhook", MollieController, :webhook
   end
 
+  # Eerst de rate limit en dan pas de herkomst: ook een geweigerde poging telt
+  # mee voor het budget van dit IP.
   scope "/api/v1", ControlPlaneWeb do
-    pipe_through :auth_public
+    pipe_through [:auth_public, :login_herkomst]
 
     post "/auth/register", AuthController, :register
     post "/auth/login", AuthController, :login
+  end
+
+  scope "/api/v1", ControlPlaneWeb do
+    pipe_through :auth_public
 
     # Email-confirmation link exchange (token IS the credential; no session needed).
     post "/auth/confirm", AuthController, :confirm

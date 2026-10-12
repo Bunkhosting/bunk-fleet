@@ -22,7 +22,7 @@ defmodule ControlPlaneWeb.AuthControllerTest do
     test "creates a user and sets the session cookie, without a token in the body",
          %{conn: conn} do
       conn =
-        post(conn, ~p"/api/v1/auth/register", %{
+        post(vanaf_dashboard(conn), ~p"/api/v1/auth/register", %{
           "email" => @email,
           "password" => @password,
           "name" => "Op"
@@ -41,7 +41,9 @@ defmodule ControlPlaneWeb.AuthControllerTest do
 
     test "returns 422 for a short password", %{conn: conn} do
       conn =
-        post(conn, ~p"/api/v1/auth/register", %{"email" => @email, "password" => "short"})
+        conn
+        |> vanaf_dashboard()
+        |> post(~p"/api/v1/auth/register", %{"email" => @email, "password" => "short"})
 
       assert %{"errors" => %{"password" => [_ | _]}} = json_response(conn, 422)
     end
@@ -50,7 +52,7 @@ defmodule ControlPlaneWeb.AuthControllerTest do
       register_user(nil)
 
       conn =
-        post(conn, ~p"/api/v1/auth/register", %{
+        post(vanaf_dashboard(conn), ~p"/api/v1/auth/register", %{
           "email" => String.upcase(@email),
           "password" => @password,
           "name" => "Op"
@@ -68,7 +70,11 @@ defmodule ControlPlaneWeb.AuthControllerTest do
 
     test "sets the session cookie for valid credentials, without a token in the body",
          %{conn: conn} do
-      conn = post(conn, ~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
+      conn =
+        conn
+        |> vanaf_dashboard()
+        |> post(~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
+
       assert %{"user" => %{"email" => @email}} = body = json_response(conn, 200)
       refute Map.has_key?(body, "token")
       # Ook niet onder een andere sleutel: de cookiewaarde mag nergens in de body staan.
@@ -77,7 +83,9 @@ defmodule ControlPlaneWeb.AuthControllerTest do
 
     test "returns 401 for a wrong password", %{conn: conn} do
       conn =
-        post(conn, ~p"/api/v1/auth/login", %{"email" => @email, "password" => "wrong-password-x"})
+        conn
+        |> vanaf_dashboard()
+        |> post(~p"/api/v1/auth/login", %{"email" => @email, "password" => "wrong-password-x"})
 
       assert %{"error" => _} = json_response(conn, 401)
     end
@@ -124,6 +132,7 @@ defmodule ControlPlaneWeb.AuthControllerTest do
     defp hammer_login(ip) do
       build_conn()
       |> put_req_header("cf-connecting-ip", ip)
+      |> vanaf_dashboard()
       |> post(~p"/api/v1/auth/login", %{
         "email" => "nobody@example.com",
         "password" => "wrong-password-123"
@@ -144,7 +153,11 @@ defmodule ControlPlaneWeb.AuthControllerTest do
 
     test "login sets an HttpOnly cookie that authenticates without a bearer header",
          %{conn: conn} do
-      login = post(conn, ~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
+      login =
+        conn
+        |> vanaf_dashboard()
+        |> post(~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
+
       refute Map.has_key?(json_response(login, 200), "token")
 
       cookie = login.resp_cookies["bunk_session"]
@@ -161,7 +174,11 @@ defmodule ControlPlaneWeb.AuthControllerTest do
     end
 
     test "logout via the cookie revokes the session and clears the cookie", %{conn: conn} do
-      login = post(conn, ~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
+      login =
+        conn
+        |> vanaf_dashboard()
+        |> post(~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
+
       value = login.resp_cookies["bunk_session"].value
 
       out =
@@ -283,6 +300,7 @@ defmodule ControlPlaneWeb.AuthControllerTest do
 
       login =
         conn
+        |> vanaf_dashboard()
         |> post(~p"/api/v1/auth/login", %{
           "email" => @email,
           "password" => "a-brand-new-password-123"

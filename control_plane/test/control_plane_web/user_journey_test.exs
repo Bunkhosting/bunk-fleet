@@ -74,7 +74,9 @@ defmodule ControlPlaneWeb.UserJourneyTest do
     # Het token staat niet in de body maar alleen in de HttpOnly-cookie; een
     # API-client haalt het daar vandaan en draagt het als Bearer.
     aanmelding =
-      post(conn, ~p"/api/v1/auth/register", %{"email" => email, "password" => @password})
+      conn
+      |> vanaf_dashboard()
+      |> post(~p"/api/v1/auth/register", %{"email" => email, "password" => @password})
 
     json_response(aanmelding, 201)
     token = aanmelding.resp_cookies["bunk_session"].value

@@ -411,7 +411,9 @@ defmodule ControlPlane.PasskeyCeremonieTest do
       assert {:ok, _} = registreer(user, Authenticator.new())
       assert {:ok, _} = inloggen(user, auth)
 
-      assert {:ok, _} = Accounts.delete_passkey(user, opgeslagen(auth).id)
+      assert {:ok, _} =
+               Accounts.delete_passkey(user, opgeslagen(auth).id, valid_user_password())
+
       assert {:error, :invalid_passkey} = inloggen(user, auth)
     end
   end

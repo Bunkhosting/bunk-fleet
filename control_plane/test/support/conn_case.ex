@@ -62,6 +62,17 @@ defmodule ControlPlaneWeb.ConnCase do
   end
 
   @doc """
+  Zet de `Origin` van ons eigen dashboard op `conn`, zoals de browser hem meestuurt.
+
+  Inloggen en registreren weigeren een verzoek zonder herkomst: anders kan een
+  andere site een bezoeker ongemerkt op het account van de aanvaller laten
+  inloggen (login-CSRF, zie `ControlPlaneWeb.Plugs.SameOrigin`).
+  """
+  def vanaf_dashboard(conn) do
+    Plug.Conn.put_req_header(conn, "origin", Application.get_env(:control_plane, :public_url))
+  end
+
+  @doc """
   Een bevestigde beheerder met een tweede factor, en `conn` met diens sessie.
 
   Vervangt het gedeelde geheim dat de /admin/v1-tests vroeger meestuurden: wat

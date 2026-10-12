@@ -145,6 +145,7 @@ defmodule ControlPlaneWeb.BeheerMfaTest do
 
       login =
         build_conn()
+        |> vanaf_dashboard()
         |> post(~p"/api/v1/auth/login", %{
           "email" => beheerder.email,
           "password" => "Str0ngPassphrase!42",

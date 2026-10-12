@@ -47,7 +47,8 @@ controleer("het saldo is geen cent veranderd", voor == na,
            f"voor {voor}, na {na} -- er is geld weggelekt op een mislukte bestelling", "KRITIEK")
 
 # --- 2. Twintig keer tegelijk inloggen ------------------------------------
-res = parallel(20, lambda i: roep("POST", "/auth/login", {"email": EMAIL, "password": PW}))
+res = parallel(20, lambda i: roep("POST", "/auth/login", {"email": EMAIL, "password": PW},
+                                  headers=VAN_DASHBOARD))
 st = Counter(s for s, _, _, _ in res)
 controleer("twintig gelijktijdige logins geven geen 5xx", all(s < 500 for s in st),
            f"statussen {dict(st)}", "HOOG")

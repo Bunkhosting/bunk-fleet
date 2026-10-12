@@ -44,8 +44,11 @@ async function sessieCookie(): Promise<{ name: string; value: string } | null> {
   if (!pw) return null;
 
   const ctx = await pwRequest.newContext();
+  // De Origin die een browser zelf meestuurt. Zonder die herkomst weigert de
+  // control plane het inloggen (login-CSRF), en dit is geen browser.
   const res = await ctx.post(`${APP}/api/v1/auth/login`, {
     data: { email: EMAIL, password: pw },
+    headers: { Origin: APP },
   });
   if (!res.ok()) return null;
 

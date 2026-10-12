@@ -37,7 +37,7 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
 
   defp login(conn, email, extra \\ %{}) do
     post(
-      conn,
+      vanaf_dashboard(conn),
       ~p"/api/v1/auth/login",
       Map.merge(%{"email" => email, "password" => @password}, extra)
     )
@@ -132,8 +132,12 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
              })
              |> json_response(422)
 
+    # Met het juiste wachtwoord van a: anders strandt het al daarop en zegt dit
+    # niets over andermans sleutel.
     assert %{"error" => "not_found"} =
-             authed |> delete(~p"/api/v1/auth/passkeys/#{pk_b.id}") |> json_response(404)
+             authed
+             |> delete(~p"/api/v1/auth/passkeys/#{pk_b.id}", %{"current_password" => @password})
+             |> json_response(404)
 
     assert Accounts.passkeys_active?(b)
   end

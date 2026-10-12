@@ -25,6 +25,24 @@ defmodule ControlPlaneWeb.Plugs.SameOrigin do
 
   Ontbreken beide, dan weigeren we. Dat is een verzoek dat geen browser stuurt,
   en "geen bewijs van herkomst" mag niet hetzelfde betekenen als "goed".
+
+  ## Inloggen en registreren: `ook_zonder_cookie: true`
+
+  Daar is de regel "zonder cookie gaat het door" precies het gat. Een andere
+  site kan met een gewoon formulier een POST naar /auth/login laten doen met de
+  gegevens van de AANVALLER; wij zetten dan zijn sessiecookie in de browser van
+  de bezoeker (login-CSRF). Die werkt daarna, zonder het te merken, in andermans
+  account: een betaling of een SSH-sleutel komt bij de aanvaller terecht.
+
+  Met deze optie moet ook een verzoek zonder cookie van ons komen. Ontbreken
+  Origin en Referer, dan weigeren we, net als hierboven. Een browser stuurt bij
+  een formulier-POST naar een andere site altijd een Origin mee, dus een
+  ontbrekende Origin uitzonderen zou geen aanval openzetten -- maar `Origin: null`
+  (een sandbox-iframe, een omleiding via een andere site) valt hier ook onder "geen
+  herkomst", en een uitzondering voor "niets" is er vroeg of laat een voor
+  "null". Wie geen browser is (curl, de e2e-harnas) zet de Origin zelf; dat kost
+  één header. Een `Authorization`-header blijft ook hier volstaan, om dezelfde
+  reden als bij de sessieroutes: een andere site kan hem niet zetten.
   """
   import Plug.Conn
 
@@ -36,17 +54,23 @@ defmodule ControlPlaneWeb.Plugs.SameOrigin do
 
   def call(%Plug.Conn{method: method} = conn, _opts) when method in @veilig, do: conn
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
     conn = fetch_cookies(conn)
 
     cond do
       get_req_header(conn, "authorization") != [] -> conn
       # Zonder cookie valt er niets te misbruiken; de authenticatie hierna geeft
-      # dan de gewone 401, en dat is het antwoord dat de client verwacht.
-      not Map.has_key?(conn.req_cookies, Bearer.cookie_name()) -> conn
+      # dan de gewone 401, en dat is het antwoord dat de client verwacht. Niet
+      # bij inloggen: daar is het verzoek zonder cookie juist de aanval.
+      zonder_cookie_vrij?(conn, opts) -> conn
       van_ons?(herkomst(conn)) -> conn
       true -> weiger(conn)
     end
+  end
+
+  defp zonder_cookie_vrij?(conn, opts) do
+    not Keyword.get(opts, :ook_zonder_cookie, false) and
+      not Map.has_key?(conn.req_cookies, Bearer.cookie_name())
   end
 
   defp herkomst(conn) do

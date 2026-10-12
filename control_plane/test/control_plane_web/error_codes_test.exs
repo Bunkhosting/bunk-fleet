@@ -55,6 +55,7 @@ defmodule ControlPlaneWeb.ErrorCodesTest do
     test "a wrong password", %{conn: conn} do
       resp =
         conn
+        |> vanaf_dashboard()
         |> post(~p"/api/v1/auth/login", %{"email" => "nobody@example.com", "password" => "wrong"})
         |> json_response(401)
 
@@ -62,7 +63,7 @@ defmodule ControlPlaneWeb.ErrorCodesTest do
     end
 
     test "a login with nothing in it", %{conn: conn} do
-      resp = conn |> post(~p"/api/v1/auth/login", %{}) |> json_response(422)
+      resp = conn |> vanaf_dashboard() |> post(~p"/api/v1/auth/login", %{}) |> json_response(422)
 
       assert resp["error"] == "missing_credentials"
       # The sentence belongs in detail, where it is free to be one.

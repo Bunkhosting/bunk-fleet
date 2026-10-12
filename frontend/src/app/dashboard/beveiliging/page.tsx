@@ -8,6 +8,13 @@ import { ShieldCheck, ShieldOff, ShieldAlert, Loader2, Copy, Check, KeyRound, Tr
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { authApi, parseApiError, toPublicKeyOptions, type Passkey } from "@/lib/api";
 import { useUser } from "@/contexts/UserContext";
 import { useToast } from "@/components/ui/use-toast";
@@ -38,7 +45,7 @@ const UITLEG = [
 ];
 
 function BeveiligingContent() {
-  const { dialoog, bevestig, vraag } = useBevestig();
+  const { dialoog, vraag } = useBevestig();
   const { user, refresh } = useUser();
   const { toast } = useToast();
   const searchParams = useSearchParams();
@@ -62,6 +69,8 @@ function BeveiligingContent() {
   // dus ze worden als lijst beheerd in plaats van als één aan/uit-schakelaar.
   const [passkeys, setPasskeys] = React.useState<Passkey[] | null>(null);
   const [passkeyBusy, setPasskeyBusy] = React.useState(false);
+  const [teVerwijderen, setTeVerwijderen] = React.useState<Passkey | null>(null);
+  const [verwijderWachtwoord, setVerwijderWachtwoord] = React.useState("");
   const webauthnAvailable =
     typeof window !== "undefined" && typeof window.PublicKeyCredential !== "undefined";
 
@@ -119,22 +128,36 @@ function BeveiligingContent() {
     }
   }
 
-  async function removePasskey(pk: Passkey) {
-    const ok = await bevestig({
-      titel: `Passkey "${pk.label}" verwijderen?`,
-      uitleg: "Je kunt er daarna niet meer mee inloggen.",
-      bevestigLabel: "Verwijderen",
-      variant: "destructive",
-    });
-    if (!ok) return;
+  // Een passkey verwijderen vraagt het huidige wachtwoord, zoals TOTP uitzetten
+  // een code vraagt. Een passkey kan de tweede factor zijn, en wie alleen een
+  // open sessie in handen heeft mag die niet kunnen weghalen. Het wachtwoord en
+  // geen code: een account met alleen passkeys heeft geen authenticator-app.
+  async function removePasskey(e: React.FormEvent) {
+    e.preventDefault();
+    if (!teVerwijderen) return;
+    setPasskeyBusy(true);
     try {
-      await authApi.passkey.remove(pk.id);
+      await authApi.passkey.remove(teVerwijderen.id, verwijderWachtwoord);
       toast({ title: "Passkey verwijderd" });
+      sluitVerwijderen();
       loadPasskeys();
       await refresh();
     } catch (err: unknown) {
-      toast({ variant: "destructive", title: "Verwijderen mislukt", description: parseApiError(err, "Probeer het opnieuw.") });
+      // De dialoog blijft open, zodat een tikfout opnieuw geprobeerd kan worden.
+      toast({
+        variant: "destructive",
+        title: "Niet verwijderd",
+        description: parseApiError(err, "Klopt je huidige wachtwoord?"),
+      });
+      setVerwijderWachtwoord("");
+    } finally {
+      setPasskeyBusy(false);
     }
+  }
+
+  function sluitVerwijderen() {
+    setTeVerwijderen(null);
+    setVerwijderWachtwoord("");
   }
 
   const startSetup = React.useCallback(async () => {
@@ -252,6 +275,58 @@ function BeveiligingContent() {
   return (
     <>
       {dialoog}
+      {/* Passkey verwijderen: dezelfde opbouw als het uitschakelen van TOTP --
+          uitleg, één veld, een rode knop en annuleren -- maar in een dialoog,
+          omdat hij bij één regel uit de lijst hoort. */}
+      <Dialog
+        open={teVerwijderen !== null}
+        onOpenChange={(open) => {
+          if (!open && !passkeyBusy) sluitVerwijderen();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Passkey &quot;{teVerwijderen?.label}&quot; verwijderen?</DialogTitle>
+            <DialogDescription>
+              Je kunt er daarna niet meer mee inloggen. Voer je huidige wachtwoord in om te
+              bevestigen dat jij het bent.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={removePasskey} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="passkey-verwijder-wachtwoord">Huidig wachtwoord</Label>
+              <Input
+                id="passkey-verwijder-wachtwoord"
+                type="password"
+                autoComplete="current-password"
+                value={verwijderWachtwoord}
+                onChange={(e) => setVerwijderWachtwoord(e.target.value)}
+                required
+                autoFocus
+                className="bg-background/60"
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="destructive"
+              className="w-full"
+              disabled={passkeyBusy || !verwijderWachtwoord}
+            >
+              {passkeyBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Passkey verwijderen
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={sluitVerwijderen}
+              disabled={passkeyBusy}
+            >
+              Annuleren
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     <div className="max-w-2xl space-y-6">
       <PageHeader title="Beveiliging" description={<>Kies hoe je inlogt: een authenticator-app, een passkey, of allebei.</>} />
 
@@ -550,7 +625,10 @@ function BeveiligingContent() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => removePasskey(pk)}
+                      onClick={() => {
+                        setVerwijderWachtwoord("");
+                        setTeVerwijderen(pk);
+                      }}
                       title="Verwijderen"
                       aria-label={`Passkey ${pk.label} verwijderen`}
                     >

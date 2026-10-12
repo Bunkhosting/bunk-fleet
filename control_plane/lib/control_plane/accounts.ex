@@ -382,9 +382,19 @@ defmodule ControlPlane.Accounts do
   @spec change_user_password(User.t(), String.t(), map(), binary() | nil) ::
           {:ok, User.t()} | {:error, :invalid_current_password | Ecto.Changeset.t()}
   def change_user_password(%User{} = user, huidig, attrs, behoud_token \\ nil) do
-    # Hetzelfde slot als bij inloggen, en bewust dezelfde teller: het is hetzelfde
-    # wachtwoord dat geraden wordt. Zonder dit is deze endpoint de stille achterdeur
-    # om er ongelimiteerd op te gokken met een sessie die je al hebt.
+    with :ok <- herbevestig_wachtwoord(user, huidig) do
+      wijzig_wachtwoord(user, attrs, behoud_token)
+    end
+  end
+
+  # Het huidige wachtwoord als herbevestiging, voor handelingen die een geldige
+  # sessie alleen niet mag kunnen doen.
+  #
+  # Hetzelfde slot als bij inloggen, en bewust dezelfde teller: het is hetzelfde
+  # wachtwoord dat geraden wordt. Zonder dit is elke endpoint die hierom vraagt
+  # de stille achterdeur om er ongelimiteerd op te gokken met een sessie die je
+  # al hebt.
+  defp herbevestig_wachtwoord(%User{} = user, huidig) do
     cond do
       LoginThrottle.blocked?(user.email) ->
         {:error, :invalid_current_password}
@@ -394,7 +404,7 @@ defmodule ControlPlane.Accounts do
         {:error, :invalid_current_password}
 
       true ->
-        wijzig_wachtwoord(user, attrs, behoud_token)
+        :ok
     end
   end
 
@@ -812,11 +822,27 @@ defmodule ControlPlane.Accounts do
     end
   end
 
-  @doc "Verwijdert een passkey, maar alleen als hij van deze gebruiker is."
-  def delete_passkey(%User{id: user_id}, passkey_id) do
-    case Repo.get_by(Passkey, id: passkey_id, user_id: user_id) do
+  @doc """
+  Verwijdert een passkey, maar alleen als hij van deze gebruiker is en het
+  huidige wachtwoord klopt.
+
+  Een passkey kan de tweede factor van het account zijn. Met alleen een sessie
+  -- een meegelezen cookie, een onbeheerde laptop -- kon iemand hem weghalen en
+  daarmee de 2FA uitzetten, terwijl TOTP uitzetten wel een code vraagt. Het
+  wachtwoord en geen TOTP-code, want een account met alleen passkeys heeft geen
+  code; een wachtwoord heeft iedereen. Zelfde controle en zelfde slot als bij
+  wachtwoord wijzigen.
+
+  Eerst het wachtwoord, dan pas de opzoeking: zonder het juiste wachtwoord zegt
+  het antwoord ook niets over welke passkey-id's er bestaan.
+  """
+  def delete_passkey(%User{id: user_id} = user, passkey_id, huidig) when is_binary(huidig) do
+    with :ok <- herbevestig_wachtwoord(user, huidig),
+         %Passkey{} = p <- Repo.get_by(Passkey, id: passkey_id, user_id: user_id) do
+      Repo.delete(p)
+    else
       nil -> {:error, :not_found}
-      %Passkey{} = p -> Repo.delete(p)
+      {:error, :invalid_current_password} = fout -> fout
     end
   end
 
