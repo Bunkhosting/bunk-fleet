@@ -12,7 +12,14 @@ config :control_plane, ControlPlane.Repo,
   port: String.to_integer(System.get_env("DB_PORT", "5432")),
   database: "control_plane_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size: System.schedulers_online() * 2,
+  # In een async-test delen taken die de test start één sandboxverbinding, dus
+  # "gelijktijdige" transacties lopen daar achter elkaar. Met de standaard
+  # wachtrij (queue_target 50 ms) liet een trage CI-runner de achtste van acht
+  # wachtende taken vallen: "request was dropped from queue after 994ms". Dat
+  # is geen fout in de code maar een test die op de klok van de runner leunt.
+  queue_target: 5_000,
+  queue_interval: 10_000
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
