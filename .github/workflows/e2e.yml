@@ -1,0 +1,63 @@
+name: E2E tegen productie
+
+# De e2e-suite draaide alleen als iemand eraan dacht. Nu na elke geslaagde
+# uitrol, en eens per dag voor wat niet aan een uitrol hangt: een verlopen
+# certificaat, een edge die anders is gaan antwoorden, de marketingsite die uit
+# een eigen repo komt.
+#
+# Op een runner van GitHub en NIET op VM102. Die machine heeft 2 vCPU en draait
+# de hele dienst; Chromium ernaast liet ooit de guest-agent wegvallen. Vanaf
+# hier is de suite gewoon een bezoeker van buiten, en dat is ook wat hij meet.
+#
+# De suite is read-only (zie e2e/README.md): geen registratie, geen mail, geen
+# betaling, geen mutatie. Er gaat geen wachtwoord mee, dus de ingelogde tests
+# slaan zichzelf over -- die vragen een testaccount, en een geheim in deze
+# publieke repo-instellingen is een beslissing die niet in een workflow hoort.
+on:
+  workflow_run:
+    workflows: [Deploy]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-productie
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: Playwright (read-only, productie)
+    # Een mislukte uitrol heeft niets nieuws neergezet om te testen.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Dezelfde versie als @playwright/test in e2e/package.json; de browsers in
+    # het image horen bij precies die versie.
+    container:
+      image: mcr.microsoft.com/playwright:v1.50.0-noble
+    defaults:
+      run:
+        working-directory: e2e
+    env:
+      # Playwright weigert anders als root in de container te starten met een
+      # HOME die niet van root is.
+      HOME: /root
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: npm ci
+      - run: npx playwright test
+      - name: Rapport bewaren
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-rapport
+          path: |
+            e2e/playwright-report
+            e2e/results.json
+            e2e/test-results
+          retention-days: 14
