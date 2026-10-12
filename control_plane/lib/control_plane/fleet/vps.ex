@@ -108,7 +108,8 @@ defmodule ControlPlane.Fleet.Vps do
     # worden alleen door het platform gezet, bij het aanmaken. Ze via `cast/3`
     # bereikbaar maken zou betekenen dat een verzoek zijn eigen publieke sleutel
     # kan opgeven -- en dat is precies de sleutel die root geeft op die machine.
-    |> validate_required([:name, :region_id, :vcpu, :ram_mb, :disk_gb])
+    |> validate_required([:name, :vcpu, :ram_mb, :disk_gb])
+    |> regio_verplicht_bij_aanmaken()
     |> validate_length(:name, max: 100)
     # Reject control characters (newlines, etc.) so a name can't break out of the
     # cloud-init/guestinfo YAML the agent renders for the VM (injection hardening).
@@ -142,6 +143,27 @@ defmodule ControlPlane.Fleet.Vps do
     # exceptie die als 500 bij de klant aankomt.
     |> foreign_key_constraint(:package_id)
     |> unique_constraint(:ip_address, name: :vpses_active_node_ip_uidx)
+  end
+
+  # Een nieuwe VPS zonder locatie bestaat niet, dus bij het aanmaken is de regio
+  # verplicht. Bij een latere wijziging niet: sinds de regio met `ON DELETE SET
+  # NULL` kan worden opgeruimd, heeft een verwijderde VPS uit zo'n regio
+  # `region_id` NULL. Eiste deze changeset de regio altijd, dan liep daarna elke
+  # wijziging van die rij vast -- ook een laat antwoord van de agent op een
+  # delete of provision, dat dan steeds opnieuw zou mislukken.
+  #
+  # Eén changeset met deze ene uitzondering in plaats van twee varianten: alle
+  # andere regels gelden bij aanmaken en wijzigen precies hetzelfde, en twee
+  # varianten nodigen uit tot een aanroeper die de verkeerde kiest. Het
+  # onderscheid zit in de struct zelf: `:built` is een rij die nog niet in de
+  # database staat.
+  #
+  # Een rij die wél een regio heeft, raakt die ook niet kwijt via een wijziging:
+  # alleen het opruimen van de regio mag `region_id` leeg maken.
+  defp regio_verplicht_bij_aanmaken(%Ecto.Changeset{data: data} = changeset) do
+    if data.__meta__.state == :built or not is_nil(data.region_id),
+      do: validate_required(changeset, :region_id),
+      else: changeset
   end
 
   # Hard platform bounds on the requested spec. The lower bounds (> 0) are a
