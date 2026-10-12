@@ -89,6 +89,22 @@ defmodule ControlPlane.MailDagquotumTest do
     end
   end
 
+  test "zonder eigen reservering is die een vijfde van de limiet, minstens vijf", %{
+    klant: klant
+  } do
+    # Bij 100 per dag (Resend) zou een vaste vijftig de helft van de klantmail
+    # wegnemen. Limiet 10 geeft een vijfde van 2, dus de bodem van 5: klantmail
+    # mag er vijf, de zesde niet.
+    Application.delete_env(:control_plane, :mail_ops_reserve)
+    Application.put_env(:control_plane, :mail_daily_limit, 10)
+
+    for _ <- 1..5, do: assert(stuur_klantmail(klant) == :ok)
+
+    capture_log(fn ->
+      assert stuur_klantmail(klant) == {:error, :daily_quota_reserved_for_ops}
+    end)
+  end
+
   test "een melding gaat ook als de klantgrens al ver voorbij is", %{klant: klant} do
     # De reservering is geen tweede quotum voor meldingen: de app houdt een
     # melding nooit tegen. Of hij aankomt, beslist de server.

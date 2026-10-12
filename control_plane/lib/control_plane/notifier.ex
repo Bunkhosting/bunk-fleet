@@ -190,10 +190,12 @@ defmodule ControlPlane.Notifier do
   # Een aparte teller voor meldingen zou niets toevoegen: wat telt is hoeveel er
   # vandaag in totaal al weg is.
   #
-  # Vijftig is ruim: de rem hierboven laat per onderwerp drie meldingen per uur
-  # door, dus één aanhoudende toestand vult de reservering pas na zestien uur, en
-  # tientallen verschillende storingen krijgen elk hun eerste melding. Wie het
-  # ziet, weet het dan al.
+  # De reservering is een vijfde van de limiet, met een bodem van vijf en een
+  # plafond van vijftig. Een vast getal paste niet: Resend geeft ons honderd per
+  # dag, en vijftig daarvan vrijhouden halveert wat klanten krijgen. Een vijfde
+  # (bij MAIL_DAILY_LIMIT=90 zijn dat er achttien) dekt de rem hierboven -- drie
+  # per onderwerp per uur -- voor zes uur van één aanhoudende storing, of de
+  # eerste melding van achttien verschillende. Wie het ziet, weet het dan al.
   #
   # Zonder `:mail_daily_limit` (MAIL_DAILY_LIMIT) is er geen teller: we weten de
   # grens van de server niet, en een geraden getal weigert klanten zonder reden.
@@ -202,7 +204,8 @@ defmodule ControlPlane.Notifier do
   # doortelt. Het venster is een UTC-dag, wat niet hoeft te kloppen met hoe de
   # server zijn dag rekent. Beide maken de teller optimistisch, en dat is waarom
   # MAIL_DAILY_LIMIT liever wat onder de echte grens staat.
-  @ops_reserve 50
+  @ops_reserve_max 50
+  @ops_reserve_min 5
   @dag_ms 24 * 60 * 60 * 1000
   @dagteller "mail:dagquotum"
 
@@ -220,9 +223,12 @@ defmodule ControlPlane.Notifier do
   end
 
   defp grens(:ops, limiet), do: limiet
-  defp grens(:klant, limiet), do: limiet - ops_reserve()
+  defp grens(:klant, limiet), do: limiet - ops_reserve(limiet)
 
-  defp ops_reserve, do: Application.get_env(:control_plane, :mail_ops_reserve, @ops_reserve)
+  defp ops_reserve(limiet) do
+    standaard = limiet |> div(5) |> max(@ops_reserve_min) |> min(@ops_reserve_max)
+    Application.get_env(:control_plane, :mail_ops_reserve, standaard)
+  end
 
   defp deliver(%{to: to_email, subject: subject, text: text, html: html, soort: soort}) do
     email =
