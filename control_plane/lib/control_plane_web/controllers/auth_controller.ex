@@ -450,7 +450,13 @@ defmodule ControlPlaneWeb.AuthController do
 
   def passkey_register(conn, %{"challenge_id" => cid, "credential" => cred} = params)
       when is_binary(cid) and is_map(cred) do
-    label = String.trim(to_string(params["label"] || "Passkey"))
+    # Alleen een string is een label. `to_string/1` op een JSON-object raist, en
+    # dat was een 500 op een verzoek dat elke ingelogde gebruiker kan sturen.
+    label =
+      case params["label"] do
+        tekst when is_binary(tekst) -> String.trim(tekst)
+        _ -> "Passkey"
+      end
 
     with {:ok, attestation_object} <- b64(get_in(cred, ["response", "attestationObject"])),
          {:ok, client_data_json} <- b64(get_in(cred, ["response", "clientDataJSON"])),

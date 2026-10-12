@@ -1,11 +1,11 @@
 defmodule ControlPlane.AccountsPasskeyTest do
   @moduledoc """
-  De levenscyclus rond een passkey, zonder echte authenticator.
+  De levenscyclus rond een passkey, met verzonnen sleutels.
 
-  Een echte attestatie is hier niet na te maken — die vereist een apparaat dat
-  ondertekent. Wat wél te bewijzen is: dat de challenge eenmalig en tijdelijk
-  is, dat rommel geweigerd wordt, dat sleutels bij hun eigenaar blijven en dat de
-  challenge-structuren de vorm hebben die de browser verwacht.
+  Wat hier bewezen wordt: dat de challenge eenmalig en tijdelijk is, dat rommel
+  geweigerd wordt, dat sleutels bij hun eigenaar blijven en dat de
+  challenge-structuren de vorm hebben die de browser verwacht. De ceremonie met
+  een echte, tekenende sleutel staat in `passkey_ceremonie_test.exs`.
   """
   use ControlPlane.DataCase, async: false
 

@@ -803,6 +803,10 @@ defmodule ControlPlane.Accounts do
     else
       :error -> {:error, :challenge_expired}
       false -> {:error, :challenge_expired}
+      # Een challenge die voor inloggen is uitgegeven. Zonder deze tak viel hij
+      # door alle andere heen en werd het een WithClauseError: een 500 op een
+      # verzoek dat iedere ingelogde gebruiker kan sturen.
+      {:ok, _challenge, _meta} -> {:error, :challenge_expired}
       {:error, %Ecto.Changeset{} = cs} -> {:error, cs}
       {:error, _wax} -> {:error, :invalid_passkey}
     end
@@ -883,6 +887,9 @@ defmodule ControlPlane.Accounts do
     else
       :error -> {:error, :challenge_expired}
       false -> {:error, :challenge_expired}
+      # Een registratie-challenge die als inlog-challenge wordt aangeboden: zie
+      # finish_passkey_registration/3, zelfde gat, hier op het inlogpad.
+      {:ok, _challenge, _meta} -> {:error, :challenge_expired}
       nil -> {:error, :invalid_passkey}
       {:error, :cloned} -> {:error, :invalid_passkey}
       {:error, _} -> {:error, :invalid_passkey}
@@ -902,10 +909,14 @@ defmodule ControlPlane.Accounts do
 
   # Een authenticator die tellers ondersteunt telt strikt op. Twee apparaten met
   # dezelfde sleutel lopen uit de pas, en dat zie je hier: de teller die
-  # binnenkomt is niet hoger dan de laatste. Nul betekent "ondersteunt geen
-  # teller" en wordt daarom overgeslagen.
+  # binnenkomt is niet hoger dan de laatste. Alleen als BEIDE nul zijn is er geen
+  # teller en valt er niets te vergelijken (WebAuthn §7.2, stap 21).
+  #
+  # Eerst moest de binnenkomende teller ook boven nul zijn. Dan kwam een kloon
+  # die 0 meestuurde er altijd door, en omdat die 0 daarna werd opgeslagen stond
+  # de controle voor die sleutel voorgoed uit.
   defp check_sign_count(%Passkey{sign_count: stored}, incoming)
-       when incoming > 0 and stored > 0 and incoming <= stored,
+       when (incoming > 0 or stored > 0) and incoming <= stored,
        do: {:error, :cloned}
 
   defp check_sign_count(_pk, _incoming), do: :ok
