@@ -12,9 +12,7 @@ defmodule ControlPlane.Provisioning do
        the command and the VPS, committing or releasing the held reservation.
   """
   import Ecto.Query, warn: false
-  require Logger
 
-  alias ControlPlane.Clock
   alias ControlPlane.Console.Keys
   alias ControlPlane.Credits
 
@@ -29,8 +27,11 @@ defmodule ControlPlane.Provisioning do
   alias ControlPlane.Locks
   alias ControlPlane.Net
   alias ControlPlane.Provisioning.CommandQueue
+  alias ControlPlane.Provisioning.GuestName
   alias ControlPlane.Provisioning.Power
   alias ControlPlane.Provisioning.Reservations
+  alias ControlPlane.Provisioning.Sweeps
+  alias ControlPlane.Provisioning.Teardown
   alias ControlPlane.Repo
   alias ControlPlane.Subscriptions
   alias Ecto.Multi
@@ -87,299 +88,21 @@ defmodule ControlPlane.Provisioning do
     end
   end
 
-  @doc """
-  Fails VPSes that were persisted but never dispatched, and says how many.
+  @doc "Zie `ControlPlane.Provisioning.Sweeps.fail_stuck_queued_vpses/1`."
+  defdelegate fail_stuck_queued_vpses(grace_seconds \\ 600), to: Sweeps
 
-  `create_vps/1` inserts the row `:queued` and then places it. Between those two
-  the control plane can stop — a deploy, a crash — and what is left is a row
-  nobody will ever act on: no command, no reservation, no node, and a customer
-  who has already been charged. It counts against their quota and shows in their
-  dashboard as something about to happen, forever.
-
-  Marking it `:failed` is the honest end state: the customer can see it went
-  wrong and delete it, and it stops occupying a quota slot. The charge is
-  refunded in the same transaction: the ledger carries the VPS id, so there is
-  no guessing about which entry to reverse.
-  """
-  @spec fail_stuck_queued_vpses(non_neg_integer()) :: non_neg_integer()
-  def fail_stuck_queued_vpses(grace_seconds \\ 600) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-grace_seconds, :second)
-
-    stuck =
-      Repo.all(
-        from v in Vps,
-          as: :vps,
-          where: v.status == :queued and v.inserted_at < ^cutoff,
-          # A row with a command is mid-dispatch, not abandoned.
-          where: not exists(from c in Command, where: c.vps_id == parent_as(:vps).id, select: 1),
-          select: v.id
-      )
-
-    # Per VPS één transactie: eerst de rij voorwaardelijk op :failed, en alleen
-    # als dat lukt het geld terug. Andersom -- eerst terugbetalen, dan alle ids
-    # in één keer op :failed -- liet een gat. Een uitsturing die tussen de select
-    # en de update alsnog doorkwam, zette de VPS op :provisioning; de update
-    # overschreef dat zonder te kijken, en de klant kreeg een draaiende machine
-    # met zijn geld terug. De voorwaarde staat nu in de UPDATE zelf: Postgres
-    # wacht op het slot van die uitsturing en kijkt daarna opnieuw.
-    count = Enum.count(stuck, &faal_wachtende_vps/1)
-
-    if count > 0, do: Events.broadcast_changed(:vps)
-    count
-  end
-
+  # Publiek voor de test die het gat in `fail_stuck_queued_vpses/1` vastlegt.
   @doc false
-  # Publiek voor de test die het gat hierboven vastlegt; verder alleen van hier.
-  def faal_wachtende_vps(vps_id) do
-    {:ok, gefaald?} =
-      Repo.transaction(fn ->
-        {n, _} =
-          Repo.update_all(
-            from(v in Vps,
-              as: :vps,
-              where: v.id == ^vps_id and v.status == :queued,
-              where:
-                not exists(from c in Command, where: c.vps_id == parent_as(:vps).id, select: 1)
-            ),
-            set: [status: :failed, updated_at: Clock.now()]
-          )
+  defdelegate faal_wachtende_vps(vps_id), to: Sweeps
 
-        if n == 1, do: betaal_wachtende_terug(vps_id)
+  @doc "Zie `ControlPlane.Provisioning.Sweeps.fail_stuck_provisioning_vpses/1`."
+  defdelegate fail_stuck_provisioning_vpses(grace_seconds \\ 1800), to: Sweeps
 
-        n == 1
-      end)
-
-    gefaald?
-  end
-
-  defp betaal_wachtende_terug(vps_id) do
-    # The charge carries the VPS id since the ledger learned about machines, so
-    # the money can go back here instead of in a sentence telling a person to go
-    # and look for it.
-    refunded = Credits.refund_charge_for_vps(vps_id)
-
-    Logger.error(
-      "vps #{vps_id} was queued but never dispatched; failing it. " <>
-        if(refunded, do: "The charge has been refunded.", else: "No charge was found for it.")
-    )
-  end
+  @doc "Zie `ControlPlane.Provisioning.Sweeps.fail_stuck_restores/1`."
+  defdelegate fail_stuck_restores(uren \\ 6), to: Sweeps
 
   @doc "Zie `ControlPlane.Provisioning.CommandQueue.purge_old_commands/2`."
   defdelegate purge_old_commands(dagen \\ 90, hoogstens \\ 5_000), to: CommandQueue
-
-  @doc """
-  Fails VPSes still `:provisioning` on a node that has gone away, and returns how
-  many.
-
-  `fail_stuck_queued_vpses/1` only looks at `:queued` -- rows the control plane
-  never managed to dispatch. Once a placement succeeds the VPS goes
-  `:provisioning` with a command behind it, and from there the only way out is
-  the agent reporting a result. If the node never comes back, nobody ever
-  reports: the row stays "bezig" in the panel forever, its reservation stays
-  `:held` so the node looks fuller than it is even after it returns, and the
-  customer stays charged for a machine that does not exist.
-
-  The trigger is deliberately narrow -- the node is `:offline` (the heartbeat
-  sweeper has already decided it is gone) and the provision command has sat
-  unresolved past the grace. A node that is merely slow stays `:online` and its
-  command keeps being redelivered, which is the existing recovery path and is
-  better than this one.
-
-  The grace is half an hour: far past the 120-second heartbeat TTL, so a reboot
-  or a brief network cut never reaches this code.
-
-  It goes through `apply_result/2` with a synthesised failure rather than
-  updating the rows here, so the refund, the reservation release and the
-  capacity restore are literally the same code that runs when an agent reports a
-  failed provision. A second implementation of that path would be a second place
-  for the money to go wrong.
-
-  What this cannot do is clean up a half-built VM on the node, because the agent
-  never told us a vm_id. If the node returns with a guest we do not know about,
-  `ControlPlane.Fleet.Drift` is what reports it.
-  """
-  @spec fail_stuck_provisioning_vpses(non_neg_integer()) :: non_neg_integer()
-  def fail_stuck_provisioning_vpses(grace_seconds \\ 1800) do
-    cutoff = Clock.shift(-grace_seconds)
-
-    gestrand =
-      Repo.all(
-        from c in Command,
-          join: v in Vps,
-          on: v.id == c.vps_id,
-          join: n in Node,
-          on: n.id == c.node_id,
-          where: c.kind == :provision and c.status in [:pending, :delivered],
-          # :deleting hoort erbij: een klant die verwijderde terwijl de uitrol
-          # liep, krijgt een uitgestelde afbraak die op het resultaat van die
-          # uitrol wacht. Valt de node weg, dan komt dat resultaat nooit, en
-          # bleef de VPS voorgoed op "wordt verwijderd" staan, met de capaciteit
-          # geboekt.
-          where: v.status in [:provisioning, :deleting],
-          where: n.status == :offline,
-          where: c.inserted_at < ^cutoff
-      )
-
-    Enum.each(gestrand, fn command ->
-      Logger.error(
-        "vps #{command.vps_id} hangt in :provisioning op node #{command.node_id}, " <>
-          "die offline is; de bestelling wordt als mislukt afgehandeld en terugbetaald"
-      )
-
-      apply_result(command, %{
-        "status" => "failed",
-        "error" => "node unreachable: provision never reported a result"
-      })
-    end)
-
-    length(gestrand)
-  end
-
-  @doc """
-  Haalt VPS'en uit `:restoring` die daar nooit meer uit zouden komen.
-
-  Een terugzetactie wordt alleen afgesloten door het resultaat van de agent.
-  Komt dat nooit -- de node valt weg, het resultaat gaat verloren -- dan stond
-  de VPS voorgoed op "terugzetten", en blokkeerde dat elke andere knop.
-
-  Twee gevallen:
-
-    * het commando loopt al langer dan `uren` uur: dan wordt het als mislukt
-      afgehandeld, wat de VPS op `:stopped` zet (niet op `:active`: de schijf
-      kan half geschreven zijn);
-    * er is geen lopend terugzetcommando meer, maar de VPS staat er al een half
-      uur op: dan is er niets meer dat hem verplaatst, en gaat hij direct naar
-      `:stopped`.
-
-  Geeft het aantal losgemaakte VPS'en terug.
-  """
-  @spec fail_stuck_restores(pos_integer()) :: non_neg_integer()
-  def fail_stuck_restores(uren \\ 6) do
-    grens = Clock.shift(-uren * 3600)
-
-    te_lang =
-      Repo.all(
-        from c in Command,
-          join: v in Vps,
-          on: v.id == c.vps_id,
-          where: c.kind == :restore_backup and c.status in [:pending, :delivered],
-          where: v.status == :restoring and c.inserted_at < ^grens
-      )
-
-    Enum.each(te_lang, fn command ->
-      Logger.error("terugzetten van vps #{command.vps_id} meldde niets terug binnen #{uren} uur")
-
-      apply_result(command, %{
-        "status" => "failed",
-        "error" => "de node meldde niets terug binnen #{uren} uur"
-      })
-    end)
-
-    lopend =
-      from c in Command,
-        where:
-          c.vps_id == parent_as(:vps).id and c.kind == :restore_backup and
-            c.status in [:pending, :delivered],
-        select: 1
-
-    {zwevend, _} =
-      Repo.update_all(
-        from(v in Vps,
-          as: :vps,
-          where: v.status == :restoring and v.updated_at < ^Clock.shift(-1800),
-          where: not exists(lopend)
-        ),
-        set: [status: :stopped, updated_at: Clock.now()]
-      )
-
-    length(te_lang) + zwevend
-  end
-
-  @doc """
-  Re-dispatches teardowns that failed, and returns how many it retried.
-
-  A delete whose command fails leaves the VPS `:deleting` with a live VM still
-  running on the node. It is recoverable — asking to delete again dispatches a
-  fresh command — but the dashboard shows "being deleted" and offers no second
-  button, so the nudge has to come from here.
-
-  The spacing doubles with each failure: five minutes after the first, ten after
-  the second, and so on to a ceiling. That is deliberate in both directions. A
-  transient error — a busy storage, a node mid-reboot — clears on the next
-  attempt; a real one (a VM the hypervisor will not release) stops generating a
-  command every thirty seconds while still being retried hours later, when the
-  node that was down for maintenance comes back.
-
-  There is no give-up state on purpose. Marking the VPS `:failed` would let the
-  customer clear it from their list while its VM kept running and its capacity
-  stayed booked — tidy for them, a leak for the fleet.
-  """
-  @spec retry_stuck_deletes(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  def retry_stuck_deletes(grace_seconds \\ 300, max_backoff_seconds \\ 6 * 3600) do
-    now = DateTime.utc_now()
-
-    candidates =
-      Repo.all(
-        from v in Vps,
-          as: :vps,
-          where: v.status == :deleting and not is_nil(v.node_id),
-          where:
-            not exists(
-              from c in Command,
-                where:
-                  c.vps_id == parent_as(:vps).id and c.kind == :delete and
-                    c.status in [:pending, :delivered],
-                select: 1
-            )
-      )
-
-    # De mislukkingen van alle kandidaten in één query. Stond dit per kandidaat,
-    # dan deed de reconciler elke dertig seconden een query per VPS die op
-    # verwijderen wacht -- en dat is precies de situatie waarin er meer dan een
-    # paar zijn: een node die weg is, met alles erop in :deleting.
-    mislukkingen = mislukte_deletes(Enum.map(candidates, & &1.id))
-
-    candidates
-    |> Enum.filter(
-      &due_for_delete_retry?(&1, mislukkingen, now, grace_seconds, max_backoff_seconds)
-    )
-    |> Enum.map(fn vps ->
-      Logger.error("retrying the failed teardown of vps #{vps.id}")
-      dispatch_delete(vps)
-    end)
-    |> length()
-  end
-
-  # Per VPS: hoeveel delete-commando's er mislukt zijn en wanneer de laatste dat
-  # deed. Meer heeft de afweging hieronder niet nodig.
-  defp mislukte_deletes([]), do: %{}
-
-  defp mislukte_deletes(vps_ids) do
-    Repo.all(
-      from c in Command,
-        where: c.vps_id in ^vps_ids and c.kind == :delete and c.status == :failed,
-        group_by: c.vps_id,
-        select: {c.vps_id, count(c.id), type(max(c.updated_at), :utc_datetime)}
-    )
-    |> Map.new(fn {vps_id, aantal, laatste} -> {vps_id, {aantal, laatste}} end)
-  end
-
-  defp due_for_delete_retry?(%Vps{} = vps, mislukkingen, now, grace_seconds, max_backoff_seconds) do
-    case Map.get(mislukkingen, vps.id) do
-      nil ->
-        false
-
-      {aantal, laatste} ->
-        # 5 min, 10, 20, 40… so a genuinely broken teardown stops churning while
-        # still being retried long after a node comes back. De exponent wordt
-        # afgetopt voordat hij wordt uitgerekend: de uitkomst gaat toch door
-        # `min/2`, en 2^300 uitrekenen om hem daarna weg te gooien is zonde.
-        backoff =
-          min(grace_seconds * Integer.pow(2, min(aantal - 1, 32)), max_backoff_seconds)
-
-        DateTime.diff(now, laatste, :second) >= backoff
-    end
-  end
 
   @doc """
   Creates a VPS on behalf of an authenticated owner, enforcing the per-owner quota
@@ -638,116 +361,12 @@ defmodule ControlPlane.Provisioning do
     |> Repo.transaction()
   end
 
-  @doc """
-  Begins teardown of a VPS by dispatching a `:delete` command to its node.
+  @doc "Zie `ControlPlane.Provisioning.Teardown.delete_vps/1`."
+  defdelegate delete_vps(vps_id), to: Teardown
 
-  In one transaction this moves the VPS to `:deleting` and enqueues a `:delete`
-  `Command` carrying the provider VM id for the node's agent to destroy. The
-  reservation is only released later, once the agent reports the delete `done`
-  (see `apply_result/2`), so capacity is not freed before the VM is actually gone.
-
-  Returns `{:ok, %{vps: vps, command: command}}`, or `{:error, :not_found}` if no
-  VPS with `vps_id` exists, or `{:error, :no_node}` if the VPS was never placed
-  on a node / provisioned (no `node_id` or `provider_vm_id`) and so has nothing
-  for an agent to delete.
-  """
-  @spec delete_vps(binary()) :: {:ok, dispatch() | map()} | {:error, refusal()}
-  def delete_vps(vps_id) do
-    # Deleting a VPS ends its subscription — do it up front so recurring billing
-    # stops immediately, even while an async teardown is still in flight.
-    # Idempotent: a no-op if it's already cancelled or the VPS doesn't exist.
-    _ = Subscriptions.cancel_for_vps(vps_id)
-
-    case Repo.get(Vps, vps_id) do
-      nil ->
-        {:error, :not_found}
-
-      %Vps{status: :deleted} ->
-        {:error, :already_deleting}
-
-      %Vps{status: :deleting} = vps ->
-        redispatch_delete(vps)
-
-      # A :failed VPS has no live VM and no held reservation (the reservation, if
-      # any, was already released when provisioning failed), so it can be cleaned
-      # up directly — no agent round-trip needed.
-      %Vps{status: :failed} = vps ->
-        mark_vps_deleted(vps)
-
-      # Not yet scheduled to a node — no VM and no held reservation, so it can be
-      # cleaned up directly. Lets a customer cancel a VPS still waiting for capacity.
-      %Vps{node_id: nil} = vps ->
-        mark_vps_deleted(vps)
-
-      # Scheduled (capacity reserved) but no live VM recorded yet.
-      %Vps{provider_vm_id: nil} = vps ->
-        teardown_unprovisioned(vps)
-
-      %Vps{} = vps ->
-        dispatch_delete(vps)
-    end
-  end
-
-  # Already :deleting: only block if a delete command is still in flight. If a
-  # previous delete terminally failed (e.g. a transient Proxmox error), allow a
-  # fresh attempt so a VPS can never get permanently stuck undeletable.
-  defp redispatch_delete(vps) do
-    if CommandQueue.in_flight?(vps.id, :delete),
-      do: {:error, :already_deleting},
-      else: dispatch_delete(vps)
-  end
-
-  # If the provision command is still in flight (delivered to the agent), the
-  # agent may be mid-CreateVM; force-failing it now would orphan the VM it
-  # produces AND double-count the freed capacity. Defer: mark :deleting and let
-  # the provision-done result run the compensating teardown. Only when nothing is
-  # in flight is it safe to cancel-and-release immediately.
-  defp teardown_unprovisioned(vps) do
-    if CommandQueue.provision_in_flight?(vps.id),
-      do: defer_teardown(vps),
-      else: cancel_and_release(vps)
-  end
-
-  # Record delete intent without failing the in-flight provision or releasing
-  # capacity. The provision result (see finalize_vps/4, :provision/:done) then
-  # dispatches a compensating :delete for whatever VM the agent created and frees
-  # capacity only once that delete confirms — so nothing is orphaned or
-  # double-counted.
-  defp defer_teardown(%Vps{} = vps) do
-    case vps |> Vps.changeset(%{status: :deleting}) |> Repo.update() do
-      {:ok, vps} ->
-        Events.broadcast_changed(:vps)
-        {:ok, %{vps: vps, command: nil}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Moves the VPS to :deleting and enqueues a :delete command for its node's agent.
-  defp dispatch_delete(%Vps{} = vps) do
-    multi =
-      Multi.new()
-      |> Multi.update(:vps, Vps.changeset(vps, %{status: :deleting}))
-      |> Multi.insert(:command, fn %{vps: vps} ->
-        Command.changeset(%Command{}, %{
-          node_id: vps.node_id,
-          vps_id: vps.id,
-          kind: :delete,
-          status: :pending,
-          payload: %{"vm_id" => vps.provider_vm_id}
-        })
-      end)
-
-    case Repo.transaction(multi) do
-      {:ok, %{vps: vps, command: command}} ->
-        Events.broadcast_changed(:vps)
-        {:ok, %{vps: vps, command: command}}
-
-      {:error, _step, reason, _changes} ->
-        {:error, reason}
-    end
-  end
+  @doc "Zie `ControlPlane.Provisioning.Teardown.retry_stuck_deletes/2`."
+  defdelegate retry_stuck_deletes(grace_seconds \\ 300, max_backoff_seconds \\ 6 * 3600),
+    to: Teardown
 
   @doc "Zie `ControlPlane.Provisioning.Power.start_vps/1`."
   defdelegate start_vps(vps_id), to: Power
@@ -882,149 +501,15 @@ defmodule ControlPlane.Provisioning do
     end
   end
 
-  # De naam waaronder een gast op de hypervisor komt te staan.
-  #
-  # De agent herkent hieraan of hij een machine al heeft aangemaakt, dus het
-  # unieke deel is geen opsmuk: stond daar ooit alleen de door de klant gekozen
-  # naam in, dan nam de tweede klant met dezelfde naam op een node de draaiende
-  # VM van de eerste over. `{id}` is daarom verplicht in een patroon, en zonder
-  # patroon is het `{naam}-{id}`.
-  #
-  # Het is een slug van de weergavenaam plus een kort stuk van de UUID: leesbaar
-  # voor een mens, uniek per VPS, en bij elke herhaling van hetzelfde commando
-  # dezelfde naam -- dat laatste is precies wat de agent nodig heeft om een
-  # opnieuw afgeleverd provision-commando als "die heb ik al" te herkennen.
-  defp guest_name(%Vps{} = vps, %{guest_name_pattern: patroon} = node) when is_binary(patroon) do
-    kort = short_vps_id(vps)
+  @doc "Zie `ControlPlane.Provisioning.GuestName.guest_name/2`."
+  defdelegate guest_name(vps, node), to: GuestName
 
-    patroon
-    |> String.replace("{id}", kort)
-    |> String.replace("{naam}", name_slug(vps))
-    |> String.replace("{klant}", owner_slug(vps))
-    |> String.replace("{node}", slug(node.name, "node"))
-    |> String.trim("-")
-    |> begrens_met_id(kort)
-  end
-
-  defp guest_name(%Vps{} = vps, _node_zonder_patroon), do: guest_name(vps)
-
-  # Een hypervisor accepteert geen gastnaam langer dan 63 tekens, dus er moet
-  # worden afgekapt. Maar NOOIT het unieke deel.
-  #
-  # Een eigenaar mag zijn eigen patroon kiezen en `{id}` is daarin verplicht,
-  # maar die eis zegt niets over wat er ná het invullen overblijft: met
-  # `{naam}-{klant}-{node}-{id}` en drie lange stukken valt precies het
-  # achtervoegsel eraf. Wat overblijft is een naam die twee klanten kunnen
-  # delen -- en de agent herkent zijn VM aan die naam. Dan neemt de tweede de
-  # draaiende machine van de eerste over, wat de kritieke bevinding van juli
-  # was.
-  #
-  # Daarom wordt er aan de voorkant geknipt en blijft het id achteraan staan.
-  defp begrens_met_id(naam, _kort) when byte_size(naam) <= 63, do: naam
-
-  defp begrens_met_id(naam, kort) do
-    if String.contains?(naam, kort) do
-      ruimte = 63 - String.length(kort) - 1
-
-      voorkant =
-        naam
-        |> String.replace(kort, "")
-        |> String.trim("-")
-        |> String.slice(0, max(ruimte, 0))
-        |> String.trim("-")
-
-      if voorkant == "", do: kort, else: voorkant <> "-" <> kort
-    else
-      # Geen id in de naam: dat hoort niet te kunnen (de validatie eist hem),
-      # maar afkappen zonder meer is hier het enige wat overblijft.
-      String.slice(naam, 0, 63)
-    end
-  end
-
-  defp short_vps_id(%Vps{id: id}), do: id |> String.replace("-", "") |> String.slice(0, 8)
-
-  defp name_slug(%Vps{name: name}), do: slug(name, "vps")
-
-  defp owner_slug(%Vps{owner_email: email}),
-    do: slug(email && List.first(String.split(email, "@")), "klant")
-
-  defp slug(nil, standaard), do: standaard
-
-  defp slug(waarde, standaard) do
-    schoon =
-      waarde
-      |> String.downcase()
-      |> String.replace(~r/[^a-z0-9-]+/, "-")
-      |> String.trim("-")
-      |> String.slice(0, 40)
-
-    if schoon == "", do: standaard, else: schoon
-  end
-
-  defp guest_name(%Vps{id: id, name: name}) do
-    slug =
-      (name || "")
-      |> String.downcase()
-      |> String.replace(~r/[^a-z0-9-]+/, "-")
-      |> String.trim("-")
-      |> String.slice(0, 40)
-
-    slug = if slug == "", do: "vps", else: slug
-    short = id |> String.replace("-", "") |> String.slice(0, 8)
-    "#{slug}-#{short}"
-  end
+  @doc "Zie `ControlPlane.Provisioning.GuestName.guest_name/1`."
+  defdelegate guest_name(vps), to: GuestName
 
   defp mark_vps_failed(%Vps{} = vps) do
     vps
     |> Vps.changeset(%{status: :failed})
     |> Repo.update()
-  end
-
-  # Directly marks a VPS :deleted (no agent command), used to clean up a :failed
-  # VPS. Mirrors the success shape of `delete_vps/1` (`command: nil`, no command
-  # was issued) so callers can treat both uniformly.
-  # Releases a still-held reservation for a VPS that never reached a live VM,
-  # restores the node's advertised capacity, cancels any outstanding provision
-  # command and marks the VPS deleted — all atomically.
-  defp cancel_and_release(%Vps{} = vps) do
-    Multi.new()
-    |> Multi.run(:vps, fn repo, _changes ->
-      repo.get!(Vps, vps.id) |> Vps.changeset(%{status: :deleted}) |> repo.update()
-    end)
-    |> Multi.run(:reservation, fn repo, _changes ->
-      Reservations.release(repo, Reservations.held(repo, vps.id))
-    end)
-    |> Multi.run(:restore_capacity, fn repo, %{reservation: reservation} ->
-      Reservations.restore_capacity(repo, reservation)
-    end)
-    |> Multi.update_all(
-      :cancel_commands,
-      from(c in Command,
-        where:
-          c.vps_id == ^vps.id and c.kind == :provision and
-            c.status in [:pending, :delivered]
-      ),
-      set: [status: :failed]
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{vps: vps}} ->
-        Events.broadcast_changed(:vps)
-        {:ok, %{vps: vps, command: nil}}
-
-      {:error, _step, reason, _changes} ->
-        {:error, reason}
-    end
-  end
-
-  defp mark_vps_deleted(%Vps{} = vps) do
-    case vps |> Vps.changeset(%{status: :deleted}) |> Repo.update() do
-      {:ok, vps} ->
-        Events.broadcast_changed(:vps)
-        {:ok, %{vps: vps, command: nil}}
-
-      {:error, changeset} ->
-        {:error, changeset}
-    end
   end
 end
