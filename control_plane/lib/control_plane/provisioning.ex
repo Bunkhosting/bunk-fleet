@@ -125,10 +125,9 @@ defmodule ControlPlane.Provisioning do
   dashboard as something about to happen, forever.
 
   Marking it `:failed` is the honest end state: the customer can see it went
-  wrong and delete it, and it stops occupying a quota slot. It is deliberately
-  not refunded here. The ledger records a charge against a user, not against a
-  VPS, so a sweeper cannot tell which entry to reverse without guessing — and
-  guessing with someone's money is worse than telling a person to look.
+  wrong and delete it, and it stops occupying a quota slot. The charge is
+  refunded in the same transaction: the ledger carries the VPS id, so there is
+  no guessing about which entry to reverse.
   """
   @spec fail_stuck_queued_vpses(non_neg_integer()) :: non_neg_integer()
   def fail_stuck_queued_vpses(grace_seconds \\ 600) do
@@ -144,26 +143,53 @@ defmodule ControlPlane.Provisioning do
           select: v.id
       )
 
-    Enum.each(stuck, fn vps_id ->
-      # The charge carries the VPS id since the ledger learned about machines, so
-      # the money can go back here instead of in a sentence telling a person to
-      # go and look for it.
-      refunded = Credits.refund_charge_for_vps(vps_id)
-
-      Logger.error(
-        "vps #{vps_id} was queued but never dispatched; failing it. " <>
-          if(refunded, do: "The charge has been refunded.", else: "No charge was found for it.")
-      )
-    end)
-
-    {count, _} =
-      Repo.update_all(
-        from(v in Vps, where: v.id in ^stuck),
-        set: [status: :failed, updated_at: Clock.now()]
-      )
+    # Per VPS één transactie: eerst de rij voorwaardelijk op :failed, en alleen
+    # als dat lukt het geld terug. Andersom -- eerst terugbetalen, dan alle ids
+    # in één keer op :failed -- liet een gat. Een uitsturing die tussen de select
+    # en de update alsnog doorkwam, zette de VPS op :provisioning; de update
+    # overschreef dat zonder te kijken, en de klant kreeg een draaiende machine
+    # met zijn geld terug. De voorwaarde staat nu in de UPDATE zelf: Postgres
+    # wacht op het slot van die uitsturing en kijkt daarna opnieuw.
+    count = Enum.count(stuck, &faal_wachtende_vps/1)
 
     if count > 0, do: Events.broadcast_changed(:vps)
     count
+  end
+
+  @doc false
+  # Publiek voor de test die het gat hierboven vastlegt; verder alleen van hier.
+  def faal_wachtende_vps(vps_id) do
+    {:ok, gefaald?} =
+      Repo.transaction(fn ->
+        {n, _} =
+          Repo.update_all(
+            from(v in Vps,
+              as: :vps,
+              where: v.id == ^vps_id and v.status == :queued,
+              where:
+                not exists(from c in Command, where: c.vps_id == parent_as(:vps).id, select: 1)
+            ),
+            set: [status: :failed, updated_at: Clock.now()]
+          )
+
+        if n == 1, do: betaal_wachtende_terug(vps_id)
+
+        n == 1
+      end)
+
+    gefaald?
+  end
+
+  defp betaal_wachtende_terug(vps_id) do
+    # The charge carries the VPS id since the ledger learned about machines, so
+    # the money can go back here instead of in a sentence telling a person to go
+    # and look for it.
+    refunded = Credits.refund_charge_for_vps(vps_id)
+
+    Logger.error(
+      "vps #{vps_id} was queued but never dispatched; failing it. " <>
+        if(refunded, do: "The charge has been refunded.", else: "No charge was found for it.")
+    )
   end
 
   @doc """

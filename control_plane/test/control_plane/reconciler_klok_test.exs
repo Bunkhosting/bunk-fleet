@@ -54,8 +54,42 @@ defmodule ControlPlane.ReconcilerKlokTest do
     # De klok loopt door: het volgende bericht staat klaar voor dit proces.
     assert_receive :reconcile, 500
 
-    # En de fout is niet stil weggeslikt.
-    assert log =~ "fleet reconciler tick faalde"
+    # En de fout is niet stil weggeslikt, en hij staat op naam van de stap.
+    assert log =~ "reconciler-stap metering faalde"
+  end
+
+  test "een kapotte stap neemt de stappen erna niet mee" do
+    # Metering klapt; de mollie-stap staat verderop in de tik en hoort toch aan
+    # de beurt te komen. Dat hij gedraaid heeft, staat in zijn tijdstempel.
+    kapot = staat(%{last_meter_ms: :geen_getal})
+
+    capture_log(fn ->
+      assert {:noreply, terug} = Reconciler.handle_info(:reconcile, kapot)
+      assert is_integer(terug.last_mollie_ms)
+      assert terug.last_meter_ms == :geen_getal
+    end)
+  end
+
+  describe "stap/2 en stap/3" do
+    test "een exit blijft binnen de stap" do
+      # Een uitgeputte databasepool is geen exception maar een exit; die kwam
+      # voorheen door elke `rescue` heen en nam de rest van de tik mee.
+      log =
+        capture_log(fn ->
+          assert :error = Reconciler.stap("proef", fn -> exit(:timeout) end)
+        end)
+
+      assert log =~ "reconciler-stap proef stopte met een exit"
+    end
+
+    test "een mislukte stap laat de oude staat staan" do
+      capture_log(fn ->
+        assert %{x: 1} = Reconciler.stap(%{x: 1}, "proef", fn _ -> exit(:timeout) end)
+        assert %{x: 1} = Reconciler.stap(%{x: 1}, "proef", fn _ -> raise "kapot" end)
+      end)
+
+      assert %{x: 2} = Reconciler.stap(%{x: 1}, "proef", &%{&1 | x: 2})
+    end
   end
 
   test "de staat blijft bruikbaar na een mislukte tik" do

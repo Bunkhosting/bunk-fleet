@@ -183,26 +183,26 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp tik(state) do
-    reconcile_nodes()
-    reclaim_reservations()
-    fail_stuck_creates()
-    fail_stuck_provisionings()
-    fail_stuck_restores()
-    refund_orphan_charges()
-    retry_stuck_deletes()
-    state = maybe_meter_usage(state)
-    state = maybe_dispatch_backups(state)
-    state = maybe_purge_commands(state)
-    state = maybe_scrub_vpses(state)
-    state = maybe_check_schijf(state)
-    state = maybe_verzoen_betalingen(state)
-    state = maybe_ruim_archieven(state)
-    state = maybe_meld_stille_nodes(state)
-    settle_subscriptions()
-    roll_out_agent()
-    meld_vastgelopen_commandos()
-    ruim_vastgelopen_backups_op()
-    state = maybe_check_drift(state)
+    stap("nodes offline zetten", fn -> reconcile_nodes() end)
+    stap("reserveringen terughalen", fn -> reclaim_reservations() end)
+    stap("vastgelopen aanmaken", fn -> fail_stuck_creates() end)
+    stap("vastgelopen provisioning", fn -> fail_stuck_provisionings() end)
+    stap("vastgelopen terugzetten", fn -> fail_stuck_restores() end)
+    stap("wees-afschrijvingen", fn -> refund_orphan_charges() end)
+    stap("verwijderen opnieuw", fn -> retry_stuck_deletes() end)
+    state = stap(state, "metering", &maybe_meter_usage/1)
+    state = stap(state, "back-ups", &maybe_dispatch_backups/1)
+    state = stap(state, "commando's opruimen", &maybe_purge_commands/1)
+    state = stap(state, "vps'en schoonmaken", &maybe_scrub_vpses/1)
+    state = stap(state, "schijfcontrole", &maybe_check_schijf/1)
+    state = stap(state, "mollie-verzoening", &maybe_verzoen_betalingen/1)
+    state = stap(state, "archieven", &maybe_ruim_archieven/1)
+    state = stap(state, "stille nodes", &maybe_meld_stille_nodes/1)
+    stap("abonnementen", fn -> settle_subscriptions() end)
+    stap("agent-uitrol", fn -> roll_out_agent() end)
+    stap("vastgelopen commando's", fn -> meld_vastgelopen_commandos() end)
+    stap("vastgelopen back-ups", fn -> ruim_vastgelopen_backups_op() end)
+    state = stap(state, "driftcontrole", &maybe_check_drift/1)
 
     # Helemaal achteraan, en dat is de hele betekenis: dit levensteken zegt niet
     # "het proces bestaat" maar "deze ronde is van begin tot eind doorlopen".
@@ -224,6 +224,38 @@ defmodule ControlPlane.Fleet.Reconciler do
     :exit, reason ->
       Logger.error("fleet reconciler tick stopte met een exit: #{inspect(reason)}")
       state
+  end
+
+  # Elke stap heeft zijn eigen `rescue`, maar een exit komt daar niet doorheen:
+  # een uitgeputte databasepool of een GenServer.call die verloopt is geen
+  # exception. Zonder deze schil nam zo'n exit de rest van de tik mee -- en dus
+  # ook het levensteken aan het eind, waardoor één trage query bij drukte
+  # metering, facturatie en back-ups stillegde. Het vangnet in `tik/1` bleef
+  # alleen de klok draaiende houden; de stappen erachter kwamen nooit aan bod.
+  @doc false
+  def stap(naam, werk) do
+    werk.()
+  rescue
+    exception ->
+      Logger.error("reconciler-stap #{naam} faalde: " <> Exception.message(exception),
+        crash_reason: {exception, __STACKTRACE__}
+      )
+
+      :error
+  catch
+    :exit, reden ->
+      Logger.error("reconciler-stap #{naam} stopte met een exit: #{inspect(reden)}")
+      :error
+  end
+
+  # Voor een stap die de staat bijwerkt: mislukt hij, dan blijft de oude staat
+  # staan, zodat de stap bij de volgende tik opnieuw aan de beurt is.
+  @doc false
+  def stap(state, naam, werk) do
+    case stap(naam, fn -> {:ok, werk.(state)} end) do
+      {:ok, nieuw} -> nieuw
+      :error -> state
+    end
   end
 
   # Meter only once per meter_interval_ms (default hourly), not every tick. Uses a

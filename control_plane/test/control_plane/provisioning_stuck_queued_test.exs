@@ -1,6 +1,10 @@
 defmodule ControlPlane.ProvisioningStuckQueuedTest do
   use ControlPlane.DataCase, async: true
 
+  import ControlPlane.Fixtures
+
+  alias ControlPlane.Credits
+
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
@@ -105,5 +109,35 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
 
     assert Provisioning.fail_stuck_queued_vpses(600) == 1
     assert Provisioning.fail_stuck_queued_vpses(600) == 0
+  end
+
+  describe "terugbetalen hoort bij het op :failed zetten" do
+    test "een vastgelopen VPS gaat op :failed en krijgt zijn geld terug" do
+      u = confirmed_user_fixture("vast-#{System.unique_integer([:positive])}@bunk.test")
+      v = queued_vps(region(), 3600, %{owner_id: u.id})
+      voor = Credits.balance_cents(u.id)
+      {:ok, _} = Credits.add_entry(u.id, -400, "vps_charge", "VPS Starter", v.id)
+
+      assert Provisioning.fail_stuck_queued_vpses(600) == 1
+      assert Repo.get!(Vps, v.id).status == :failed
+      assert Credits.balance_cents(u.id) == voor
+    end
+
+    test "een VPS die inmiddels is uitgestuurd wordt niet terugbetaald" do
+      # Het gat: de sweep had hem al geselecteerd toen de uitsturing alsnog
+      # doorkwam. Vroeger ging dan het geld terug en werd :provisioning
+      # overschreven met :failed -- een draaiende machine, gratis.
+      u = confirmed_user_fixture("vast-#{System.unique_integer([:positive])}@bunk.test")
+      r = region()
+      node = node_in(r)
+      v = queued_vps(r, 3600, %{owner_id: u.id, node_id: node.id})
+      voor = Credits.balance_cents(u.id)
+      {:ok, _} = Credits.add_entry(u.id, -400, "vps_charge", "VPS Starter", v.id)
+      {:ok, _} = v |> Vps.changeset(%{status: :provisioning}) |> Repo.update()
+
+      refute Provisioning.faal_wachtende_vps(v.id)
+      assert Repo.get!(Vps, v.id).status == :provisioning
+      assert Credits.balance_cents(u.id) == voor - 400
+    end
   end
 end
