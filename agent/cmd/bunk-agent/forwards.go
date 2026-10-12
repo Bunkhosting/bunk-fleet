@@ -140,22 +140,43 @@ func syncForwards(ctx context.Context, logger *slog.Logger, cp *transport.Client
 }
 
 // applyForwards makes our own chains say exactly what the control plane asked
-// for. Flush and rewrite rather than diff: the set is small, and a rewrite
-// converges from any starting state including one an operator half-edited.
+// for. Rewrite rather than diff: the set is small, and a rewrite converges from
+// any starting state including one an operator half-edited.
+//
+// The rewrite goes through iptables-restore, one commit per table. It used to be
+// a flush followed by one iptables call per rule, and that had two holes: for
+// as long as the calls took, every customer on the node had no inbound access,
+// and a call that failed halfway left the chain with only the forwards before
+// it — until the next tick a minute later, and then only if that one got
+// further. Now a table either gets the whole new set or keeps the old one.
 func applyForwards(ctx context.Context, logger *slog.Logger, forwards []transport.PortForward, subnet *net.IPNet) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+
+	// --noflush: only the chains we declare are emptied, everything else in the
+	// table — Proxmox's firewall, Docker, an operator's own rules — stays.
+	if out, err := runCmdInput(ctx, forwardsRestore(logger, forwards, subnet), "iptables-restore", "--noflush"); err != nil {
+		return fmt.Errorf("iptables-restore: %v (%s)", err, out)
+	}
 
 	for _, chain := range []struct{ table, name, parent string }{
 		{"nat", dnatChain, "PREROUTING"},
 		{"filter", fwdChain, "FORWARD"},
 		{"nat", snatChain, "POSTROUTING"},
 	} {
-		if err := ensureChain(ctx, chain.table, chain.name, chain.parent); err != nil {
+		if err := hookChain(ctx, chain.table, chain.name, chain.parent); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
+// forwardsRestore renders the forwards as iptables-restore input. Declaring a
+// chain with ":NAME - [0:0]" creates it when missing and empties it when it is
+// not, so a node with no forwards left still ends up with empty chains rather
+// than yesterday's rules.
+func forwardsRestore(logger *slog.Logger, forwards []transport.PortForward, subnet *net.IPNet) string {
+	tables := map[string][]string{"nat": nil, "filter": nil}
 	for _, f := range forwards {
 		if err := validForward(f, subnet); err != nil {
 			// Skip the bad one and keep the rest: one malformed entry must not
@@ -164,29 +185,35 @@ func applyForwards(ctx context.Context, logger *slog.Logger, forwards []transpor
 			continue
 		}
 		for _, rule := range forwardRules(f, subnet) {
-			if out, err := runCmd(ctx, "iptables", rule...); err != nil {
-				return fmt.Errorf("%s: %v (%s)", strings.Join(rule, " "), err, out)
+			table := "filter"
+			if len(rule) >= 2 && rule[0] == "-t" {
+				table, rule = rule[1], rule[2:]
 			}
+			tables[table] = append(tables[table], strings.Join(rule, " "))
 		}
 	}
-	return nil
+
+	var b strings.Builder
+	b.WriteString("*nat\n:" + dnatChain + " - [0:0]\n:" + snatChain + " - [0:0]\n")
+	for _, line := range tables["nat"] {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("COMMIT\n*filter\n:" + fwdChain + " - [0:0]\n")
+	for _, line := range tables["filter"] {
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("COMMIT\n")
+	return b.String()
 }
 
-// ensureChain creates our chain if it is missing, empties it, and makes sure the
-// built-in chain jumps to it exactly once.
-func ensureChain(ctx context.Context, table, name, parent string) error {
+// hookChain makes sure the built-in chain jumps to ours exactly once. The chain
+// itself already exists: iptables-restore created it.
+func hookChain(ctx context.Context, table, name, parent string) error {
 	args := func(rest ...string) []string {
 		if table == "filter" {
 			return rest
 		}
 		return append([]string{"-t", table}, rest...)
-	}
-
-	// -N fails when it already exists, which is the common case and not an error.
-	_, _ = runCmd(ctx, "iptables", args("-N", name)...)
-
-	if out, err := runCmd(ctx, "iptables", args("-F", name)...); err != nil {
-		return fmt.Errorf("flushing %s: %v (%s)", name, err, out)
 	}
 
 	if _, err := runCmd(ctx, "iptables", args("-C", parent, "-j", name)...); err != nil {

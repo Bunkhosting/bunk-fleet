@@ -147,3 +147,52 @@ func TestDescribeForwardsIsSafeWithNothingToSay(t *testing.T) {
 		{PublicPort: 20001, TargetIP: "10.10.4.20", TargetPort: 22},
 	})
 }
+
+func TestForwardsRestoreIsOneCommitPerTable(t *testing.T) {
+	// The whole point of going through iptables-restore: a table gets the new
+	// set in one commit or keeps the old one. Rules outside a table block, or a
+	// block without COMMIT, would undo that.
+	subnet := mustSubnet(t, "10.10.4.1", 22)
+	out := forwardsRestore(slog.New(slog.NewTextHandler(io.Discard, nil)), []transport.PortForward{sshForward()}, subnet)
+
+	want := "*nat\n" +
+		":BUNK-DNAT - [0:0]\n" +
+		":BUNK-SNAT - [0:0]\n" +
+		"-A BUNK-DNAT -p tcp --dport 20001 -j DNAT --to-destination 10.10.4.20:22\n" +
+		"-A BUNK-SNAT -s 10.10.4.0/22 -d 10.10.4.20 -p tcp --dport 22 -j MASQUERADE\n" +
+		"COMMIT\n" +
+		"*filter\n" +
+		":BUNK-FWD - [0:0]\n" +
+		"-A BUNK-FWD -p tcp -d 10.10.4.20 --dport 22 -j ACCEPT\n" +
+		"COMMIT\n"
+	if out != want {
+		t.Errorf("restore input:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+func TestForwardsRestoreWithNothingLeftStillEmptiesTheChains(t *testing.T) {
+	// The last VPS on a node is deleted. Its forward has to go too, so the
+	// chains are declared — and thereby emptied — even with no rules for them.
+	out := forwardsRestore(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+	for _, decl := range []string{":BUNK-DNAT - [0:0]", ":BUNK-SNAT - [0:0]", ":BUNK-FWD - [0:0]"} {
+		if !strings.Contains(out, decl) {
+			t.Errorf("chain not declared: %s", decl)
+		}
+	}
+	if strings.Contains(out, "-A ") {
+		t.Errorf("rules with no forwards:\n%s", out)
+	}
+}
+
+func TestForwardsRestoreSkipsOnlyTheBadEntry(t *testing.T) {
+	subnet := mustSubnet(t, "10.10.4.1", 22)
+	bad := transport.PortForward{PublicPort: 20002, TargetIP: "8.8.8.8", TargetPort: 53}
+	out := forwardsRestore(slog.New(slog.NewTextHandler(io.Discard, nil)), []transport.PortForward{bad, sshForward()}, subnet)
+
+	if strings.Contains(out, "8.8.8.8") {
+		t.Errorf("an off-subnet target made it into the rules:\n%s", out)
+	}
+	if !strings.Contains(out, "--dport 20001") {
+		t.Errorf("the good forward was dropped with the bad one:\n%s", out)
+	}
+}

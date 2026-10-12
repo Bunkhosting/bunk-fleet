@@ -369,6 +369,14 @@ func runCmd(ctx context.Context, name string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// runCmdInput is runCmd with something on stdin.
+func runCmdInput(ctx context.Context, input, name string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdin = strings.NewReader(input)
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
 // vpsNetwerkVan beantwoordt de vraag "wat is het VPS-netwerk van deze node", en
 // is de enige plek waar dat antwoord vandaan komt.
 //
