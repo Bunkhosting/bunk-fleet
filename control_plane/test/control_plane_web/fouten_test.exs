@@ -19,7 +19,7 @@ defmodule ControlPlaneWeb.FoutenTest do
   # je moet bijwerken is beter dan een controle die er niet is.
   @weigeringen ~w(
     not_found not_provisioned no_node no_capacity already_deleting
-    quota_exceeded insufficient_credits port_pool_exhausted
+    quota_exceeded insufficient_credits port_pool_exhausted vps_state_changed
   )a
 
   test "elke weigering van de bestelweg staat in de tabel" do

@@ -10,10 +10,14 @@ defmodule ControlPlane.AfbraakRaceTest do
   Een echte race is in een test niet te regelen. Hier wordt hij nagebootst door
   de struct te lezen, daarna de rij te veranderen zoals `apply_result/2` dat zou
   doen, en dan het afbreekpad met de verouderde struct aan te roepen.
+
+  `mark_vps_deleted` had dezelfde race, voor een `:failed` VPS en een VPS zonder
+  node. Die staan hier ook, net als de grens op het opnieuw kiezen.
   """
   use ControlPlane.DataCase, async: true
 
   import ControlPlane.Fixtures
+  import ExUnit.CaptureLog
 
   alias ControlPlane.Credits
   alias ControlPlane.Credits.LedgerEntry
@@ -192,5 +196,113 @@ defmodule ControlPlane.AfbraakRaceTest do
 
     assert deletes(opzet.vps.id) == []
     assert reservering(opzet.vps.id).status == :released
+  end
+
+  # Een VPS die mark_vps_deleted zonder agent afsluit: :failed, of nog nergens
+  # geplaatst. Geen reservering en geen uitrol, want die heeft zo'n VPS niet.
+  defp losse_vps(ctx, status, node_id) do
+    %Vps{}
+    |> Vps.changeset(%{
+      name: "v-#{System.unique_integer([:positive])}",
+      region_id: ctx.region.id,
+      node_id: node_id,
+      owner_id: ctx.user.id,
+      vcpu: 1,
+      ram_mb: 1024,
+      disk_gb: 10
+    })
+    |> Ecto.Changeset.put_change(:status, status)
+    |> Repo.insert!()
+  end
+
+  # Wat een plaatsing plus geslaagde uitrol samen achterlaten, buiten de
+  # afbraak om.
+  defp intussen_geleverd(vps, node_id, vm_id) do
+    vps_rij = from(v in Vps, where: v.id == ^vps.id)
+    Repo.update_all(vps_rij, set: [status: :active, node_id: node_id, provider_vm_id: vm_id])
+  end
+
+  describe "mark_vps_deleted: een VPS zonder VM die er intussen wel een kreeg" do
+    test "een :failed VPS die intussen draait krijgt een delete met vm_id", ctx do
+      vps = losse_vps(ctx, :failed, ctx.fleet_node.id)
+      verouderd = Repo.get!(Vps, vps.id)
+      id = vm_id()
+
+      intussen_geleverd(vps, ctx.fleet_node.id, id)
+
+      # Het pad moet echt gehaald zijn: :failed stuurt naar mark_vps_deleted.
+      assert %Vps{status: :failed, provider_vm_id: nil} = verouderd
+
+      assert {:ok, %{vps: %Vps{status: :deleting}, command: %Command{} = delete}} =
+               Teardown.afbreken(verouderd)
+
+      assert %Command{kind: :delete, status: :pending, payload: %{"vm_id" => ^id}} = delete
+      assert delete.node_id == ctx.fleet_node.id
+      assert %Vps{status: :deleting, provider_vm_id: ^id} = Repo.get!(Vps, vps.id)
+    end
+
+    test "een VPS zonder node die intussen geplaatst en geleverd is, ook", ctx do
+      vps = losse_vps(ctx, :queued, nil)
+      verouderd = Repo.get!(Vps, vps.id)
+      id = vm_id()
+
+      intussen_geleverd(vps, ctx.fleet_node.id, id)
+
+      assert %Vps{status: :queued, node_id: nil} = verouderd
+
+      assert {:ok, %{vps: %Vps{status: :deleting}, command: %Command{} = delete}} =
+               Teardown.afbreken(verouderd)
+
+      assert %Command{kind: :delete, payload: %{"vm_id" => ^id}} = delete
+      assert delete.node_id == ctx.fleet_node.id
+      assert [%Command{payload: %{"vm_id" => ^id}}] = deletes(vps.id)
+      refute Repo.get!(Vps, vps.id).status == :deleted
+    end
+
+    test "tegenproef: zonder tussenliggende levering sluit hij af zonder delete", ctx do
+      for {status, node_id} <- [{:failed, ctx.fleet_node.id}, {:queued, nil}] do
+        vps = losse_vps(ctx, status, node_id)
+        verouderd = Repo.get!(Vps, vps.id)
+
+        assert {:ok, %{vps: %Vps{status: :deleted}, command: nil}} = Teardown.afbreken(verouderd)
+
+        assert Repo.get!(Vps, vps.id).status == :deleted
+        assert deletes(vps.id) == []
+      end
+    end
+  end
+
+  describe "het opnieuw kiezen is begrensd" do
+    # Een echte rij die drie keer onder het slot verandert, is in een test niet te
+    # regelen. De teller is wel aan te roepen: een aanroep die al bij de laatste
+    # poging is en dan een veranderde rij ziet, is precies de derde poging die
+    # opnieuw iets anders ziet.
+    test "na het maximum volgt een weigering en blijft alles staan", ctx do
+      vps = losse_vps(ctx, :failed, ctx.fleet_node.id)
+      verouderd = Repo.get!(Vps, vps.id)
+      id = vm_id()
+      intussen_geleverd(vps, ctx.fleet_node.id, id)
+
+      log =
+        capture_log(fn ->
+          assert {:error, :vps_state_changed} = Teardown.afbreken(verouderd, 2)
+        end)
+
+      assert log =~ "opgegeven na 3 pogingen"
+      assert %Vps{status: :active, provider_vm_id: ^id} = Repo.get!(Vps, vps.id)
+      assert deletes(vps.id) == []
+    end
+
+    test "tegenproef: één poging eerder mag hij nog opnieuw kiezen", ctx do
+      vps = losse_vps(ctx, :failed, ctx.fleet_node.id)
+      verouderd = Repo.get!(Vps, vps.id)
+      id = vm_id()
+      intussen_geleverd(vps, ctx.fleet_node.id, id)
+
+      assert {:ok, %{vps: %Vps{status: :deleting}, command: %Command{}}} =
+               Teardown.afbreken(verouderd, 1)
+
+      assert [%Command{payload: %{"vm_id" => ^id}}] = deletes(vps.id)
+    end
   end
 end

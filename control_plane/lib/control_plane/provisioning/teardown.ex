@@ -61,29 +61,41 @@ defmodule ControlPlane.Provisioning.Teardown do
     end
   end
 
+  # Hoe vaak het afbreekpad mag kiezen. Een keuze valt op een gelezen VPS; blijkt
+  # die onder het slot veranderd, dan wordt opnieuw gekozen op de verse rij.
+  # Statussen lopen maar één kant op, dus dat eindigt -- maar alleen zolang dat zo
+  # blijft. Een fout die de rij heen en weer laat gaan, zou hier anders een
+  # eindeloze lus van transacties worden. Drie is ruim: in de praktijk is er
+  # hooguit één verandering (een uitrol die net slaagt of een plaatsing die net
+  # binnenkomt), en een derde poging die wéér iets anders ziet, is een signaal.
+  @max_pogingen 3
+
   # Publiek maar ongedocumenteerd: een test moet dit pad met een verouderde
   # struct kunnen aanroepen, want precies dat is de race met een uitrol die
-  # tussen het lezen en het afbreken slaagt. Zie cancel_and_release/1.
+  # tussen het lezen en het afbreken slaagt. `poging` telt hoe vaak er al
+  # opnieuw gekozen is; zie opnieuw_kiezen/2.
   @doc false
-  @spec afbreken(Vps.t()) ::
+  @spec afbreken(Vps.t(), non_neg_integer()) ::
           {:ok, Provisioning.dispatch() | map()} | {:error, Provisioning.refusal()}
-  def afbreken(%Vps{status: :deleted}), do: {:error, :already_deleting}
+  def afbreken(vps, poging \\ 0)
 
-  def afbreken(%Vps{status: :deleting} = vps), do: redispatch_delete(vps)
+  def afbreken(%Vps{status: :deleted}, _poging), do: {:error, :already_deleting}
+
+  def afbreken(%Vps{status: :deleting} = vps, poging), do: redispatch_delete(vps, poging)
 
   # A :failed VPS has no live VM and no held reservation (the reservation, if
   # any, was already released when provisioning failed), so it can be cleaned
   # up directly — no agent round-trip needed.
-  def afbreken(%Vps{status: :failed} = vps), do: mark_vps_deleted(vps)
+  def afbreken(%Vps{status: :failed} = vps, poging), do: mark_vps_deleted(vps, poging)
 
   # Not yet scheduled to a node — no VM and no held reservation, so it can be
   # cleaned up directly. Lets a customer cancel a VPS still waiting for capacity.
-  def afbreken(%Vps{node_id: nil} = vps), do: mark_vps_deleted(vps)
+  def afbreken(%Vps{node_id: nil} = vps, poging), do: mark_vps_deleted(vps, poging)
 
   # Scheduled (capacity reserved) but no live VM recorded yet.
-  def afbreken(%Vps{provider_vm_id: nil} = vps), do: teardown_unprovisioned(vps)
+  def afbreken(%Vps{provider_vm_id: nil} = vps, poging), do: teardown_unprovisioned(vps, poging)
 
-  def afbreken(%Vps{} = vps), do: dispatch_delete(vps)
+  def afbreken(%Vps{} = vps, _poging), do: dispatch_delete(vps)
 
   # Al :deleting zonder VM: de afbraak is uitgesteld en wacht op het resultaat
   # van de uitrol. Een tweede verzoek mag daar niets aan toevoegen. Vroeger viel
@@ -91,17 +103,17 @@ defmodule ControlPlane.Provisioning.Teardown do
   # node; meldde de agent die als klaar, dan stond de VPS op :deleted terwijl de
   # uitrol de VM daarna nog kon afmaken -- een wees die niemand meer opruimt.
   # Loopt er geen uitrol meer, dan staat er op de node niets van deze VPS en
-  # wordt hij hier afgesloten, net als in teardown_unprovisioned/1.
-  defp redispatch_delete(%Vps{provider_vm_id: nil} = vps) do
+  # wordt hij hier afgesloten, net als in teardown_unprovisioned/2.
+  defp redispatch_delete(%Vps{provider_vm_id: nil} = vps, poging) do
     if CommandQueue.provision_in_flight?(vps.id),
       do: {:error, :already_deleting},
-      else: cancel_and_release(vps)
+      else: cancel_and_release(vps, poging)
   end
 
   # Already :deleting: only block if a delete command is still in flight. If a
   # previous delete terminally failed (e.g. a transient Proxmox error), allow a
   # fresh attempt so a VPS can never get permanently stuck undeletable.
-  defp redispatch_delete(vps) do
+  defp redispatch_delete(vps, _poging) do
     if CommandQueue.in_flight?(vps.id, :delete),
       do: {:error, :already_deleting},
       else: dispatch_delete(vps)
@@ -112,10 +124,10 @@ defmodule ControlPlane.Provisioning.Teardown do
   # produces AND double-count the freed capacity. Defer: mark :deleting and let
   # the provision-done result run the compensating teardown. Only when nothing is
   # in flight is it safe to cancel-and-release immediately.
-  defp teardown_unprovisioned(vps) do
+  defp teardown_unprovisioned(vps, poging) do
     if CommandQueue.provision_in_flight?(vps.id),
-      do: defer_teardown(vps),
-      else: cancel_and_release(vps)
+      do: defer_teardown(vps, poging),
+      else: cancel_and_release(vps, poging)
   end
 
   # Record delete intent without failing the in-flight provision or releasing
@@ -123,15 +135,18 @@ defmodule ControlPlane.Provisioning.Teardown do
   # dispatches a compensating :delete for whatever VM the agent created and frees
   # capacity only once that delete confirms — so nothing is orphaned or
   # double-counted.
-  defp defer_teardown(%Vps{} = vps) do
-    case vps |> Vps.changeset(%{status: :deleting}) |> Repo.update() do
-      {:ok, vps} ->
-        Events.broadcast_changed(:vps)
-        {:ok, %{vps: vps, command: nil}}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  #
+  # Onder slot, net als cancel_and_release/2. Committe de uitrol tussen de
+  # controle hierboven en deze update, dan stond de VPS al op :active met een VM
+  # en zette een blinde update hem op :deleting zonder dat er een delete kwam: het
+  # resultaat dat die delete had moeten plannen, was al verwerkt. Een VM die bleef
+  # draaien zonder abonnement, en die retry_stuck_deletes/2 nooit oppakt omdat er
+  # geen mislukte delete is.
+  defp defer_teardown(%Vps{} = vps, poging) do
+    vps
+    |> onder_slot()
+    |> Multi.update(:vps, fn %{vers: vers} -> Vps.changeset(vers, %{status: :deleting}) end)
+    |> afronden(poging)
   end
 
   # Moves the VPS to :deleting and enqueues a :delete command for its node's agent.
@@ -162,27 +177,10 @@ defmodule ControlPlane.Provisioning.Teardown do
   # Releases a still-held reservation for a VPS that never reached a live VM,
   # restores the node's advertised capacity, cancels any outstanding provision
   # command and marks the VPS deleted — all atomically.
-  defp cancel_and_release(%Vps{} = vps) do
-    Multi.new()
-    # Lockvolgorde: eerst de commando's, dan de VPS, net als apply_result/2 (zie
-    # de moduledoc van ControlPlane.Provisioning). Andersom -- eerst de VPS via
-    # de update hieronder, dan de commando's via update_all -- kon met een
-    # gelijktijdig resultaat voor dezelfde uitrol een deadlock geven.
-    |> Multi.run(:lock_commands, fn repo, _changes ->
-      {:ok, repo.all(from c in lopende_uitrollen(vps.id), order_by: c.id, lock: "FOR UPDATE")}
-    end)
-    # De beslissing om af te sluiten viel op een struct die vóór de sloten
-    # gelezen is. Een uitrol die daartussen slaagde, heeft de VPS op :active
-    # gezet met een VM erop; die hier op :deleted zetten liet een draaiende VM
-    # zonder administratie achter. Dus: onder slot opnieuw lezen, en is er
-    # intussen iets veranderd, dan niet afsluiten maar opnieuw kiezen.
-    |> Multi.run(:vps, fn repo, _changes ->
-      vers = repo.one!(from v in Vps, where: v.id == ^vps.id, lock: "FOR UPDATE")
-
-      if inmiddels_veranderd?(vps, vers),
-        do: {:error, {:inmiddels_veranderd, vers}},
-        else: vers |> Vps.changeset(%{status: :deleted}) |> repo.update()
-    end)
+  defp cancel_and_release(%Vps{} = vps, poging) do
+    vps
+    |> onder_slot()
+    |> Multi.update(:vps, fn %{vers: vers} -> Vps.changeset(vers, %{status: :deleted}) end)
     |> Multi.run(:reservation, fn repo, _changes ->
       Reservations.release(repo, Reservations.held(repo, vps.id))
     end)
@@ -190,8 +188,52 @@ defmodule ControlPlane.Provisioning.Teardown do
       Reservations.restore_capacity(repo, reservation)
     end)
     |> Multi.update_all(:cancel_commands, lopende_uitrollen(vps.id), set: [status: :failed])
-    |> Repo.transaction()
-    |> case do
+    |> afronden(poging)
+  end
+
+  # Directly marks a VPS :deleted (no agent command), used to clean up a :failed
+  # VPS or one that was never placed. Mirrors the success shape of `delete_vps/1`
+  # (`command: nil`, no command was issued) so callers can treat both uniformly.
+  #
+  # Onder slot om dezelfde reden als cancel_and_release/2: de keuze voor deze weg
+  # viel op een struct van vóór het slot. Een VPS zonder node die intussen
+  # geplaatst en uitgerold is, staat op :active met een VM; die stil op :deleted
+  # zetten liet die VM draaien zonder administratie, met een vastgelegde
+  # reservering die nooit meer vrijkwam.
+  defp mark_vps_deleted(%Vps{} = vps, poging) do
+    vps
+    |> onder_slot()
+    |> Multi.update(:vps, fn %{vers: vers} -> Vps.changeset(vers, %{status: :deleted}) end)
+    |> afronden(poging)
+  end
+
+  # Het begin van elke afbraak die zonder agent een toestand vastlegt: de sloten,
+  # en de VPS opnieuw gelezen. De beslissing viel op een struct die vóór de
+  # sloten gelezen is; is de rij intussen veranderd, dan klopt de reden voor deze
+  # weg niet meer en stopt de transactie hier, voordat er iets is vrijgegeven of
+  # afgesloten.
+  #
+  # Lockvolgorde: eerst de commando's, dan de VPS, net als apply_result/2 (zie de
+  # moduledoc van ControlPlane.Provisioning). Andersom -- eerst de VPS, dan de
+  # commando's -- kon met een gelijktijdig resultaat voor dezelfde uitrol een
+  # deadlock geven. Ook waar geen uitrol loopt, blijft de volgorde staan: dan
+  # vindt de eerste stap niets en kost hij bijna niets.
+  defp onder_slot(%Vps{} = vps) do
+    Multi.new()
+    |> Multi.run(:lock_commands, fn repo, _changes ->
+      {:ok, repo.all(from c in lopende_uitrollen(vps.id), order_by: c.id, lock: "FOR UPDATE")}
+    end)
+    |> Multi.run(:vers, fn repo, _changes ->
+      vers = repo.one!(from v in Vps, where: v.id == ^vps.id, lock: "FOR UPDATE")
+
+      if inmiddels_veranderd?(vps, vers),
+        do: {:error, {:inmiddels_veranderd, vers}},
+        else: {:ok, vers}
+    end)
+  end
+
+  defp afronden(%Multi{} = multi, poging) do
+    case Repo.transaction(multi) do
       {:ok, %{vps: vps}} ->
         Events.broadcast_changed(:vps)
         {:ok, %{vps: vps, command: nil}}
@@ -199,41 +241,47 @@ defmodule ControlPlane.Provisioning.Teardown do
       # De transactie is teruggedraaid; er is niets vrijgegeven of afgesloten.
       # Kies de weg opnieuw op de verse toestand. Een VPS met een VM komt zo bij
       # dispatch_delete/1 uit, of bij de delete die er al voor klaarstaat -- de
-      # gewone afbraak met vm_id, nooit een stille :deleted. Dit herhaalt zich
-      # alleen als de toestand opnieuw verandert, en statussen lopen maar één
-      # kant op, dus het eindigt.
-      {:error, :vps, {:inmiddels_veranderd, vers}, _changes} ->
-        afbreken(vers)
+      # gewone afbraak met vm_id, nooit een stille :deleted.
+      {:error, :vers, {:inmiddels_veranderd, vers}, _changes} ->
+        opnieuw_kiezen(vers, poging)
 
       {:error, _step, reason, _changes} ->
         {:error, reason}
     end
   end
 
-  # Geleverd (er staat een VM op) of door iets anders verplaatst sinds de
-  # aanroeper keek. In beide gevallen klopt de reden om af te sluiten niet meer.
-  defp inmiddels_veranderd?(%Vps{} = oud, %Vps{} = vers),
-    do: not is_nil(vers.provider_vm_id) or vers.status != oud.status
+  defp opnieuw_kiezen(%Vps{} = vers, poging) when poging + 1 < @max_pogingen,
+    do: afbreken(vers, poging + 1)
+
+  # Na het maximum geen nieuwe poging maar een weigering. Er is dan niets
+  # veranderd: elke poging draaide zijn transactie terug. De klant kan het
+  # opnieuw proberen; blijft dit terugkomen, dan beweegt er iets aan de rij dat
+  # niet hoort te bewegen, en dat moet in de log opvallen.
+  defp opnieuw_kiezen(%Vps{} = vers, poging) do
+    Logger.warning(
+      "afbraak van vps #{vers.id} opgegeven na #{poging + 1} pogingen: de toestand " <>
+        "veranderde telkens onder het slot (nu #{vers.status})"
+    )
+
+    {:error, :vps_state_changed}
+  end
+
+  # Geleverd (er staat een VM op), geplaatst, of door iets anders verplaatst
+  # sinds de aanroeper keek. In al die gevallen klopt de reden voor de gekozen
+  # weg niet meer. Vergeleken wordt met de oude struct en niet met een vaste
+  # verwachting: een rij die op beide momenten hetzelfde is, is niet veranderd,
+  # ook niet als hij al een VM had. Anders kiest elke poging hetzelfde pad en
+  # weigert de afbraak na het maximum zonder reden.
+  defp inmiddels_veranderd?(%Vps{} = oud, %Vps{} = vers) do
+    vers.status != oud.status or vers.node_id != oud.node_id or
+      vers.provider_vm_id != oud.provider_vm_id
+  end
 
   # De uitrolcommando's van deze VPS die nog niet zijn afgesloten.
   defp lopende_uitrollen(vps_id) do
     from(c in Command,
       where: c.vps_id == ^vps_id and c.kind == :provision and c.status in [:pending, :delivered]
     )
-  end
-
-  # Directly marks a VPS :deleted (no agent command), used to clean up a :failed
-  # VPS. Mirrors the success shape of `delete_vps/1` (`command: nil`, no command
-  # was issued) so callers can treat both uniformly.
-  defp mark_vps_deleted(%Vps{} = vps) do
-    case vps |> Vps.changeset(%{status: :deleted}) |> Repo.update() do
-      {:ok, vps} ->
-        Events.broadcast_changed(:vps)
-        {:ok, %{vps: vps, command: nil}}
-
-      {:error, changeset} ->
-        {:error, changeset}
-    end
   end
 
   @doc """

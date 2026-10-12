@@ -79,6 +79,12 @@ defmodule ControlPlaneWeb.Fouten do
     node_has_vpses: {:conflict, "node_has_vpses"},
     node_unreachable: {:conflict, "node_unreachable"},
     not_provisioned: {:conflict, "not_provisioned"},
+    # Het verwijderen gaf het op omdat de VPS onder het slot steeds van toestand
+    # wisselde (zie Teardown.afbreken/2). Er is niets veranderd, dus opnieuw
+    # proberen is veilig. Een eigen code: geen bestaande zegt "probeer opnieuw"
+    # zonder iets onwaars over de VPS of over onze kant te beweren. Reden en code
+    # heten hetzelfde, omdat het beheerpaneel de reden met to_string/1 doorgeeft.
+    vps_state_changed: {:conflict, "vps_state_changed"},
 
     # Het verzoek zelf deugt niet.
     input_too_large: {:unprocessable_entity, "input_too_large"},

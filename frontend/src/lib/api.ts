@@ -119,6 +119,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_status_paused: "De VPS staat gepauzeerd.",
   invalid_idempotency_key: "Deze bestelling kon niet worden geplaatst. Herlaad de pagina en probeer het opnieuw.",
   already_deleting: "Deze VPS wordt al verwijderd.",
+  vps_state_changed: "De VPS veranderde net van toestand. Probeer het zo opnieuw.",
   not_provisioned: "Deze VPS is nog niet klaar.",
   vps_not_active: "Dit kan alleen bij een draaiende VPS.",
   console_unavailable: "De console is nu niet beschikbaar voor deze VPS.",

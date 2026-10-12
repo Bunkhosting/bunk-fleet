@@ -70,6 +70,7 @@ defmodule ControlPlane.Provisioning do
           | :quota_exceeded
           | :insufficient_credits
           | :port_pool_exhausted
+          | :vps_state_changed
           | {:invalid_status, atom()}
 
   @doc """
