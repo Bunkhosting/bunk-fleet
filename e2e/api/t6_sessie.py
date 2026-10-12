@@ -40,7 +40,30 @@ controleer("uitloggen zonder sessie geeft geen 5xx", 0 < status < 500, f"status 
 
 # --- de cookie -------------------------------------------------------------
 status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW})
-cookie = headers.get("Set-Cookie", "")
+cookie = next((c for c in headers.set_cookies if c.startswith("bunk_session=")), "")
+waarde = sessiecookie(headers)
+controleer("de login zet een sessiecookie", status == 200 and bool(waarde),
+           f"status {status}, Set-Cookie: {cookie[:60]}", "HOOG")
+# Het token hoort alleen in de HttpOnly-cookie. Staat het ook in de body, dan
+# leest elke XSS het en is de HttpOnly-vlag voor niets.
+controleer("het login-antwoord bevat geen token", "token" not in body
+           and (not waarde or waarde not in json.dumps(body)),
+           f"body-sleutels: {sorted(body)[:10]}", "HOOG")
+# Alleen de cookie, geen Authorization-header: zo doet de browser het.
+status, _, _, _ = roep("GET", "/auth/me", headers={"Cookie": f"bunk_session={waarde}"})
+controleer("alleen de cookie is genoeg om ingelogd te zijn", status == 200,
+           f"status {status}", "HOOG")
+# En een wijzigend verzoek op alleen die cookie, van een vreemde herkomst, wordt
+# geweigerd: dat is de CSRF-bescherming nu de browser niets anders meer heeft.
+status, body2, _, _ = roep("DELETE", "/auth/logout",
+                           headers={"Cookie": f"bunk_session={waarde}",
+                                    "Origin": "https://kwaadwillend.example"})
+controleer("een vreemde herkomst kan niet uitloggen met de cookie", status == 403,
+           f"status {status}: {str(body2)[:80]}", "HOOG")
+# Daarna netjes uitloggen vanaf de eigen herkomst; de sessie hoort dan dood.
+roep("DELETE", "/auth/logout", headers={"Cookie": f"bunk_session={waarde}", "Origin": APP})
+status, _, _, _ = roep("GET", "/auth/me", headers={"Cookie": f"bunk_session={waarde}"})
+controleer("uitloggen via de cookie doodt de sessie", status == 401, f"status {status}", "HOOG")
 controleer("de sessiecookie is HttpOnly", "httponly" in cookie.lower(),
            f"Set-Cookie: {cookie[:160]}", "HOOG")
 controleer("de sessiecookie is Secure", "secure" in cookie.lower(),

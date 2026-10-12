@@ -143,17 +143,20 @@ defmodule ControlPlaneWeb.BeheerMfaTest do
         })
         |> Repo.update!()
 
-      %{"token" => token} =
+      login =
         build_conn()
         |> post(~p"/api/v1/auth/login", %{
           "email" => beheerder.email,
           "password" => "Str0ngPassphrase!42",
           "code" => NimbleTOTP.verification_code(geheim)
         })
-        |> json_response(200)
 
+      body = json_response(login, 200)
+      refute Map.has_key?(body, "token")
+
+      # Precies zoals de browser het doet: alleen de cookie uit het antwoord.
       assert build_conn()
-             |> put_req_header("authorization", "Bearer " <> token)
+             |> put_req_cookie("bunk_session", login.resp_cookies["bunk_session"].value)
              |> get(~p"/api/v1/beheer/stats")
              |> json_response(200)
     end

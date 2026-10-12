@@ -78,7 +78,12 @@ class Headers(dict):
     """
 
     def __init__(self, paren):
+        paren = list(paren)
         super().__init__((k.lower(), v) for k, v in paren)
+        # Een dict houdt per naam maar één waarde over, en een antwoord kan
+        # meerdere Set-Cookie-regels hebben. De sessiecookie mag daar niet
+        # tussen wegvallen, dus die regels gaan apart mee.
+        self.set_cookies = [v for k, v in paren if k.lower() == "set-cookie"]
 
     def get(self, key, standaard=None):
         return super().get(key.lower(), standaard)
@@ -158,9 +163,25 @@ def mag_bestellen(wat="deze reeks"):
     return False
 
 
+def sessiecookie(headers):
+    """De waarde van `bunk_session` uit de Set-Cookie-regels, of None.
+
+    De login geeft het token niet meer in de JSON-body: daar kon elke XSS het
+    lezen. Het staat alleen nog in de HttpOnly-cookie, en dit harnas haalt het
+    daar vandaan om het daarna als Bearer-header mee te sturen.
+    """
+    for regel in headers.set_cookies:
+        naam, _, rest = regel.partition("=")
+        if naam.strip() == "bunk_session":
+            waarde = rest.split(";", 1)[0].strip()
+            return waarde or None
+    return None
+
+
 def inloggen():
-    status, body, _, _ = roep("POST", "/auth/login", {"email": EMAIL, "password": PW})
-    if status != 200:
+    status, body, _, headers = roep("POST", "/auth/login", {"email": EMAIL, "password": PW})
+    token = sessiecookie(headers) if status == 200 else None
+    if not token:
         print(f"inloggen mislukt ({status}): {body}")
         sys.exit(1)
-    return body.get("token")
+    return token

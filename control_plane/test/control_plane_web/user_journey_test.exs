@@ -71,11 +71,13 @@ defmodule ControlPlaneWeb.UserJourneyTest do
   defp klant(conn, naam) do
     email = "#{naam}-#{System.unique_integer([:positive])}@bunk.test"
 
-    token =
-      conn
-      |> post(~p"/api/v1/auth/register", %{"email" => email, "password" => @password})
-      |> json_response(201)
-      |> Map.fetch!("token")
+    # Het token staat niet in de body maar alleen in de HttpOnly-cookie; een
+    # API-client haalt het daar vandaan en draagt het als Bearer.
+    aanmelding =
+      post(conn, ~p"/api/v1/auth/register", %{"email" => email, "password" => @password})
+
+    json_response(aanmelding, 201)
+    token = aanmelding.resp_cookies["bunk_session"].value
 
     gebruiker = Accounts.get_user_by_email(email)
     {:ok, bevestig_token} = Accounts.deliver_user_confirmation_instructions(gebruiker)

@@ -19,7 +19,8 @@ defmodule ControlPlaneWeb.AuthControllerTest do
   end
 
   describe "POST /api/v1/auth/register" do
-    test "creates a user and returns a token", %{conn: conn} do
+    test "creates a user and sets the session cookie, without a token in the body",
+         %{conn: conn} do
       conn =
         post(conn, ~p"/api/v1/auth/register", %{
           "email" => @email,
@@ -27,8 +28,11 @@ defmodule ControlPlaneWeb.AuthControllerTest do
           "name" => "Op"
         })
 
-      assert %{"token" => token, "user" => user} = json_response(conn, 201)
-      assert is_binary(token)
+      assert %{"user" => user} = body = json_response(conn, 201)
+      # Het token hoort alleen in de HttpOnly-cookie; in de body leest elke XSS het.
+      refute Map.has_key?(body, "token")
+      assert %{http_only: true, value: value} = conn.resp_cookies["bunk_session"]
+      assert is_binary(value) and value != ""
       assert user["email"] == @email
       assert user["role"] == "user"
       refute Map.has_key?(user, "hashed_password")
@@ -62,10 +66,13 @@ defmodule ControlPlaneWeb.AuthControllerTest do
   describe "POST /api/v1/auth/login" do
     setup [:register_user]
 
-    test "returns a token for valid credentials", %{conn: conn} do
+    test "sets the session cookie for valid credentials, without a token in the body",
+         %{conn: conn} do
       conn = post(conn, ~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
-      assert %{"token" => token} = json_response(conn, 200)
-      assert is_binary(token)
+      assert %{"user" => %{"email" => @email}} = body = json_response(conn, 200)
+      refute Map.has_key?(body, "token")
+      # Ook niet onder een andere sleutel: de cookiewaarde mag nergens in de body staan.
+      refute conn.resp_body =~ conn.resp_cookies["bunk_session"].value
     end
 
     test "returns 401 for a wrong password", %{conn: conn} do
@@ -138,7 +145,7 @@ defmodule ControlPlaneWeb.AuthControllerTest do
     test "login sets an HttpOnly cookie that authenticates without a bearer header",
          %{conn: conn} do
       login = post(conn, ~p"/api/v1/auth/login", %{"email" => @email, "password" => @password})
-      assert %{"token" => _} = json_response(login, 200)
+      refute Map.has_key?(json_response(login, 200), "token")
 
       cookie = login.resp_cookies["bunk_session"]
       assert cookie.http_only
@@ -281,7 +288,8 @@ defmodule ControlPlaneWeb.AuthControllerTest do
           "password" => "a-brand-new-password-123"
         })
 
-      assert json_response(login, 200)["token"]
+      assert json_response(login, 200)["user"]["email"] == @email
+      assert login.resp_cookies["bunk_session"].value
     end
 
     test "422s an invalid token", %{conn: conn} do

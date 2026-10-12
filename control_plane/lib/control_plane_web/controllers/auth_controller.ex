@@ -2,8 +2,8 @@ defmodule ControlPlaneWeb.AuthController do
   @moduledoc """
   End-user/operator authentication API.
 
-    * `POST   /api/v1/auth/register`            — create a user, return it plus a session token.
-    * `POST   /api/v1/auth/login`               — exchange email + password for a session token.
+    * `POST   /api/v1/auth/register`            — create a user, return it and set the session cookie.
+    * `POST   /api/v1/auth/login`               — exchange email + password for the session cookie.
     * `GET    /api/v1/auth/me`                  — (authenticated) the current user.
     * `DELETE /api/v1/auth/logout`               — (authenticated) revoke the presented session.
     * `POST   /api/v1/auth/confirm`              — exchange an email-confirmation token for a confirmed account.
@@ -11,9 +11,13 @@ defmodule ControlPlaneWeb.AuthController do
     * `POST   /api/v1/auth/password-reset`       — request a reset email (always 200; anti-enumeration).
     * `POST   /api/v1/auth/password-reset/confirm` — exchange a reset token + new password for a changed password.
 
-  Session tokens are returned as URL-safe Base64 (no padding) and expected back the
-  same way in the `Authorization: Bearer <token>` header (see
-  `ControlPlaneWeb.Plugs.ApiAuth`).
+  De sessie gaat uitsluitend mee als HttpOnly-cookie `bunk_session`, nooit in de
+  JSON-body. Een token in de body is leesbaar voor JavaScript en daarmee voor
+  elke XSS: wat de HttpOnly-vlag op de cookie beschermt, gaf de body gewoon weg.
+  Er was ook geen afnemer meer van: het dashboard leunt al op de cookie en de
+  e2e-harnas leest het token uit `Set-Cookie`. Een API-client die de waarde
+  toch zelf wil dragen kan hem daar ook vandaan halen en terugsturen als
+  `Authorization: Bearer <token>` (zie `ControlPlaneWeb.Plugs.ApiAuth`).
   """
   use ControlPlaneWeb, :controller
 
@@ -37,7 +41,7 @@ defmodule ControlPlaneWeb.AuthController do
       conn
       |> put_session_cookie(token)
       |> put_status(:created)
-      |> json(%{user: user_json(user), token: encode_token(token)})
+      |> json(%{user: user_json(user)})
     else
       {:error, reason}
       when reason in [:captcha_required, :captcha_failed, :captcha_unavailable] ->
@@ -109,7 +113,7 @@ defmodule ControlPlaneWeb.AuthController do
     conn
     |> put_session_cookie(token)
     |> put_status(:ok)
-    |> json(%{user: user_json(user), token: encode_token(token)})
+    |> json(%{user: user_json(user)})
   end
 
   def me(conn, _params) do
@@ -299,7 +303,8 @@ defmodule ControlPlaneWeb.AuthController do
 
   # Sets the session token as an HttpOnly cookie so the browser holds it out of
   # JS reach (an XSS foothold can't read it). Same-site Lax + Secure (over https)
-  # for CSRF/transport safety. API clients keep using the returned bearer token.
+  # for CSRF/transport safety; ControlPlaneWeb.Plugs.SameOrigin doet de rest voor
+  # wijzigende verzoeken. Dit is de enige plek waar het token de server verlaat.
   defp put_session_cookie(conn, token) do
     put_resp_cookie(
       conn,

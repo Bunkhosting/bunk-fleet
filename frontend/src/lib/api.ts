@@ -2,10 +2,12 @@
  * API adapter — bridges the (unchanged) vps-frontend UI to the bunk-fleet
  * (Elixir) control-plane API.
  *
- * bunk-fleet uses bearer session tokens (Authorization: Bearer <token>) instead
- * of the old Django cookie+CSRF+JWT-refresh model, and returns its own JSON
- * shapes. This module is the single boundary that:
- *   - stores the bearer token client-side and attaches it to every request,
+ * De browser logt in met de HttpOnly-cookie `bunk_session` die de control plane
+ * zet; het token zelf komt nooit in JavaScript terecht (de API stuurt het ook
+ * niet meer in de body). Wijzigende verzoeken krijgen hun CSRF-bescherming van
+ * SameSite=Lax plus de Origin-controle in de control plane (SameOrigin-plug).
+ * This module is the single boundary that:
+ *   - sends every request with that cookie (withCredentials, same origin),
  *   - transforms bunk-fleet responses into the frontend's existing TS types,
  * so the React components stay byte-for-byte identical.
  */
@@ -244,7 +246,7 @@ api.interceptors.response.use(
     const status = error.response?.status;
     const url: string = error.config?.url || "";
     // Fail securely: a 401 outside the auth flow means the session is gone — drop
-    // the token and send the user back to login.
+    // the cached client state and send the user back to login.
     if (status === 401 && typeof window !== "undefined" && !url.includes("/auth/login") && !window.location.pathname.startsWith("/login")) {
       resetClientState();
       // Bewust een harde navigatie en geen router.push: dit is een
@@ -446,7 +448,8 @@ export type PasskeyChallenge = {
 
 export type LoginResponse = {
   user?: BunkUser;
-  token?: string;
+  // Geen `token`: de sessie zit alleen in de HttpOnly-cookie. Stond hij hier,
+  // dan nodigde het type uit om hem toch ergens in JavaScript te bewaren.
   /** Wachtwoord klopt, tweede factor nodig. */
   mfa_required?: boolean;
   /** Blijft bestaan voor de oude client; gelijk aan methods.includes("totp"). */

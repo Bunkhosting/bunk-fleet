@@ -100,8 +100,11 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
 
   test "zonder tweede factor logt een wachtwoord gewoon in", %{conn: conn} do
     confirmed_user("pl4@bunk.test")
-    body = conn |> login("pl4@bunk.test") |> json_response(200)
-    assert is_binary(body["token"])
+    out = conn |> login("pl4@bunk.test")
+    body = json_response(out, 200)
+    # De sessie zit in de HttpOnly-cookie, niet in de body.
+    assert is_binary(out.resp_cookies["bunk_session"].value)
+    refute Map.has_key?(body, "token")
     assert body["user"]["passkeys_enabled"] == false
   end
 

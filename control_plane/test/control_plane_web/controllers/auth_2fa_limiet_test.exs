@@ -53,8 +53,9 @@ defmodule ControlPlaneWeb.Auth2faLimietTest do
     # 2FA in deze opzet altijd mislukte.
     for n <- 1..4, do: assert(inloggen(user, "000000", n).status == 401)
 
-    assert %{"token" => _} =
-             json_response(inloggen(user, NimbleTOTP.verification_code(geheim), 99), 200)
+    conn = inloggen(user, NimbleTOTP.verification_code(geheim), 99)
+    assert %{"user" => _} = json_response(conn, 200)
+    assert conn.resp_cookies["bunk_session"].value
   end
 
   test "een geslaagde login zet de teller terug", %{user: user, geheim: geheim} do
