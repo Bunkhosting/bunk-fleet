@@ -94,5 +94,23 @@ defmodule ControlPlane.Fleet.Command do
     # botsing een uitzondering worden in plaats van een changeset-fout, en dan
     # krijgt een klant een 500 waar "er loopt er al een" het juiste antwoord is.
     |> unique_constraint([:vps_id, :kind], name: :commands_een_machtscommando_per_vps_uidx)
+    |> valideer_afbraakdoel()
   end
+
+  # Een :delete zonder vm_id laat de agent raden welke VM weg moet, en meldt hij
+  # "klaar", dan staat de VPS op :deleted terwijl er misschien nog een VM komt.
+  # Zonder vm_id is er op de node niets af te breken; dat hoort lokaal te worden
+  # afgehandeld, nooit door de agent. Alleen bij het aanmaken: een oude rij
+  # zonder vm_id moet via deze changeset nog wel een resultaat kunnen krijgen,
+  # anders komt hij nooit in een eindstand en wordt hij eeuwig opnieuw uitgedeeld.
+  defp valideer_afbraakdoel(%Ecto.Changeset{data: %{__meta__: %{state: :built}}} = cs) do
+    if get_field(cs, :kind) == :delete and not afbraakdoel?(get_field(cs, :payload)),
+      do: add_error(cs, :payload, "a delete needs a vm_id"),
+      else: cs
+  end
+
+  defp valideer_afbraakdoel(changeset), do: changeset
+
+  defp afbraakdoel?(%{"vm_id" => vm_id}) when is_binary(vm_id) and vm_id != "", do: true
+  defp afbraakdoel?(_payload), do: false
 end

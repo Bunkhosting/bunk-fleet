@@ -729,7 +729,9 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp retry_stuck_deletes do
-    count = Provisioning.retry_stuck_deletes()
+    # Wees-VM's (VPS al :deleted) horen erbij: hun afbraak werd anders maar één
+    # keer geprobeerd, en een mislukking bleef dan stil staan tot de driftmelding.
+    count = Provisioning.retry_stuck_deletes() + Provisioning.retry_orphan_deletes()
 
     if count > 0 do
       Logger.info("fleet reconciler retried failed teardowns", retried: count)

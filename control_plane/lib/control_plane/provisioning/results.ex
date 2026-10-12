@@ -79,6 +79,8 @@ defmodule ControlPlane.Provisioning.Results do
       Multi.new()
       # Lock + re-read the command. Abort (idempotent no-op) if it's already
       # terminal; this serializes concurrent/duplicate result deliveries.
+      # Lockvolgorde: dit commando eerst, de VPS pas in finalize_vps/4. Zie de
+      # moduledoc van ControlPlane.Provisioning; elke andere plek volgt dit.
       |> Multi.run(:lock, fn repo, _changes ->
         locked = repo.one!(from c in Command, where: c.id == ^command.id, lock: "FOR UPDATE")
 

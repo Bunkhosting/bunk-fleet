@@ -10,6 +10,20 @@ defmodule ControlPlane.Provisioning do
        agent crash (delivered but never resolved) is redelivered after a TTL.
     3. The agent reports the outcome through `apply_result/2`, which finalises both
        the command and the VPS, committing or releasing the held reservation.
+
+  ## Lockvolgorde
+
+  Een transactie die zowel een commando-rij als een VPS-rij vergrendelt, doet
+  dat in deze volgorde: **eerst het commando, dan de VPS**. Dat is de volgorde
+  van `apply_result/2` (het commando `FOR UPDATE`, daarna de VPS `FOR UPDATE`),
+  en elke andere plek volgt hem. Twee transacties die dezelfde rijen in
+  omgekeerde volgorde pakken kunnen op elkaar gaan wachten; Postgres breekt er
+  dan één af, en dat is een afbraak of een resultaat dat verloren gaat.
+
+  Een gewone `UPDATE` vergrendelt ook. `Teardown`'s `cancel_and_release` deed
+  eerst de VPS en dan de uitrolcommando's, en vergrendelt die commando's nu
+  vooraf. Wie hier een nieuwe transactie toevoegt die beide raakt: neem eerst de
+  commando's, op volgorde van id, en dan de VPS.
   """
   import Ecto.Query, warn: false
 
@@ -366,6 +380,10 @@ defmodule ControlPlane.Provisioning do
 
   @doc "Zie `ControlPlane.Provisioning.Teardown.retry_stuck_deletes/2`."
   defdelegate retry_stuck_deletes(grace_seconds \\ 300, max_backoff_seconds \\ 6 * 3600),
+    to: Teardown
+
+  @doc "Zie `ControlPlane.Provisioning.Teardown.retry_orphan_deletes/2`."
+  defdelegate retry_orphan_deletes(grace_seconds \\ 300, max_backoff_seconds \\ 6 * 3600),
     to: Teardown
 
   @doc "Zie `ControlPlane.Provisioning.Power.start_vps/1`."
