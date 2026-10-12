@@ -90,13 +90,6 @@ defmodule ControlPlaneWeb.Router do
     plug ControlPlaneWeb.Plugs.NodeAuth
   end
 
-  # Admin API: JSON plus shared-secret admin-token bearer authentication.
-  pipeline :admin_api do
-    plug :accepts, ["json"]
-    plug ControlPlaneWeb.Plugs.AdminAuth
-    plug ControlPlaneWeb.Plugs.AdminAuditLog
-  end
-
   # End-user API: JSON plus per-user session-token bearer authentication.
   pipeline :user_api do
     plug :accepts, ["json"]
@@ -118,7 +111,8 @@ defmodule ControlPlaneWeb.Router do
   end
 
   # Admin panel API: authenticated on the caller's OWN session token and gated to
-  # the :admin role (distinct from /admin/v1/* which uses a shared secret).
+  # the :admin role. Ook /admin/v1/* loopt hierdoor: een beheerhandeling hoort
+  # altijd aan een persoon met een tweede factor te hangen.
   pipeline :admin_session_api do
     plug :accepts, ["json"]
     # Vóór de authenticatie: een wijzigend verzoek dat op de cookie leunt moet
@@ -374,9 +368,13 @@ defmodule ControlPlaneWeb.Router do
     get "/console-relay", ConsoleController, :relay_ws
   end
 
-  # Admin API.
+  # Admin API. Stond tot 2026-10 achter een gedeeld geheim (ADMIN_TOKEN): een
+  # sleutel die nooit verliep, aan niemand hing en in `beheer_audit` alleen als
+  # "admin-token" verscheen. Nu dezelfde drempel als /api/v1/beheer -- een eigen
+  # sessie, rol :admin, tweede factor -- zodat elke handeling een naam heeft.
+  # Een ADMIN_TOKEN die nog in de omgeving staat wordt nergens meer gelezen.
   scope "/admin/v1", ControlPlaneWeb.Admin do
-    pipe_through :admin_api
+    pipe_through :admin_session_api
 
     resources "/regions", RegionController, only: [:index, :create]
     post "/enroll-tokens", EnrollTokenController, :create

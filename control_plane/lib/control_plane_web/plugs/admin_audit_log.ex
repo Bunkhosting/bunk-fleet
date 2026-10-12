@@ -22,9 +22,9 @@ defmodule ControlPlaneWeb.Plugs.AdminAuditLog do
   bedrag, een rol, aan of uit. Een wachtwoord of e-mailadres komt er niet in.
   De applicatielog blijft er ook, voor wie de logs doorzoekt.
 
-  Ook de API met het gedeelde geheim (/admin/v1) loopt hierdoorheen. Daar is de
-  actor "admin-token": wie het was, weet die API niet, en dat is precies waarom
-  hij beter niet gebruikt wordt.
+  Ook /admin/v1 loopt hierdoorheen. Die API hing tot 2026-10 aan een gedeeld
+  geheim en schreef dan "admin-token" als actor; zulke regels staan nog in de
+  tabel. Sinds die API een beheerderssessie vraagt, heeft elke regel een naam.
   """
   import Plug.Conn
 
@@ -101,5 +101,8 @@ defmodule ControlPlaneWeb.Plugs.AdminAuditLog do
   end
 
   defp actor(%Plug.Conn{assigns: %{current_user: %User{} = user}}), do: user.email
-  defp actor(_conn), do: "admin-token"
+  # Hoort niet voor te komen: `RequireAdmin` staat ervoor. Mocht een route ooit
+  # zonder die plug hier belanden, dan liever een eerlijke "onbekend" in de log
+  # dan een crash nadat de handeling al gebeurd is.
+  defp actor(_conn), do: "onbekend"
 end

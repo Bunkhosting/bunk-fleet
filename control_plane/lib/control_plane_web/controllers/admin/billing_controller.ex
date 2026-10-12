@@ -14,7 +14,8 @@ defmodule ControlPlaneWeb.Admin.BillingController do
   `ControlPlane.Billing` for the model and units), serialized as a string to
   preserve Decimal precision.
 
-  Protected by `ControlPlaneWeb.Plugs.AdminAuth` (shared-secret admin token).
+  Protected by the `:admin_session_api` pipeline: an admin's own session,
+  with a second factor (see `ControlPlaneWeb.Plugs.RequireAdmin`).
   """
   use ControlPlaneWeb, :controller
 

@@ -6,9 +6,8 @@ defmodule ControlPlaneWeb.Admin.NodeDrainTest do
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Repo
 
-  @admin_token "test-admin-token"
-
-  defp auth(conn), do: put_req_header(conn, "authorization", "Bearer " <> @admin_token)
+  # Een beheerderssessie, geen gedeeld geheim meer: zie `ConnCase.als_beheerder/1`.
+  defp auth(conn), do: conn |> als_beheerder() |> elem(0)
 
   defp node_fixture do
     code = "r-#{System.unique_integer([:positive])}"
@@ -38,7 +37,7 @@ defmodule ControlPlaneWeb.Admin.NodeDrainTest do
     assert resumed["status"] == "online"
   end
 
-  test "requires the admin token", %{conn: conn} do
+  test "requires an admin session", %{conn: conn} do
     node = node_fixture()
     conn = post(conn, ~p"/admin/v1/nodes/#{node.id}/drain")
     assert conn.status in [401, 403]

@@ -55,16 +55,18 @@ defmodule ControlPlaneWeb.BeheerAuditTest do
     assert length(Audit.recent(1000)) == voor
   end
 
-  test "de API met het gedeelde geheim wordt ook vastgelegd" do
+  # /admin/v1 hing vroeger aan een gedeeld geheim en schreef dan "admin-token"
+  # als actor. Nu staat er een naam, net als bij het paneel.
+  test "/admin/v1 legt de beheerder op naam vast" do
+    {beheerder, conn} = beheerder_conn()
     klant = confirmed_user_fixture()
 
-    build_conn()
-    |> put_req_header("authorization", "Bearer test-admin-token")
+    conn
     |> post("/admin/v1/credits", %{"email" => klant.email, "amount_cents" => 500})
     |> json_response(200)
 
     assert [regel | _] = Audit.recent(1)
-    assert regel.actor == "admin-token"
+    assert regel.actor == beheerder.email
     assert regel.details == %{"amount_cents" => 500}
     refute inspect(regel.details) =~ klant.email
   end

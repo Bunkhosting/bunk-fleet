@@ -100,8 +100,10 @@ if config_env() == :prod do
       _ -> nil
     end
 
+  # Geen ADMIN_TOKEN meer: /admin/v1 vraagt een beheerderssessie. Staat de
+  # variabele nog in .env.prod, dan wordt hij genegeerd -- bewust geen
+  # weigering bij het starten, zodat een uitrol niet op een oud restje strandt.
   config :control_plane,
-    admin_token: System.get_env("ADMIN_TOKEN"),
     public_url: System.get_env("PUBLIC_URL") || "https://#{host}",
     console: [
       ssh_private_key: console_private_key,

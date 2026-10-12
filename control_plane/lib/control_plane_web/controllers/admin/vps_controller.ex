@@ -6,7 +6,8 @@ defmodule ControlPlaneWeb.Admin.VpsController do
   `region_id` or a `region_code`, and defaulting `template_id` from
   `Application.get_env(:control_plane, :default_template_id, 9000)`.
 
-  Protected by `ControlPlaneWeb.Plugs.AdminAuth` (shared-secret admin token).
+  Protected by the `:admin_session_api` pipeline: an admin's own session,
+  with a second factor (see `ControlPlaneWeb.Plugs.RequireAdmin`).
   """
   use ControlPlaneWeb, :controller
 

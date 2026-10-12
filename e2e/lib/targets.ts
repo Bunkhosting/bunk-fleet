@@ -56,11 +56,13 @@ export const API_AUTH_REQUIRED = [
 ];
 
 /**
- * De node-API (agent-token) en de shared-secret admin-API. /v1/* hangt wél aan
- * de edge, /admin/v1/* bewust niet — dat hoort dus de frontend-404 te geven en
- * niet de control plane te bereiken.
+ * De node-API (agent-token) en de oude admin-API. /v1/* hangt wél aan de edge,
+ * /admin/v1/* bewust niet — dat hoort dus de frontend-404 te geven en niet de
+ * control plane te bereiken. Sinds 2026-10 vraagt /admin/v1 een
+ * beheerderssessie in plaats van een gedeeld geheim, maar ook zo hoort hij van
+ * buiten onzichtbaar te blijven.
  */
 export const API_NODE_PATHS = ["/v1/commands", "/v1/port-forwards"];
-export const API_ADMIN_SHARED_SECRET = ["/admin/v1/nodes", "/admin/v1/vpses", "/admin/v1/credits"];
+export const API_ADMIN_V1 = ["/admin/v1/nodes", "/admin/v1/vpses", "/admin/v1/credits"];
 
 export const API_PUBLIC = ["/api/v1/packages"];

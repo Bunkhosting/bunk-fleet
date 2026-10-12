@@ -278,10 +278,10 @@ defmodule ControlPlaneWeb.Admin.PanelController do
   op die machine plakt.
 
   Dit endpoint bestaat naast dat onder `/admin/v1`. Dat laatste wordt door
-  Cloudflare's WAF geblokkeerd voordat het de origin bereikt, waardoor het
-  vanuit de browser niet aan te roepen is — precies de reden dat deze hele
-  scope op /beheer staat. Zonder deze route was een node toevoegen vanuit het
-  dashboard onmogelijk.
+  Cloudflare's WAF geblokkeerd voordat het de origin bereikt (en de edge stuurt
+  het ook niet door), waardoor het vanuit de browser niet aan te roepen is —
+  precies de reden dat deze hele scope op /beheer staat. Zonder deze route was
+  een node toevoegen vanuit het dashboard onmogelijk.
 
   Het token komt maar één keer terug: er staat alleen een hash van in de
   database.

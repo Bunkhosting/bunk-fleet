@@ -4,7 +4,7 @@ import {
   API_AUTH_REQUIRED,
   API_PUBLIC,
   API_NODE_PATHS,
-  API_ADMIN_SHARED_SECRET,
+  API_ADMIN_V1,
 } from "../lib/targets";
 
 /**
@@ -131,8 +131,8 @@ for (const path of API_NODE_PATHS) {
   });
 }
 
-for (const path of API_ADMIN_SHARED_SECRET) {
-  test(`shared-secret admin-API ${path} is van buiten niet bereikbaar`, async () => {
+for (const path of API_ADMIN_V1) {
+  test(`admin-API ${path} is van buiten niet bereikbaar`, async () => {
     const ctx = await pwRequest.newContext();
     const res = await ctx.get(`${APP}${path}`);
     // De edge stuurt /admin/v1/* niet door naar de control plane; dit hoort dus

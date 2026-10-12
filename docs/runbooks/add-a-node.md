@@ -102,34 +102,27 @@ first: a node in another city is only worth a separate region if you want
 customers to be able to *choose* it, and an empty region is never shown to
 anyone, so creating it early costs nothing.
 
-```bash
-# List regions
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://app.bunkhosting.nl/admin/v1/regions | jq
+Both happen in the dashboard, signed in as an admin with a second factor:
 
-# Create one, if this node is somewhere new
-curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"code":"nl-2","name":"Nederland — <plaats>"}' \
-  https://app.bunkhosting.nl/admin/v1/regions | jq
+- **Beheer → Locaties** lists the regions, creates one if this node is
+  somewhere new (code `nl-2`, name `Nederland — <plaats>`), renames them, and
+  closes one that is being wound down (closed means "nothing new lands here";
+  what runs there keeps running).
+- **Beheer → Nodes → Node toevoegen** mints the token for the chosen location,
+  valid one hour.
 
-# Mint the token (valid one hour). region_code works as well as region_id.
-curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"region_code":"nl-2","ttl_seconds":3600}' \
-  https://app.bunkhosting.nl/admin/v1/enroll-tokens | jq
-```
+The result carries the plaintext token — shown once — and the `install` line:
+the exact command for §3, with the token already in it. Send it over something
+that is not a group chat.
 
-The response carries the plaintext token — returned once — and an `install`
-field: the exact command for §3, with the token already in it. Send it over
-something that is not a group chat.
+There used to be a curl variant against `/admin/v1` with a shared
+`ADMIN_TOKEN`. That secret is gone: every admin action now hangs on a person's
+own session, so `beheer_audit` says who did it. `/admin/v1` itself is not
+reachable from outside anyway — the edge does not forward it.
 
-The dashboard does the same two things without curl: **Beheer → Locaties**
-creates and renames regions and closes one that is being wound down (closed
-means "nothing new lands here"; what runs there keeps running), and the node's
-owner can move it to another location later from **Mijn nodes** — the VPSes on
-it move with the machine. Only the owner can, because only the owner knows
-where the hardware actually stands.
+The node's owner can move it to another location later from **Mijn nodes** —
+the VPSes on it move with the machine. Only the owner can, because only the
+owner knows where the hardware actually stands.
 
 ---
 
@@ -274,12 +267,8 @@ heartbeat sent                         avail_vcpu=... avail_ram_mb=... avail_dis
 `BUNK_MANAGE_NETWORK=0` you get "not managed" instead, and the operator owes you
 a working gateway on the subnet the control plane assigned.
 
-Then, from your side:
-
-```bash
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://app.bunkhosting.nl/admin/v1/nodes | jq '.nodes[] | {name, status, region, available_ram_mb}'
-```
+Then, from your side: **Beheer → Nodes** shows it with its status, location
+and free RAM.
 
 Order the smallest VPS in that region and open the console. That exercises the
 whole chain — scheduler, address allocation, cloud-init, and the console relay
@@ -293,12 +282,8 @@ node can do the job rather than merely appear.
 Closing a node is not the same as turning it off, and the difference matters
 when someone's machine is running on it.
 
-**Close it to new VPSes** — the operator UI's "Afsluiten" button, or:
-
-```bash
-curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  https://app.bunkhosting.nl/admin/v1/nodes/<NODE_UUID>/drain | jq
-```
+**Close it to new VPSes** — the "Afsluiten" button on the node in
+**Beheer → Nodes** (`POST /api/v1/beheer/nodes/:id/drain`).
 
 The scheduler stops placing there. Everything already on the node keeps running,
 keeps being metered, keeps its console. The node keeps heartbeating, and its
@@ -308,7 +293,7 @@ heartbeat no longer flips it back open.
 someone's VPS is not something to trigger by changing a status field. Today that
 means telling those customers, or rebuilding their VPS elsewhere.
 
-**Then remove it.** `DELETE /admin/v1/nodes/:id` refuses while the node still
+**Then remove it.** `DELETE /api/v1/beheer/nodes/:id` refuses while the node still
 hosts a live VPS, which is the backstop for having skipped the previous step.
 
 An offline node can be drained but not resumed. Draining one that is already

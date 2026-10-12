@@ -66,7 +66,7 @@ status, body, _, _ = roep("POST", APP + f"/api/v1/beheer/users/{ANDERE_USER}/cre
 controleer("geld bijboeken kan niet", status in (401, 403, 404),
            f"status {status}: {str(body)[:200]}", "KRITIEK")
 
-# --- de gedeelde-geheim-API ------------------------------------------------
+# --- de oude admin-API (/admin/v1) -----------------------------------------
 for pad, data in [("/admin/v1/nodes", None), ("/admin/v1/credits", None)]:
     status, body, _, _ = roep("GET", APP + pad, token=token)
     controleer(f"GET {pad} met een klantsessie wordt geweigerd", status in (401, 403, 404),

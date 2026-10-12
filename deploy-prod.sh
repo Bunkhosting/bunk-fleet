@@ -60,11 +60,9 @@ if [ ! -f "$ENV_FILE" ]; then
   umask 077
   DBPASS=$(openssl rand -hex 16)
   SKB=$(openssl rand -base64 64 | tr -d '\n')
-  ADMTOK=$(openssl rand -hex 32)
   cat > "$ENV_FILE" <<EOF
 DB_PASSWORD=$DBPASS
 SECRET_KEY_BASE=$SKB
-ADMIN_TOKEN=$ADMTOK
 PHX_HOST=app.bunkhosting.nl
 PUBLIC_URL=https://app.bunkhosting.nl
 PORT=4000
@@ -149,7 +147,6 @@ migratie_uitvoer=$(mktemp)
 if docker run --rm --network "$NET" \
   -e DATABASE_URL="$DATABASE_URL" \
   -e SECRET_KEY_BASE="$SECRET_KEY_BASE" \
-  -e ADMIN_TOKEN="$ADMIN_TOKEN" \
   -e PHX_HOST="$PHX_HOST" -e PUBLIC_URL="$PUBLIC_URL" -e PORT=4000 \
   -e SMTP_HOST -e SMTP_PORT -e SMTP_USERNAME -e SMTP_PASSWORD \
   -e MAIL_FROM_ADDRESS -e MAIL_FROM_NAME -e OPS_EMAIL \
@@ -236,7 +233,6 @@ docker run -d --name "$NIEUW_CP" --network "$NET" --network-alias "$CP_ALIAS" \
   -e BUNK_BUILD_VERSION="$BUNK_BUILD_VERSION" \
   -e DATABASE_URL="$DATABASE_URL" \
   -e SECRET_KEY_BASE="$SECRET_KEY_BASE" \
-  -e ADMIN_TOKEN="$ADMIN_TOKEN" \
   -e PHX_HOST="$PHX_HOST" \
   -e PUBLIC_URL="$PUBLIC_URL" \
   -e PORT=4000 \

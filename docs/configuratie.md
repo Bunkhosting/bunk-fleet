@@ -26,7 +26,6 @@ anders vermeld.
 | `ECTO_IPV6` | nee | — | `true` om Postgres over IPv6 te bereiken |
 | `DNS_CLUSTER_QUERY` | nee | — | Ongebruikt: er draait één control plane |
 | `BUNK_BUILD_VERSION` | nee | — | Build-stempel; de update-golf leest hieraan af welke agents bij zijn |
-| `ADMIN_TOKEN` | nee | — | Gedeeld geheim voor `/admin/v1`. Leeg = die API staat uit. Elke handeling komt in `beheer_audit` |
 | `CONSOLE_SSH_PRIVATE_KEY` | ja | — | Base64 van de sleutel waarmee het control plane op VPS'en inlogt (webterminal) |
 | `CONSOLE_SSH_PUBLIC_KEY` | ja | — | Base64 van de bijbehorende publieke sleutel; gaat via cloud-init naar elke VPS |
 | `CONSOLE_SSH_USER` | nee | `root` | Gebruiker voor de webterminal |

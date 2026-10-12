@@ -328,7 +328,7 @@ So: do not build it. But four things are cheap now and are a rebuild later:
 
 ### 3.7 Secrets and restore
 
-`.env.prod` holds `ADMIN_TOKEN`, `SECRET_KEY_BASE` and the `CONSOLE_SSH` keypair.
+`.env.prod` holds `SECRET_KEY_BASE` and the `CONSOLE_SSH` keypair.
 Lose it and a database restore is not enough: without the console key there is no
 way back into existing customer VPSes.
 

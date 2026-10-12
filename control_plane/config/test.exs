@@ -30,9 +30,6 @@ config :logger, level: :warning
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 
-# Fixed admin token for the operator/admin API in tests.
-config :control_plane, admin_token: "test-admin-token"
-
 # Fixed, known billing rates (money per resource-hour) so payout math is
 # deterministic in tests. Units are abstract — see `ControlPlane.Billing`.
 # Rates are given as strings (config is evaluated before deps like Decimal are

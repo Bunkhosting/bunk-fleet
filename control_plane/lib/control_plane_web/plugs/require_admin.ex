@@ -5,8 +5,8 @@ defmodule ControlPlaneWeb.Plugs.RequireAdmin do
   must run first) whose role is exactly `:admin`.
 
   Anything less — `:user` or a missing `current_user` — is halted
-  with `403 {"error": "forbidden"}`. This gates `/api/v1/admin/*` off the caller's
-  own session token (unlike `/admin/v1/*`, which uses a shared secret).
+  with `403 {"error": "forbidden"}`. This gates `/api/v1/beheer/*` and `/admin/v1/*`
+  off the caller's own session token.
   """
   import Plug.Conn
   import Phoenix.Controller, only: [json: 2]

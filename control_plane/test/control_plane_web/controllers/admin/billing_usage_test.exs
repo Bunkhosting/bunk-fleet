@@ -17,7 +17,6 @@ defmodule ControlPlaneWeb.Admin.BillingUsageTest do
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Repo
 
-  @admin_token "test-admin-token"
   @path "/admin/v1/billing/usage"
 
   setup do
@@ -62,7 +61,8 @@ defmodule ControlPlaneWeb.Admin.BillingUsageTest do
     |> Repo.insert!()
   end
 
-  defp admin(conn), do: put_req_header(conn, "authorization", "Bearer " <> @admin_token)
+  # Een beheerderssessie, geen gedeeld geheim meer: zie `ConnCase.als_beheerder/1`.
+  defp admin(conn), do: conn |> als_beheerder() |> elem(0)
 
   defp usage(conn, from, to) do
     conn
@@ -157,7 +157,7 @@ defmodule ControlPlaneWeb.Admin.BillingUsageTest do
     assert resp["error"] == "invalid_datetime"
   end
 
-  test "the endpoint is behind the admin token", %{conn: conn} do
+  test "the endpoint is behind an admin session", %{conn: conn} do
     params = %{"from" => "2026-06-01T00:00:00Z", "to" => "2026-06-02T00:00:00Z"}
 
     assert %{status: 401} = get(conn, @path, params)

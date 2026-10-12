@@ -44,4 +44,36 @@ defmodule ControlPlaneWeb.ConnCase do
     LoginThrottle.reset()
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Zet de sessie van `user` als bearer op `conn`, met een sessie die haar tweede
+  factor heeft laten zien.
+
+  Met `mfa: true`, want het beheerpaneel en /admin/v1 eisen dat
+  (`Plugs.RequireAdminMfa`). Een gewone gebruiker merkt er niets van.
+  """
+  def met_sessie(conn, %ControlPlane.Accounts.User{} = user) do
+    token =
+      user
+      |> ControlPlane.Accounts.generate_user_session_token(mfa: true)
+      |> Base.url_encode64(padding: false)
+
+    Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> token)
+  end
+
+  @doc """
+  Een bevestigde beheerder met een tweede factor, en `conn` met diens sessie.
+
+  Vervangt het gedeelde geheim dat de /admin/v1-tests vroeger meestuurden: wat
+  daar nu door mag, is een persoon.
+  """
+  def als_beheerder(conn) do
+    beheerder =
+      ControlPlane.Fixtures.confirmed_user_fixture()
+      |> Ecto.Changeset.change(%{role: :admin})
+      |> ControlPlane.Repo.update!()
+      |> ControlPlane.Fixtures.with_second_factor()
+
+    {met_sessie(conn, beheerder), beheerder}
+  end
 end

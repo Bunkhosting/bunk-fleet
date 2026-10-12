@@ -3,7 +3,7 @@ defmodule ControlPlaneWeb.Admin.CreditController do
   Admin credit management — manual wallet top-ups and adjustments. This is the
   operational stand-in for a payment provider until Mollie lands: a customer pays
   by bank/iDEAL, the admin credits their wallet here. Protected by the
-  shared-secret admin token (`AdminAuth`).
+  `:admin_session_api` pipeline: an admin's own session, with a second factor.
   """
   use ControlPlaneWeb, :controller
 

@@ -5,9 +5,8 @@ defmodule ControlPlaneWeb.Admin.CreditControllerTest do
 
   alias ControlPlane.Credits
 
-  @admin_token "test-admin-token"
-
-  defp auth(conn), do: put_req_header(conn, "authorization", "Bearer " <> @admin_token)
+  # Een beheerderssessie, geen gedeeld geheim meer: zie `ConnCase.als_beheerder/1`.
+  defp auth(conn), do: conn |> als_beheerder() |> elem(0)
 
   # The wallets below start at the signup bonus, which is granted on email
   # confirmation rather than at registration — hence confirmed_user_fixture/1,
@@ -67,7 +66,7 @@ defmodule ControlPlaneWeb.Admin.CreditControllerTest do
     assert json_response(conn, 422)
   end
 
-  test "requires the admin token", %{conn: conn} do
+  test "requires an admin session", %{conn: conn} do
     confirmed_user_fixture("noauth@bunk.test")
     conn = post(conn, ~p"/admin/v1/credits", %{email: "noauth@bunk.test", amount_cents: 100})
     assert conn.status in [401, 403]

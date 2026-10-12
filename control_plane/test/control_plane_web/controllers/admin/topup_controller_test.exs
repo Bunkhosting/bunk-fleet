@@ -4,8 +4,8 @@ defmodule ControlPlaneWeb.Admin.TopupControllerTest do
   alias ControlPlane.Accounts
   alias ControlPlane.Credits
 
-  @admin_token "test-admin-token"
-  defp auth(conn), do: put_req_header(conn, "authorization", "Bearer " <> @admin_token)
+  # Een beheerderssessie, geen gedeeld geheim meer: zie `ConnCase.als_beheerder/1`.
+  defp auth(conn), do: conn |> als_beheerder() |> elem(0)
 
   defp user(email) do
     {:ok, u} = Accounts.register_user(%{email: email, password: "test-only-password-4f2b9c1e"})
@@ -42,7 +42,7 @@ defmodule ControlPlaneWeb.Admin.TopupControllerTest do
            |> json_response(404)
   end
 
-  test "requires admin token", %{conn: conn} do
+  test "requires an admin session", %{conn: conn} do
     u = user("at3@bunk.test")
     {:ok, r} = Credits.create_topup_request(u.id, 1000)
     conn = post(conn, ~p"/admin/v1/topups/#{r.id}/confirm")
