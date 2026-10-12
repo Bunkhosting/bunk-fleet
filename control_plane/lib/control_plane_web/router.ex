@@ -325,29 +325,29 @@ defmodule ControlPlaneWeb.Router do
     get "/stats", PanelController, :stats
     get "/metrics", PanelController, :metrics
     get "/omzet", PanelController, :revenue
-    get "/users", PanelController, :users
-    get "/users/:id", PanelController, :user_detail
+    get "/users", PanelUsersController, :users
+    get "/users/:id", PanelUsersController, :user_detail
     get "/subscriptions", PanelController, :subscriptions
     get "/commands", PanelController, :commands
-    patch "/users/:id", PanelController, :update_user
-    post "/users/:id/credit", PanelController, :credit_user
-    delete "/users/:id", PanelController, :delete_user
-    get "/vpses", PanelController, :vpses
-    post "/vpses/:id/start", PanelController, :vps_start
-    post "/vpses/:id/stop", PanelController, :vps_stop
-    delete "/vpses/:id", PanelController, :vps_delete
-    get "/regions", PanelController, :regions
-    post "/regions", PanelController, :create_region
-    patch "/regions/:id", PanelController, :update_region
-    delete "/regions/:id", PanelController, :delete_region
-    get "/nodes", PanelController, :nodes
+    patch "/users/:id", PanelUsersController, :update_user
+    post "/users/:id/credit", PanelUsersController, :credit_user
+    delete "/users/:id", PanelUsersController, :delete_user
+    get "/vpses", PanelVpsController, :vpses
+    post "/vpses/:id/start", PanelVpsController, :vps_start
+    post "/vpses/:id/stop", PanelVpsController, :vps_stop
+    delete "/vpses/:id", PanelVpsController, :vps_delete
+    get "/regions", PanelFleetController, :regions
+    post "/regions", PanelFleetController, :create_region
+    patch "/regions/:id", PanelFleetController, :update_region
+    delete "/regions/:id", PanelFleetController, :delete_region
+    get "/nodes", PanelFleetController, :nodes
     # Een node toevoegen hoort hier en niet alleen onder /admin/v1: dat pad wordt
     # door Cloudflare's WAF geblokkeerd voor het de origin bereikt, waardoor het
     # vanuit de browser onbereikbaar is. Zie de opmerking boven deze scope.
-    post "/enroll-tokens", PanelController, :create_enroll_token
-    post "/nodes/:id/drain", PanelController, :drain_node
-    post "/nodes/:id/resume", PanelController, :resume_node
-    delete "/nodes/:id", PanelController, :delete_node
+    post "/enroll-tokens", PanelFleetController, :create_enroll_token
+    post "/nodes/:id/drain", PanelFleetController, :drain_node
+    post "/nodes/:id/resume", PanelFleetController, :resume_node
+    delete "/nodes/:id", PanelFleetController, :delete_node
   end
 
   # Browser console WebSocket. No router pipeline (a WS upgrade isn't JSON); the
