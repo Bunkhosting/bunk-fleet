@@ -13,13 +13,13 @@ name: E2E tegen productie
 # betaling, geen mutatie. Er gaat geen wachtwoord mee, dus de ingelogde tests
 # slaan zichzelf over -- die vragen een testaccount, en een geheim in deze
 # publieke repo-instellingen is een beslissing die niet in een workflow hoort.
+#
+# Voorlopig alleen met de hand. De eerste run liet zien dat Cloudflare de
+# adressen van GitHub-runners weigert (403 op /healthz in 50 ms, terwijl het
+# van elders 200 is). Een workflow die elke dag rood is om een reden buiten de
+# dienst leert iedereen de mail te negeren. De triggers na een uitrol en elke
+# ochtend gaan terug aan zodra de runner binnen mag.
 on:
-  workflow_run:
-    workflows: [Deploy]
-    types: [completed]
-    branches: [main]
-  schedule:
-    - cron: "17 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -32,8 +32,6 @@ concurrency:
 jobs:
   e2e:
     name: Playwright (read-only, productie)
-    # Een mislukte uitrol heeft niets nieuws neergezet om te testen.
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # Dezelfde versie als @playwright/test in e2e/package.json; de browsers in
@@ -49,6 +47,19 @@ jobs:
       HOME: /root
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # Eerst kijken of deze runner er überhaupt in mag. Zonder dit stond de
+      # suite twintig minuten te wachten op een dienst die gewoon draaide.
+      - name: Mag deze runner erin?
+        # Met node en niet met curl: node zit gegarandeerd in dit image.
+        run: |
+          node -e '
+            fetch("https://app.bunkhosting.nl/healthz").then((r) => {
+              if (r.status === 200) return;
+              console.log(`::error::/healthz gaf ${r.status} vanaf deze runner. ` +
+                "Waarschijnlijk weigert Cloudflare het adres; de dienst zelf is niet gemeten.");
+              process.exit(1);
+            }, (e) => { console.log(`::error::/healthz onbereikbaar: ${e}`); process.exit(1); });
+          '
       - run: npm ci
       - run: npx playwright test
       - name: Rapport bewaren

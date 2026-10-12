@@ -45,6 +45,15 @@ export async function wachtTotGezond(): Promise<number> {
     laatsteMeting = Date.now();
     laatsteWaarde = m;
     if (m.status === 200 && m.ms <= DREMPEL_MS) return Date.now() - begin;
+    // Een 4xx is geen trage dienst maar een weigering: bijna altijd Cloudflare
+    // die het adres van deze runner niet binnenlaat. Wachten helpt dan niet;
+    // de eerste run vanaf GitHub stond zo twintig minuten te pauzeren tot de
+    // time-out, met 45 seconden per test. Meteen stoppen met wat er aan de hand is.
+    if (m.status >= 400 && m.status < 500) {
+      throw new Error(
+        `/healthz gaf ${m.status}: de edge weigert dit adres, de dienst zelf is niet gemeten`,
+      );
+    }
 
     trageMomenten.push({ wanneer: new Date().toISOString(), ms: m.ms, status: m.status });
     console.warn(
