@@ -56,34 +56,34 @@ defmodule ControlPlane.Provisioning.Teardown do
     _ = Subscriptions.cancel_for_vps(vps_id)
 
     case Repo.get(Vps, vps_id) do
-      nil ->
-        {:error, :not_found}
-
-      %Vps{status: :deleted} ->
-        {:error, :already_deleting}
-
-      %Vps{status: :deleting} = vps ->
-        redispatch_delete(vps)
-
-      # A :failed VPS has no live VM and no held reservation (the reservation, if
-      # any, was already released when provisioning failed), so it can be cleaned
-      # up directly — no agent round-trip needed.
-      %Vps{status: :failed} = vps ->
-        mark_vps_deleted(vps)
-
-      # Not yet scheduled to a node — no VM and no held reservation, so it can be
-      # cleaned up directly. Lets a customer cancel a VPS still waiting for capacity.
-      %Vps{node_id: nil} = vps ->
-        mark_vps_deleted(vps)
-
-      # Scheduled (capacity reserved) but no live VM recorded yet.
-      %Vps{provider_vm_id: nil} = vps ->
-        teardown_unprovisioned(vps)
-
-      %Vps{} = vps ->
-        dispatch_delete(vps)
+      nil -> {:error, :not_found}
+      %Vps{} = vps -> afbreken(vps)
     end
   end
+
+  # Publiek maar ongedocumenteerd: een test moet dit pad met een verouderde
+  # struct kunnen aanroepen, want precies dat is de race met een uitrol die
+  # tussen het lezen en het afbreken slaagt. Zie cancel_and_release/1.
+  @doc false
+  @spec afbreken(Vps.t()) ::
+          {:ok, Provisioning.dispatch() | map()} | {:error, Provisioning.refusal()}
+  def afbreken(%Vps{status: :deleted}), do: {:error, :already_deleting}
+
+  def afbreken(%Vps{status: :deleting} = vps), do: redispatch_delete(vps)
+
+  # A :failed VPS has no live VM and no held reservation (the reservation, if
+  # any, was already released when provisioning failed), so it can be cleaned
+  # up directly — no agent round-trip needed.
+  def afbreken(%Vps{status: :failed} = vps), do: mark_vps_deleted(vps)
+
+  # Not yet scheduled to a node — no VM and no held reservation, so it can be
+  # cleaned up directly. Lets a customer cancel a VPS still waiting for capacity.
+  def afbreken(%Vps{node_id: nil} = vps), do: mark_vps_deleted(vps)
+
+  # Scheduled (capacity reserved) but no live VM recorded yet.
+  def afbreken(%Vps{provider_vm_id: nil} = vps), do: teardown_unprovisioned(vps)
+
+  def afbreken(%Vps{} = vps), do: dispatch_delete(vps)
 
   # Al :deleting zonder VM: de afbraak is uitgesteld en wacht op het resultaat
   # van de uitrol. Een tweede verzoek mag daar niets aan toevoegen. Vroeger viel
@@ -171,8 +171,17 @@ defmodule ControlPlane.Provisioning.Teardown do
     |> Multi.run(:lock_commands, fn repo, _changes ->
       {:ok, repo.all(from c in lopende_uitrollen(vps.id), order_by: c.id, lock: "FOR UPDATE")}
     end)
+    # De beslissing om af te sluiten viel op een struct die vóór de sloten
+    # gelezen is. Een uitrol die daartussen slaagde, heeft de VPS op :active
+    # gezet met een VM erop; die hier op :deleted zetten liet een draaiende VM
+    # zonder administratie achter. Dus: onder slot opnieuw lezen, en is er
+    # intussen iets veranderd, dan niet afsluiten maar opnieuw kiezen.
     |> Multi.run(:vps, fn repo, _changes ->
-      repo.get!(Vps, vps.id) |> Vps.changeset(%{status: :deleted}) |> repo.update()
+      vers = repo.one!(from v in Vps, where: v.id == ^vps.id, lock: "FOR UPDATE")
+
+      if inmiddels_veranderd?(vps, vers),
+        do: {:error, {:inmiddels_veranderd, vers}},
+        else: vers |> Vps.changeset(%{status: :deleted}) |> repo.update()
     end)
     |> Multi.run(:reservation, fn repo, _changes ->
       Reservations.release(repo, Reservations.held(repo, vps.id))
@@ -187,10 +196,24 @@ defmodule ControlPlane.Provisioning.Teardown do
         Events.broadcast_changed(:vps)
         {:ok, %{vps: vps, command: nil}}
 
+      # De transactie is teruggedraaid; er is niets vrijgegeven of afgesloten.
+      # Kies de weg opnieuw op de verse toestand. Een VPS met een VM komt zo bij
+      # dispatch_delete/1 uit, of bij de delete die er al voor klaarstaat -- de
+      # gewone afbraak met vm_id, nooit een stille :deleted. Dit herhaalt zich
+      # alleen als de toestand opnieuw verandert, en statussen lopen maar één
+      # kant op, dus het eindigt.
+      {:error, :vps, {:inmiddels_veranderd, vers}, _changes} ->
+        afbreken(vers)
+
       {:error, _step, reason, _changes} ->
         {:error, reason}
     end
   end
+
+  # Geleverd (er staat een VM op) of door iets anders verplaatst sinds de
+  # aanroeper keek. In beide gevallen klopt de reden om af te sluiten niet meer.
+  defp inmiddels_veranderd?(%Vps{} = oud, %Vps{} = vers),
+    do: not is_nil(vers.provider_vm_id) or vers.status != oud.status
 
   # De uitrolcommando's van deze VPS die nog niet zijn afgesloten.
   defp lopende_uitrollen(vps_id) do
