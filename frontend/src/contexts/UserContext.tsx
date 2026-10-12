@@ -34,7 +34,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       // A 401 is handled by the axios interceptor (client state reset + hard redirect
       // to /login). Navigating to /login here on OTHER failures would ping-pong
-      // against the middleware forever (the presence cookie still says "logged
+      // against the proxy forever (the presence cookie still says "logged
       // in", so /login bounces straight back to /dashboard). Surface a retryable
       // error state instead.
       if (!(axios.isAxiosError(err) && err.response?.status === 401)) {

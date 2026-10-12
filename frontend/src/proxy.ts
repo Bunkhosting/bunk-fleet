@@ -59,11 +59,17 @@ function contentSecurityPolicy(nonce: string): string {
 }
 
 // Auth is an HttpOnly `bunk_session` cookie set by the control plane. This
-// middleware only checks its PRESENCE for UX redirects (avoiding a flash of
+// proxy only checks its PRESENCE for UX redirects (avoiding a flash of
 // protected UI); the real authorization boundary is the API, which validates the
-// session on every request. Middleware runs server-side, so it can read the
+// session on every request. The proxy runs server-side, so it can read the
 // HttpOnly cookie even though client JS cannot.
-export function middleware(request: NextRequest) {
+//
+// Dit heette tot Next 16 `middleware` (src/middleware.ts). Next 16 hernoemde de
+// conventie naar `proxy` en draait hem altijd op de Node.js-runtime, niet meer
+// op edge; een `runtime`-export is hier verboden en laat de build falen. Niets
+// hieronder hangt van de runtime af: `crypto.randomUUID`, `Headers` en
+// `NextResponse` zijn in Node 22 dezelfde Web-API's.
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isLoggedIn = Boolean(request.cookies.get("bunk_session")?.value);
 

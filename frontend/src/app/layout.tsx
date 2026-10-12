@@ -27,7 +27,7 @@ const manrope = localFont({
   variable: "--font-manrope",
 });
 
-// Every page renders per request. The CSP nonce is minted in middleware, so a
+// Every page renders per request. The CSP nonce is minted in the proxy, so a
 // page prerendered at build time would ship a nonce that no live response
 // carries — its scripts would be blocked and the page would come up blank. This
 // app is a dashboard behind a session cookie; there was nothing to cache anyway.

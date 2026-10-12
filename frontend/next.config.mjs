@@ -17,7 +17,7 @@ const WS_URL  = (process.env.NEXT_PUBLIC_WS_URL  || "wss://app.bunkhosting.nl").
 const CSP_REPORT_URI = `${API_URL}/api/v1/security/csp-report`;
 
 // The Content-Security-Policy is NOT here: it carries a per-request nonce and
-// therefore lives in src/middleware.ts. A policy shipped from this file would be
+// therefore lives in src/proxy.ts. A policy shipped from this file would be
 // static, and a static policy has to allow 'unsafe-inline' for Next's hydration
 // bootstrap — which is exactly the thing worth getting rid of.
 //
@@ -43,13 +43,10 @@ const securityHeaders = [
 const nextConfig = {
   typescript: { ignoreBuildErrors: false },
 
-  // Lint niet tijdens de build. De CI draait `eslint --max-warnings 0` als eigen
-  // stap en die moet groen zijn voordat er iets wordt uitgerold, dus de controle
-  // is er wel degelijk. Hem hier ook aanzetten zou betekenen dat een stijlfout
-  // een UITROL laat klappen op een moment dat de code al door de CI is gekomen.
-  // Wat je ervoor terugkrijgt: een lokale `npm run build` is groen terwijl lint
-  // rood staat. Dat is het waard, maar weet het.
-  eslint: { ignoreDuringBuilds: true },
+  // Geen `eslint`-sleutel meer. Die stond op `ignoreDuringBuilds: true`, maar
+  // Next 16 lint sowieso niet meer tijdens `next build` en weigert de sleutel.
+  // Lint is alleen nog de eigen CI-stap `npx eslint . --max-warnings 0`. Een
+  // lokale `npm run build` is dus groen terwijl lint rood kan staan; weet het.
 
   // ALLEEN voor `next dev`. In productie staat nginx ervoor en die pakt
   // `/api/v1/` af voordat Next het ooit ziet (zie edge.conf), dus deze regel

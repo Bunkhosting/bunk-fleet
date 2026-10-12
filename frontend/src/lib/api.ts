@@ -29,7 +29,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 // live session. Requests must be same-origin (the default: an empty API_URL routes
 // through the Next `/api/v1` rewrite) for the browser to send the cookie;
 // `withCredentials` below also covers a same-site cross-origin API host. The
-// middleware gates /dashboard by reading the same cookie server-side.
+// proxy (src/proxy.ts) gates /dashboard by reading the same cookie server-side.
 function resetClientState(): void {
   // Drop cached catalog so a different user/session in the same tab refetches.
   packageCache = [];
