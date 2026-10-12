@@ -12,16 +12,14 @@ defmodule ControlPlane.Accounts do
   require Logger
 
   alias ControlPlane.Accounts.BreachedPasswords
+  alias ControlPlane.Accounts.Deletion
   alias ControlPlane.Accounts.LoginThrottle
-  alias ControlPlane.Accounts.Passkey
-  alias ControlPlane.Accounts.PasskeyChallenges
+  alias ControlPlane.Accounts.Passkeys
+  alias ControlPlane.Accounts.Totp
   alias ControlPlane.Accounts.User
   alias ControlPlane.Accounts.UserToken
   alias ControlPlane.Clock
   alias ControlPlane.Credits
-  alias ControlPlane.Credits.LedgerEntry
-  alias ControlPlane.Credits.TopupRequest
-  alias ControlPlane.Fleet.Vps
   alias ControlPlane.Metrics
   alias ControlPlane.Notifier
   alias ControlPlane.RateLimiter
@@ -40,96 +38,26 @@ defmodule ControlPlane.Accounts do
 
   ## TOTP multi-factor authentication
 
-  @doc "True once the user has set up AND confirmed a TOTP authenticator."
-  def totp_active?(%User{totp_confirmed_at: nil}), do: false
-  def totp_active?(%User{totp_secret: secret}) when is_binary(secret), do: true
-  def totp_active?(_), do: false
+  @doc "Zie `ControlPlane.Accounts.Totp.totp_active?/1`."
+  defdelegate totp_active?(user), to: Totp
 
-  @doc "Generates a fresh (unconfirmed) TOTP secret for the user and persists it."
-  # Refuse to reset a VPS owner who has ALREADY confirmed 2FA: overwriting the
-  # secret here would silently disable their working authenticator. Combined with
-  # cookie auth + SameSite=Lax (which still attaches the cookie on a top-level GET
-  # navigation), an attacker could otherwise CSRF a victim into losing 2FA. To
-  # re-enrol they must first disable it, which requires a valid current code.
-  def start_totp_setup(%User{totp_confirmed_at: confirmed}) when not is_nil(confirmed),
-    do: {:error, :already_enabled}
+  @doc "Zie `ControlPlane.Accounts.Totp.start_totp_setup/1`."
+  defdelegate start_totp_setup(user), to: Totp
 
-  def start_totp_setup(%User{} = user) do
-    {:ok, user} =
-      user
-      |> Ecto.Changeset.change(totp_secret: NimbleTOTP.secret(), totp_confirmed_at: nil)
-      |> Repo.update()
+  @doc "Zie `ControlPlane.Accounts.Totp.confirm_totp/2`."
+  defdelegate confirm_totp(user, code), to: Totp
 
-    user
-  end
+  @doc "Zie `ControlPlane.Accounts.Totp.disable_totp/1`."
+  defdelegate disable_totp(user), to: Totp
 
-  @doc "Confirms TOTP setup by verifying a code against the pending secret."
-  def confirm_totp(%User{totp_secret: secret} = user, code) when is_binary(secret) do
-    if valid_totp_code?(secret, code) do
-      user
-      |> Ecto.Changeset.change(totp_confirmed_at: Clock.now())
-      |> Repo.update()
-    else
-      {:error, :invalid_code}
-    end
-  end
+  @doc "Zie `ControlPlane.Accounts.Totp.valid_totp?/2`."
+  defdelegate valid_totp?(user, code), to: Totp
 
-  def confirm_totp(_user, _code), do: {:error, :invalid_code}
+  @doc "Zie `ControlPlane.Accounts.Totp.totp_uri/1`."
+  defdelegate totp_uri(user), to: Totp
 
-  @doc "Disables TOTP (also cancels an unconfirmed setup), clearing the secret."
-  def disable_totp(%User{} = user) do
-    user
-    |> Ecto.Changeset.change(totp_secret: nil, totp_confirmed_at: nil)
-    |> Repo.update()
-  end
-
-  @doc """
-  Validates a login TOTP code for an MFA-active user, single-use per time-step:
-  on success the accepted step is recorded (`since:`) so the same 6-digit code
-  can't be replayed within its ~30s window (a stolen-then-reused code is dead).
-  """
-  def valid_totp?(%User{totp_secret: secret} = user, code) when is_binary(secret) do
-    trimmed = String.trim(to_string(code))
-
-    now = Clock.now()
-
-    if byte_size(trimmed) == 6 and
-         NimbleTOTP.valid?(secret, trimmed, since: user.totp_last_used_at) do
-      # Atomically claim this time-step so a valid code cannot be replayed, even
-      # under concurrent requests: only the write that advances the watermark
-      # wins (1 row affected). Previously the update result was discarded
-      # fire-and-forget, so a failed/lost write (or a race) left no watermark and
-      # the same 6-digit code could be reused within its ~30s window.
-      {count, _} =
-        from(u in User,
-          where:
-            u.id == ^user.id and
-              (is_nil(u.totp_last_used_at) or u.totp_last_used_at < ^now)
-        )
-        |> Repo.update_all(set: [totp_last_used_at: now])
-
-      count == 1
-    else
-      false
-    end
-  end
-
-  def valid_totp?(_user, _code), do: false
-
-  @doc "The otpauth:// URI to encode into a QR code for authenticator apps."
-  def totp_uri(%User{email: email, totp_secret: secret}) when is_binary(secret),
-    do: NimbleTOTP.otpauth_uri("Bunk:" <> email, secret, issuer: "Bunk")
-
-  @doc "The base32 secret for manual entry into an authenticator app."
-  def totp_secret_base32(%User{totp_secret: secret}) when is_binary(secret),
-    do: Base.encode32(secret, padding: false)
-
-  defp valid_totp_code?(secret, code) when is_binary(code) do
-    trimmed = String.trim(code)
-    byte_size(trimmed) == 6 and NimbleTOTP.valid?(secret, trimmed)
-  end
-
-  defp valid_totp_code?(_secret, _code), do: false
+  @doc "Zie `ControlPlane.Accounts.Totp.totp_secret_base32/1`."
+  defdelegate totp_secret_base32(user), to: Totp
 
   @doc """
   Registers a new user from `attrs` (`email`, `password`, optionally `name`/`role`).
@@ -394,7 +322,11 @@ defmodule ControlPlane.Accounts do
   # wachtwoord dat geraden wordt. Zonder dit is elke endpoint die hierom vraagt
   # de stille achterdeur om er ongelimiteerd op te gokken met een sessie die je
   # al hebt.
-  defp herbevestig_wachtwoord(%User{} = user, huidig) do
+  #
+  # Publiek omdat `ControlPlane.Accounts.Passkeys.delete_passkey/3` hem ook
+  # gebruikt; geen onderdeel van de API.
+  @doc false
+  def herbevestig_wachtwoord(%User{} = user, huidig) do
     cond do
       LoginThrottle.blocked?(user.email) ->
         {:error, :invalid_current_password}
@@ -519,112 +451,14 @@ defmodule ControlPlane.Accounts do
 
   def session_mfa?(_token), do: false
 
-  @doc """
-  Verwijdert een account, of anonimiseert het als er een administratie aan hangt.
+  @doc "Zie `ControlPlane.Accounts.Deletion.delete_or_anonymise_user/1`."
+  defdelegate delete_or_anonymise_user(user), to: Deletion
 
-  Drie uitkomsten, en het verschil is niet cosmetisch.
+  @doc "Zie `ControlPlane.Accounts.Deletion.has_live_vpses?/1`."
+  defdelegate has_live_vpses?(user), to: Deletion
 
-  `{:error, :has_vpses}` zolang er nog een levende VPS van deze gebruiker is.
-  De sleutelregel op `vpses.owner_id` is `nilify`, dus zonder deze weigering
-  blijft er een draaiende machine over zonder eigenaar: hij eet capaciteit,
-  niemand betaalt ervoor, en niemand kan er via het dashboard nog bij. Eerst
-  opruimen, dan pas het account.
-
-  `{:ok, :anonymised}` zodra er geld aan te pas is gekomen. De sleutelregels op
-  `topup_requests` en `ledger_entries` zijn `delete_all`, dus echt verwijderen
-  neemt de facturen en het grootboek mee -- precies de administratie waarop de
-  btw-aangifte rust en die zeven jaar bewaard moet blijven. De omzet over een
-  afgesloten kwartaal zou met terugwerkende kracht veranderen. In plaats daarvan
-  gaan de persoonsgegevens eruit en blijven de bedragen staan. Dat is wat de AVG
-  met het recht op vergetelheid bedoelt én wat de Belastingdienst wil.
-
-  `{:ok, :deleted}` als er nooit iets financieels is geweest. Dan valt er niets
-  te bewaren en is echt verwijderen het eerlijkste antwoord.
-  """
-  @spec delete_or_anonymise_user(User.t()) ::
-          {:ok, :deleted | :anonymised} | {:error, :has_vpses | Ecto.Changeset.t()}
-  def delete_or_anonymise_user(%User{} = user) do
-    cond do
-      has_live_vpses?(user) -> {:error, :has_vpses}
-      has_financial_history?(user) -> anonymise_user(user)
-      true -> hard_delete_user(user)
-    end
-  end
-
-  @doc "Of er nog een levende VPS van deze gebruiker is."
-  @spec has_live_vpses?(User.t()) :: boolean()
-  def has_live_vpses?(%User{id: id}) do
-    Repo.exists?(
-      from v in Vps,
-        where: v.owner_id == ^id and v.status not in [:deleted, :failed]
-    )
-  end
-
-  @doc "Of er iets aan deze gebruiker hangt dat bewaard moet blijven."
-  @spec has_financial_history?(User.t()) :: boolean()
-  def has_financial_history?(%User{id: id}) do
-    Repo.exists?(from t in TopupRequest, where: t.user_id == ^id) or
-      Repo.exists?(from l in LedgerEntry, where: l.user_id == ^id)
-  end
-
-  defp anonymise_user(%User{id: id} = user) do
-    # Het adres moet uniek blijven en herkenbaar als verwijderd. De id erin maakt
-    # hem uniek zonder dat er iets van de persoon in achterblijft.
-    vervangend = "verwijderd-#{String.replace(id, "-", "")}@verwijderd.invalid"
-
-    user
-    |> Ecto.Changeset.change(%{
-      email: vervangend,
-      name: nil,
-      # Een wachtwoordhash die nergens bij hoort: inloggen kan niet meer, en er
-      # blijft geen bruikbaar geheim staan.
-      hashed_password: Pbkdf2.hash_pwd_salt(Base.encode64(:crypto.strong_rand_bytes(32))),
-      totp_secret: nil,
-      totp_confirmed_at: nil,
-      confirmed_at: nil,
-      role: :user,
-      anonymised_at: DateTime.utc_now() |> DateTime.truncate(:second)
-    })
-    |> Repo.update()
-    |> case do
-      {:ok, _} ->
-        # Sessies en passkeys gaan mee: een geanonimiseerd account hoort nergens
-        # meer binnen te kunnen.
-        Repo.delete_all(from t in UserToken, where: t.user_id == ^id)
-        Repo.delete_all(from p in Passkey, where: p.user_id == ^id)
-
-        # En het adres dat buiten de users-tabel is blijven staan. `vpses`
-        # bewaart het als los label naast `owner_id`, en dat label overleefde
-        # het anonimiseren -- waarmee "verwijderd" in het beheerscherm stond
-        # terwijl het adres er in de VPS-lijst gewoon nog bij hing.
-        #
-        # Alleen `vpses`: `nodes`, `enroll_tokens` en `usage_records` dragen het
-        # adres van een node-EIGENAAR, en dat is een andere betrokkene met een
-        # eigen account. Die meenemen zou het adres van iemand anders wissen.
-        Repo.update_all(
-          from(v in Vps, where: v.owner_id == ^id),
-          set: [owner_email: vervangend]
-        )
-
-        {:ok, :anonymised}
-
-      {:error, changeset} ->
-        {:error, changeset}
-    end
-  end
-
-  defp hard_delete_user(%User{id: id} = user) do
-    # Eerst het losse label, dán de rij. Andersom is te laat: zodra de gebruiker
-    # weg is wordt `owner_id` op de VPS'en genilificeerd en is niet meer te
-    # bepalen welke rijen van hem waren -- het adres blijft dan staan op een VPS
-    # die niemand meer kan koppelen, wat slechter is dan waar we begonnen.
-    Repo.update_all(from(v in Vps, where: v.owner_id == ^id), set: [owner_email: nil])
-
-    case Repo.delete(user) do
-      {:ok, _} -> {:ok, :deleted}
-      {:error, changeset} -> {:error, changeset}
-    end
-  end
+  @doc "Zie `ControlPlane.Accounts.Deletion.has_financial_history?/1`."
+  defdelegate has_financial_history?(user), to: Deletion
 
   @doc """
   Of dit account meer dan een wachtwoord nodig heeft om binnen te komen.
@@ -636,22 +470,12 @@ defmodule ControlPlane.Accounts do
   @spec has_second_factor?(User.t()) :: boolean()
   def has_second_factor?(%User{totp_confirmed_at: %DateTime{}}), do: true
 
-  def has_second_factor?(%User{id: id}) do
-    Repo.exists?(from p in Passkey, where: p.user_id == ^id)
-  end
+  def has_second_factor?(%User{} = user), do: Passkeys.passkeys_active?(user)
 
   def has_second_factor?(_), do: false
 
-  @doc """
-  Of deze gebruiker hardware beheert.
-
-  Bewust een bestaanscheck en geen telling: het dashboard wil alleen weten of het
-  het nodescherm moet tonen, en `exists?` stopt bij de eerste rij.
-  """
-  @spec owns_nodes?(User.t()) :: boolean()
-  def owns_nodes?(%User{id: id}) do
-    Repo.exists?(from n in ControlPlane.Fleet.Node, where: n.owner_id == ^id)
-  end
+  @doc "Zie `ControlPlane.Accounts.Deletion.owns_nodes?/1`."
+  defdelegate owns_nodes?(user), to: Deletion
 
   @doc """
   Returns the user owning a valid, non-expired session `token`, or `nil`.
@@ -724,233 +548,26 @@ defmodule ControlPlane.Accounts do
     :ok
   end
 
-  # --- Passkeys (WebAuthn) ----------------------------------------------------
-  #
-  # Een passkey is een tweede factor naast, of in plaats van, TOTP. De
-  # cryptografie zit in wax; wat hier staat is de levenscyclus: challenge
-  # uitgeven, antwoord controleren, sleutel bewaren, en bij het inloggen de
-  # handtekening natrekken tegen de sleutels van precies dit account.
+  ## Passkeys (WebAuthn)
 
-  @passkey_timeout_seconds 300
+  @doc "Zie `ControlPlane.Accounts.Passkeys.passkeys_active?/1`."
+  defdelegate passkeys_active?(user), to: Passkeys
 
-  @doc "True zodra de gebruiker minstens één passkey heeft geregistreerd."
-  def passkeys_active?(%User{id: user_id}) do
-    Repo.exists?(from p in Passkey, where: p.user_id == ^user_id)
-  end
+  @doc "Zie `ControlPlane.Accounts.Passkeys.list_passkeys/1`."
+  defdelegate list_passkeys(user), to: Passkeys
 
-  @doc "De passkeys van een gebruiker, oudste eerst. Zonder de sleutel zelf."
-  def list_passkeys(%User{id: user_id}) do
-    Repo.all(from p in Passkey, where: p.user_id == ^user_id, order_by: [asc: p.inserted_at])
-  end
+  @doc "Zie `ControlPlane.Accounts.Passkeys.start_passkey_registration/1`."
+  defdelegate start_passkey_registration(user), to: Passkeys
 
-  @doc """
-  Geeft een registratie-challenge uit.
+  @doc "Zie `ControlPlane.Accounts.Passkeys.finish_passkey_registration/3`."
+  defdelegate finish_passkey_registration(user, challenge_id, attrs), to: Passkeys
 
-  Het antwoord is wat `navigator.credentials.create()` als `publicKey` verwacht,
-  plus een `challenge_id` waarmee de browser het resultaat terugbrengt. De
-  bestaande passkeys gaan mee als `excludeCredentials`, zodat een authenticator
-  die al geregistreerd is dat zelf weigert in plaats van een dubbele rij op te
-  leveren.
-  """
-  def start_passkey_registration(%User{} = user) do
-    challenge =
-      Wax.new_registration_challenge(
-        origin: passkey_origin(),
-        rp_id: :auto,
-        attestation: "none",
-        user_verification: "preferred",
-        timeout: @passkey_timeout_seconds
-      )
+  @doc "Zie `ControlPlane.Accounts.Passkeys.delete_passkey/3`."
+  defdelegate delete_passkey(user, passkey_id, huidig), to: Passkeys
 
-    id = PasskeyChallenges.put(challenge, %{user_id: user.id, purpose: :register})
+  @doc "Zie `ControlPlane.Accounts.Passkeys.start_passkey_login/1`."
+  defdelegate start_passkey_login(user), to: Passkeys
 
-    %{
-      challenge_id: id,
-      public_key: %{
-        challenge: Base.url_encode64(challenge.bytes, padding: false),
-        rp: %{name: "Bunk Hosting", id: challenge.rp_id},
-        user: %{
-          id: Base.url_encode64(user.id, padding: false),
-          name: user.email,
-          displayName: user.name || user.email
-        },
-        pubKeyCredParams: [%{type: "public-key", alg: -7}, %{type: "public-key", alg: -257}],
-        timeout: @passkey_timeout_seconds * 1000,
-        attestation: "none",
-        authenticatorSelection: %{residentKey: "preferred", userVerification: "preferred"},
-        excludeCredentials:
-          for p <- list_passkeys(user) do
-            %{type: "public-key", id: Base.url_encode64(p.credential_id, padding: false)}
-          end
-      }
-    }
-  end
-
-  @doc """
-  Rondt een registratie af met het antwoord van de authenticator.
-
-  `attestation_object` en `client_data_json` zijn de rauwe bytes uit de browser
-  (al base64url-gedecodeerd door de controller). De challenge is eenmalig: ook
-  bij een fout antwoord is hij daarna weg.
-  """
-  def finish_passkey_registration(%User{} = user, challenge_id, attrs) do
-    with {:ok, challenge, %{user_id: uid, purpose: :register}} <-
-           PasskeyChallenges.take(challenge_id),
-         true <- uid == user.id,
-         {:ok, {auth_data, _attestation}} <-
-           wax(fn -> Wax.register(attrs.attestation_object, attrs.client_data_json, challenge) end) do
-      cred = auth_data.attested_credential_data
-
-      %Passkey{}
-      |> Passkey.changeset(%{
-        user_id: user.id,
-        credential_id: cred.credential_id,
-        public_key: Passkey.encode_cose_key(cred.credential_public_key),
-        sign_count: auth_data.sign_count,
-        label: attrs.label
-      })
-      |> Repo.insert()
-    else
-      :error -> {:error, :challenge_expired}
-      false -> {:error, :challenge_expired}
-      # Een challenge die voor inloggen is uitgegeven. Zonder deze tak viel hij
-      # door alle andere heen en werd het een WithClauseError: een 500 op een
-      # verzoek dat iedere ingelogde gebruiker kan sturen.
-      {:ok, _challenge, _meta} -> {:error, :challenge_expired}
-      {:error, %Ecto.Changeset{} = cs} -> {:error, cs}
-      {:error, _wax} -> {:error, :invalid_passkey}
-    end
-  end
-
-  @doc """
-  Verwijdert een passkey, maar alleen als hij van deze gebruiker is en het
-  huidige wachtwoord klopt.
-
-  Een passkey kan de tweede factor van het account zijn. Met alleen een sessie
-  -- een meegelezen cookie, een onbeheerde laptop -- kon iemand hem weghalen en
-  daarmee de 2FA uitzetten, terwijl TOTP uitzetten wel een code vraagt. Het
-  wachtwoord en geen TOTP-code, want een account met alleen passkeys heeft geen
-  code; een wachtwoord heeft iedereen. Zelfde controle en zelfde slot als bij
-  wachtwoord wijzigen.
-
-  Eerst het wachtwoord, dan pas de opzoeking: zonder het juiste wachtwoord zegt
-  het antwoord ook niets over welke passkey-id's er bestaan.
-  """
-  def delete_passkey(%User{id: user_id} = user, passkey_id, huidig) when is_binary(huidig) do
-    with :ok <- herbevestig_wachtwoord(user, huidig),
-         %Passkey{} = p <- Repo.get_by(Passkey, id: passkey_id, user_id: user_id) do
-      Repo.delete(p)
-    else
-      nil -> {:error, :not_found}
-      {:error, :invalid_current_password} = fout -> fout
-    end
-  end
-
-  @doc """
-  Geeft een inlog-challenge uit voor een gebruiker die al met wachtwoord is
-  geverifieerd. Nil als hij geen passkeys heeft: dan is er niets aan te bieden.
-  """
-  def start_passkey_login(%User{} = user) do
-    case list_passkeys(user) do
-      [] ->
-        nil
-
-      keys ->
-        challenge =
-          Wax.new_authentication_challenge(
-            origin: passkey_origin(),
-            rp_id: :auto,
-            user_verification: "preferred",
-            timeout: @passkey_timeout_seconds
-          )
-
-        id = PasskeyChallenges.put(challenge, %{user_id: user.id, purpose: :login})
-
-        %{
-          challenge_id: id,
-          public_key: %{
-            challenge: Base.url_encode64(challenge.bytes, padding: false),
-            rpId: challenge.rp_id,
-            timeout: @passkey_timeout_seconds * 1000,
-            userVerification: "preferred",
-            allowCredentials:
-              for p <- keys do
-                %{type: "public-key", id: Base.url_encode64(p.credential_id, padding: false)}
-              end
-          }
-        }
-    end
-  end
-
-  @doc """
-  Controleert een assertie tegen de passkeys van deze gebruiker.
-
-  Slaagt alleen als de handtekening klopt voor een sleutel die bij dit account
-  hoort en de challenge nog geldig en ongebruikt was. Werkt de tekenteller bij;
-  een teller die terugloopt wijst op een gekloonde sleutel en wordt geweigerd.
-  """
-  def finish_passkey_login(%User{} = user, challenge_id, attrs) do
-    with {:ok, challenge, %{user_id: uid, purpose: :login}} <-
-           PasskeyChallenges.take(challenge_id),
-         true <- uid == user.id,
-         %Passkey{} = pk <-
-           Repo.get_by(Passkey, credential_id: attrs.credential_id, user_id: user.id),
-         {:ok, auth_data} <-
-           wax(fn ->
-             Wax.authenticate(
-               attrs.credential_id,
-               attrs.authenticator_data,
-               attrs.signature,
-               attrs.client_data_json,
-               challenge,
-               [{pk.credential_id, Passkey.cose_key(pk)}]
-             )
-           end),
-         :ok <- check_sign_count(pk, auth_data.sign_count) do
-      pk
-      |> Ecto.Changeset.change(sign_count: auth_data.sign_count, last_used_at: Clock.now())
-      |> Repo.update()
-    else
-      :error -> {:error, :challenge_expired}
-      false -> {:error, :challenge_expired}
-      # Een registratie-challenge die als inlog-challenge wordt aangeboden: zie
-      # finish_passkey_registration/3, zelfde gat, hier op het inlogpad.
-      {:ok, _challenge, _meta} -> {:error, :challenge_expired}
-      nil -> {:error, :invalid_passkey}
-      {:error, :cloned} -> {:error, :invalid_passkey}
-      {:error, _} -> {:error, :invalid_passkey}
-    end
-  end
-
-  # wax geeft {:error, _} terug op een verkeerde handtekening, maar raist op
-  # invoer die niet eens de vorm heeft van een WebAuthn-antwoord: verkeerde
-  # base64, ontbrekende JSON-sleutels, geen CBOR. Dat is precies wat een
-  # aanvaller of een kapotte client stuurt, en een inlog-endpoint mag daar niet
-  # op crashen. Alles wat uit wax ontsnapt wordt hier één ongeldige poging.
-  defp wax(fun) do
-    fun.()
-  rescue
-    _ -> {:error, :invalid_passkey}
-  end
-
-  # Een authenticator die tellers ondersteunt telt strikt op. Twee apparaten met
-  # dezelfde sleutel lopen uit de pas, en dat zie je hier: de teller die
-  # binnenkomt is niet hoger dan de laatste. Alleen als BEIDE nul zijn is er geen
-  # teller en valt er niets te vergelijken (WebAuthn §7.2, stap 21).
-  #
-  # Eerst moest de binnenkomende teller ook boven nul zijn. Dan kwam een kloon
-  # die 0 meestuurde er altijd door, en omdat die 0 daarna werd opgeslagen stond
-  # de controle voor die sleutel voorgoed uit.
-  defp check_sign_count(%Passkey{sign_count: stored}, incoming)
-       when (incoming > 0 or stored > 0) and incoming <= stored,
-       do: {:error, :cloned}
-
-  defp check_sign_count(_pk, _incoming), do: :ok
-
-  # De origin is de exacte URL die de browser ziet. Zonder die gelijkheid
-  # weigert wax terecht: een passkey voor app.bunkhosting.nl mag niet op een
-  # ander domein werken.
-  defp passkey_origin do
-    Application.get_env(:control_plane, :public_url) || "http://localhost:4000"
-  end
+  @doc "Zie `ControlPlane.Accounts.Passkeys.finish_passkey_login/3`."
+  defdelegate finish_passkey_login(user, challenge_id, attrs), to: Passkeys
 end
