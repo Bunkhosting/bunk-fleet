@@ -39,6 +39,11 @@ defmodule ControlPlaneWeb.Admin.VpsController do
         |> put_status(:conflict)
         |> json(%{error: "no_capacity"})
 
+      # Verwijderd of van toestand veranderd terwijl hij werd geplaatst: geen
+      # ongeldige invoer, maar een conflict. Zelfde vertaling als de klant-API.
+      {:error, reden} when reden in [:already_deleting, :vps_state_changed] ->
+        ControlPlaneWeb.Fouten.fout(conn, reden)
+
       {:error, _reason} ->
         conn
         |> put_status(:unprocessable_entity)

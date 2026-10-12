@@ -24,9 +24,15 @@ defmodule ControlPlane.Provisioning do
   eerst de VPS en dan de uitrolcommando's, en vergrendelt die commando's nu
   vooraf. Wie hier een nieuwe transactie toevoegt die beide raakt: neem eerst de
   commando's, op volgorde van id, en dan de VPS.
+
+  Het uitsturen van een bestelling vergrendelt alleen de VPS en voegt daarna
+  het uitrolcommando in. Dat is geen omgekeerde volgorde: een `:queued` VPS
+  heeft nog geen commando's, en het nieuwe is tot de commit voor niemand
+  zichtbaar.
   """
   import Ecto.Query, warn: false
 
+  alias ControlPlane.Clock
   alias ControlPlane.Console.Keys
   alias ControlPlane.Credits
 
@@ -87,6 +93,9 @@ defmodule ControlPlane.Provisioning do
 
   Returns `{:ok, %{vps: vps, command: command}}` on success. If no node can fit the
   request the VPS is marked `:failed` and `{:error, :no_capacity}` is returned.
+  Is de VPS verwijderd voordat hij kon worden uitgestuurd, dan blijft hij
+  `:deleted`, gaat er geen uitrol uit, komt de reservering vrij en is het
+  antwoord `{:error, :already_deleting}`.
 
   Recognised keys: `:region_id`, `:name`, `:vcpu`, `:ram_mb`, `:disk_gb`,
   `:owner_email`, `:template_id`, `:ssh_keys` (default `[]`), `:cloud_init`
@@ -259,50 +268,19 @@ defmodule ControlPlane.Provisioning do
     end
   end
 
+  # Publiek maar ongedocumenteerd: een test moet dit pad kunnen aanroepen met een
+  # struct die verouderd is, want precies dat is de race met een klant die de
+  # VPS verwijdert terwijl hij nog `:queued` is.
+  @doc false
+  @spec plaats_en_verstuur(Vps.t(), map()) ::
+          {:ok, dispatch()} | {:error, refusal() | Ecto.Changeset.t()}
+  def plaats_en_verstuur(%Vps{} = vps, attrs),
+    do: place_and_dispatch(vps, placement_request(attrs), attrs)
+
   defp place_and_dispatch(%Vps{} = vps, req, attrs) do
     case Scheduler.place(req, vps_id: vps.id) do
       {:ok, %{node: node}} ->
-        # IP allocation, the VPS update and the command insert run in ONE
-        # transaction. Allocation takes a per-node advisory lock and the
-        # `vpses_active_node_ip_uidx` unique index is the DB backstop, so two
-        # concurrent creates on the same node can never share an address.
-        multi =
-          Multi.new()
-          |> Multi.run(:allocation, fn repo, _changes -> allocate_ip(repo, attrs, node) end)
-          |> Multi.run(:vps, fn repo, %{allocation: {_attrs, ip}} ->
-            vps
-            |> Vps.changeset(%{node_id: node.id, status: :provisioning, ip_address: ip})
-            |> repo.update()
-          end)
-          # A customer needs somewhere to connect. The node's own address plus an
-          # allocated port is it — in the same transaction as the IP, so a VPS
-          # never exists having been promised an endpoint it did not get.
-          |> Multi.run(:ssh_forward, fn repo, %{vps: vps} ->
-            allocate_ssh_forward(repo, node, vps)
-          end)
-          |> Multi.insert(:command, fn %{vps: vps, allocation: {attrs, _ip}} ->
-            Command.changeset(%Command{}, %{
-              node_id: node.id,
-              vps_id: vps.id,
-              kind: :provision,
-              status: :pending,
-              payload: provision_payload(vps, attrs, node)
-            })
-          end)
-
-        case Repo.transaction(multi) do
-          {:ok, %{vps: vps, command: command}} ->
-            Events.broadcast_changed(:vps)
-            {:ok, %{vps: vps, command: command}}
-
-          {:error, _step, reason, _changes} ->
-            # Any failure here is AFTER the scheduler reserved capacity, so release
-            # the held reservation and restore the node's capacity (else it leaks).
-            {:ok, _} = fail_and_release_reservation(vps.id)
-            {:ok, _} = Subscriptions.cancel_for_vps(vps.id)
-            Events.broadcast_changed(:vps)
-            {:error, reason}
-        end
+        dispatch(vps, node, attrs)
 
       {:error, :no_capacity} ->
         {:ok, _failed} = mark_vps_failed(vps)
@@ -312,6 +290,82 @@ defmodule ControlPlane.Provisioning do
         {:error, :no_capacity}
     end
   end
+
+  # IP allocation, the VPS update and the command insert run in ONE
+  # transaction. Allocation takes a per-node advisory lock and the
+  # `vpses_active_node_ip_uidx` unique index is the DB backstop, so two
+  # concurrent creates on the same node can never share an address.
+  #
+  # De VPS wordt eerst opnieuw gelezen, onder slot, en alleen een VPS die nog
+  # `:queued` is gaat door. Tussen de insert en dit punt ligt een commit en een
+  # plaatsing: tijd genoeg voor de klant om de VPS die hij in zijn lijst ziet te
+  # verwijderen. De update op de oude struct overschreef dat `:deleted` dan met
+  # `:provisioning`, en er ging een uitrol uit. Het abonnement was bij het
+  # verwijderen al opgezegd: een draaiende VM die nooit gefactureerd wordt.
+  defp dispatch(%Vps{} = vps, %Node{} = node, attrs) do
+    multi =
+      Multi.new()
+      |> Multi.run(:wachtend, fn repo, _changes -> nog_wachtend(repo, vps.id) end)
+      |> Multi.run(:allocation, fn repo, _changes -> allocate_ip(repo, attrs, node) end)
+      |> Multi.run(:vps, fn repo, %{wachtend: vers, allocation: {_attrs, ip}} ->
+        vers
+        |> Vps.changeset(%{node_id: node.id, status: :provisioning, ip_address: ip})
+        |> repo.update()
+      end)
+      # A customer needs somewhere to connect. The node's own address plus an
+      # allocated port is it — in the same transaction as the IP, so a VPS
+      # never exists having been promised an endpoint it did not get.
+      |> Multi.run(:ssh_forward, fn repo, %{vps: vps} ->
+        allocate_ssh_forward(repo, node, vps)
+      end)
+      |> Multi.insert(:command, fn %{vps: vps, allocation: {attrs, _ip}} ->
+        Command.changeset(%Command{}, %{
+          node_id: node.id,
+          vps_id: vps.id,
+          kind: :provision,
+          status: :pending,
+          payload: provision_payload(vps, attrs, node)
+        })
+      end)
+
+    case Repo.transaction(multi) do
+      {:ok, %{vps: vps, command: command}} ->
+        Events.broadcast_changed(:vps)
+        {:ok, %{vps: vps, command: command}}
+
+      {:error, step, reason, _changes} ->
+        # Any failure here is AFTER the scheduler reserved capacity, so release
+        # the held reservation and restore the node's capacity (else it leaks).
+        # Ook als de VPS intussen verwijderd is: die afbraak zag nog geen node en
+        # gaf dus niets vrij. IP en SSH-forward zaten in de teruggedraaide
+        # transactie en bestaan niet. Een verwijderde VPS blijft `:deleted`.
+        {:ok, _} = fail_and_release_reservation(vps.id)
+        {:ok, _} = Subscriptions.cancel_for_vps(vps.id)
+        Events.broadcast_changed(:vps)
+        {:error, weigering(step, reason)}
+    end
+  end
+
+  # Het slot op de VPS is hier het eerste slot, en dat keert de vaste volgorde
+  # (eerst commando's, dan de VPS; zie de moduledoc) niet om: een VPS die nog
+  # `:queued` is heeft geen commando's, en het uitrolcommando dat deze transactie
+  # invoegt is voor niemand anders zichtbaar tot de commit. Er is dus geen
+  # commandorij waarop een ander kan wachten terwijl hij deze VPS vasthoudt.
+  defp nog_wachtend(repo, vps_id) do
+    case repo.one(from v in Vps, where: v.id == ^vps_id, lock: "FOR UPDATE") do
+      %Vps{status: :queued} = vers -> {:ok, vers}
+      %Vps{status: status} -> {:error, {:niet_meer_wachtend, status}}
+      nil -> {:error, {:niet_meer_wachtend, nil}}
+    end
+  end
+
+  # De klant heeft zelf verwijderd; `already_deleting` zegt precies dat, en is
+  # een 409 met een zin die de frontend al kent. Geen nieuwe code. Een andere
+  # toestand (de sweep die een te lang wachtende VPS opgaf) is een toestand die
+  # onder de bestelling veranderde.
+  defp weigering(:wachtend, {:niet_meer_wachtend, :deleted}), do: :already_deleting
+  defp weigering(:wachtend, {:niet_meer_wachtend, _status}), do: :vps_state_changed
+  defp weigering(_step, reason), do: reason
 
   # Resolves the VPS IP inside the dispatch transaction. An explicit ip_config
   # (admin override) wins; otherwise a per-node advisory lock serialises pool
@@ -362,11 +416,19 @@ defmodule ControlPlane.Provisioning do
 
   # Marks a VPS :failed and releases its held reservation, returning the freed
   # capacity to the node (mirrors the agent-reported provision-failure path).
-  defp fail_and_release_reservation(vps_id) do
+  #
+  # `:deleted` is een eindstation en blijft staan. Een VPS die de klant tijdens
+  # het bestellen verwijderde, kwam anders als `:failed` terug in zijn lijst en
+  # in de quotumtelling. De reservering wordt wél vrijgegeven als hij nog vast
+  # staat: de afbraak van een VPS zonder node gaf er niets vrij. Een al
+  # vrijgegeven reservering is niet meer `:held` en beweegt niet nog eens.
+  #
+  # Publiek maar ongedocumenteerd, voor de test die dat vastlegt.
+  @doc false
+  @spec fail_and_release_reservation(binary()) :: {:ok, map()} | {:error, term(), term(), map()}
+  def fail_and_release_reservation(vps_id) do
     Multi.new()
-    |> Multi.run(:vps, fn repo, _changes ->
-      repo.get!(Vps, vps_id) |> Vps.changeset(%{status: :failed}) |> repo.update()
-    end)
+    |> Multi.run(:vps, fn repo, _changes -> faal_tenzij_verwijderd(repo, vps_id) end)
     |> Multi.run(:reservation, fn repo, _changes ->
       Reservations.release(repo, Reservations.held(repo, vps_id))
     end)
@@ -374,6 +436,17 @@ defmodule ControlPlane.Provisioning do
       Reservations.restore_capacity(repo, reservation)
     end)
     |> Repo.transaction()
+  end
+
+  # Onder slot, zodat een gelijktijdige afbraak ervoor of erna komt en niet
+  # ertussen. Geen commando's vooraf: dit pad loopt alleen na een teruggedraaide
+  # uitsturing, en dan bestaat er geen uitrolcommando voor deze VPS.
+  defp faal_tenzij_verwijderd(repo, vps_id) do
+    case repo.one(from v in Vps, where: v.id == ^vps_id, lock: "FOR UPDATE") do
+      nil -> {:ok, nil}
+      %Vps{status: :deleted} = vps -> {:ok, vps}
+      %Vps{} = vps -> vps |> Vps.changeset(%{status: :failed}) |> repo.update()
+    end
   end
 
   @doc "Zie `ControlPlane.Provisioning.Teardown.delete_vps/1`."
@@ -526,9 +599,22 @@ defmodule ControlPlane.Provisioning do
   @doc "Zie `ControlPlane.Provisioning.GuestName.guest_name/1`."
   defdelegate guest_name(vps), to: GuestName
 
-  defp mark_vps_failed(%Vps{} = vps) do
-    vps
-    |> Vps.changeset(%{status: :failed})
-    |> Repo.update()
+  # Geen plek op een node. De voorwaarde staat in de UPDATE zelf, net als in
+  # `Sweeps.faal_wachtende_vps/1`: een VPS die de klant intussen verwijderde,
+  # blijft `:deleted`. Geld en abonnement beweegt dit niet; dat doen de aanroeper
+  # en de controller, en die zijn allebei eenmalig (terugbetalen merkt de
+  # afschrijving, opzeggen slaat een opgezegd abonnement over).
+  #
+  # Publiek maar ongedocumenteerd, voor de test die dat vastlegt.
+  @doc false
+  @spec mark_vps_failed(Vps.t()) :: {:ok, Vps.t() | nil}
+  def mark_vps_failed(%Vps{id: id}) do
+    {_aantal, rijen} =
+      Repo.update_all(
+        from(v in Vps, where: v.id == ^id and v.status != :deleted, select: v),
+        set: [status: :failed, updated_at: Clock.now()]
+      )
+
+    {:ok, List.first(rijen)}
   end
 end
