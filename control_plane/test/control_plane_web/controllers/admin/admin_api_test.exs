@@ -275,8 +275,32 @@ defmodule ControlPlaneWeb.Admin.AdminApiTest do
       assert %{"vps" => body} = json_response(conn, 202)
       assert body["id"] == vps.id
       assert body["status"] == "deleting"
+      # `delete_vps/1` geeft een struct zonder regio terug; dit antwoord zei
+      # daarom `"region": null` voor een VPS die wel in een regio stond.
+      assert body["region"] == region.code
 
       assert Repo.get!(Vps, vps.id).status == :deleting
+    end
+
+    test "creating a vps answers with its real region", %{conn: conn} do
+      # Zelfde verhaal als bij verwijderen: de struct uit de transactie heeft
+      # geen regio geladen, en `null` las dan als "staat nergens".
+      %{region: region} = create_region(%{})
+      _node = enroll_node_with_capacity(region)
+
+      conn =
+        post(conn, ~p"/admin/v1/vpses", %{
+          "region_code" => region.code,
+          "name" => "vps-regio",
+          "vcpu" => 2,
+          "ram_mb" => 2048,
+          "disk_gb" => 20,
+          "owner_email" => "ops@bunkhosting.nl"
+        })
+
+      assert %{"vps" => body} = json_response(conn, 201)
+      assert body["name"] == "vps-regio"
+      assert body["region"] == region.code
     end
 
     test "deleting an unknown vps returns 404", %{conn: conn} do

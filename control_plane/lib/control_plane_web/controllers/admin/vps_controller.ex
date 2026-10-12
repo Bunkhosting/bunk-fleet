@@ -15,6 +15,7 @@ defmodule ControlPlaneWeb.Admin.VpsController do
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Repo
 
   def index(conn, _params) do
     vpses = Enum.map(Fleet.list_vpses(), &vps_json/1)
@@ -109,7 +110,13 @@ defmodule ControlPlaneWeb.Admin.VpsController do
     Application.get_env(:control_plane, :default_template_id, 9000)
   end
 
+  # Aanmaken en verwijderen geven de struct door die `Provisioning` uit zijn
+  # transactie teruggaf, zonder regio erin. Dat gaf hier `"region": null` voor
+  # een VPS die wel degelijk in een regio stond. Daarom laadt de serializer zelf;
+  # `Repo.preload/2` slaat over wat al geladen is, dus `index` betaalt niets extra.
   defp vps_json(%Vps{} = vps) do
+    vps = Repo.preload(vps, :region)
+
     %{
       id: vps.id,
       name: vps.name,
@@ -125,6 +132,9 @@ defmodule ControlPlaneWeb.Admin.VpsController do
     }
   end
 
-  defp region_code(%Vps{region: %{code: code}}), do: code
-  defp region_code(%Vps{}), do: nil
+  # Geen vangnet voor een niet-geladen regio: dat werd vroeger stil `nil` en was
+  # dan niet te onderscheiden van een VPS zonder regio. `vps_json/1` laadt hem
+  # altijd, dus een crash hier wijst op een pad dat dat omzeilt.
+  defp region_code(%Vps{region: %Region{code: code}}), do: code
+  defp region_code(%Vps{region: nil}), do: nil
 end

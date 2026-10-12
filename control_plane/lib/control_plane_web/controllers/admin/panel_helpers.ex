@@ -11,7 +11,9 @@ defmodule ControlPlaneWeb.Admin.PanelHelpers do
   import Phoenix.Controller, only: [json: 2]
 
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
+  alias ControlPlane.Repo
 
   @doc false
   def subscription_json(s) do
@@ -28,8 +30,14 @@ defmodule ControlPlaneWeb.Admin.PanelHelpers do
     }
   end
 
+  # De huidige aanroepers laden regio en node al in hun query, maar dat is een
+  # afspraak die niemand afdwingt. Een volgende aanroeper die de struct uit een
+  # context doorgeeft kreeg dan stil `"region": null`. `Repo.preload/2` slaat over
+  # wat al geladen is, dus de bestaande lijsten betalen hier niets voor.
   @doc false
   def vps_json(%Vps{} = v) do
+    v = Repo.preload(v, [:region, :node])
+
     %{
       id: v.id,
       name: v.name,
@@ -47,14 +55,19 @@ defmodule ControlPlaneWeb.Admin.PanelHelpers do
   end
 
   defp node_name(%Vps{node: %Node{name: name}}), do: name
-  defp node_name(_), do: nil
+  defp node_name(%Vps{node: nil}), do: nil
 
+  # Voor een VPS en een node allebei. `nil` betekent alleen nog "geen regio";
+  # een niet-geladen associatie crasht met opzet in plaats van stil `nil` te
+  # worden, want die twee waren in het antwoord niet uit elkaar te houden. Wie
+  # hier een `NotLoaded` aanlevert, heeft een preload vergeten -- dat hoort een
+  # test te vangen, niet een klant of beheerder die een lege regio leest.
   @doc false
-  def region_code(%{region: %{code: code}}), do: code
-  def region_code(_), do: nil
+  def region_code(%{region: %Region{code: code}}), do: code
+  def region_code(%{region: nil}), do: nil
 
-  defp region_name(%{region: %{name: name}}), do: name
-  defp region_name(_), do: nil
+  defp region_name(%{region: %Region{name: name}}), do: name
+  defp region_name(%{region: nil}), do: nil
 
   @doc false
   def ok_or({:ok, v}, _err), do: {:ok, v}

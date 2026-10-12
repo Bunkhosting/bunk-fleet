@@ -582,9 +582,17 @@ defmodule ControlPlaneWeb.VpsController do
 
   defp port_forwards_json(%Vps{}), do: []
 
-  defp region_code(%Vps{region: %{code: code}}), do: code
-  defp region_code(%Vps{}), do: nil
+  # Alleen twee gevallen, en bewust geen derde. `nil` betekent hier één ding:
+  # deze VPS heeft geen regio (de kolom mag leeg zijn sinds een regio weg kan
+  # terwijl er nog VPS'en naar verwezen, zie migratie 20260918120000). Een
+  # `%Ecto.Association.NotLoaded{}` valt er met opzet doorheen en crasht: vroeger
+  # werd dat stil `nil`, en dan las "niet opgehaald" als "geen regio". `vps_json/1`
+  # preloadt altijd eerst, dus komt deze crash ooit, dan is dat een nieuw pad
+  # dat die preload omzeilt -- en dat hoort een test rood te maken, niet een
+  # klant een verkeerd antwoord te geven.
+  defp region_code(%Vps{region: %Region{code: code}}), do: code
+  defp region_code(%Vps{region: nil}), do: nil
 
-  defp region_name(%Vps{region: %{name: name}}), do: name
-  defp region_name(%Vps{}), do: nil
+  defp region_name(%Vps{region: %Region{name: name}}), do: name
+  defp region_name(%Vps{region: nil}), do: nil
 end

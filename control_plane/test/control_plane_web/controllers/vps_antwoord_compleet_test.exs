@@ -21,8 +21,10 @@ defmodule ControlPlaneWeb.VpsAntwoordCompleetTest do
   use ControlPlaneWeb.ConnCase, async: true
 
   import ControlPlane.Fixtures
+  import Ecto.Query, only: [from: 2]
 
   alias ControlPlane.Accounts
+  alias ControlPlane.Backups.VpsBackup
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.PortForward
   alias ControlPlane.Fleet.Region
@@ -110,5 +112,70 @@ defmodule ControlPlaneWeb.VpsAntwoordCompleetTest do
 
     assert gevonden["region"] == code, inspect(gevonden)
     assert gevonden["public_host"] == "node.example.test", inspect(gevonden)
+  end
+
+  test "hernoemen geeft het hele antwoord", %{conn: conn, vps: vps, code: code} do
+    # `Fleet.rename_vps/2` geeft terug wat `Repo.update/1` teruggeeft. Of daar
+    # een regio in zit, hangt af van wat de aanroeper toevallig meegaf -- en dat
+    # mag niet uitmaken voor wat de klant leest.
+    assert %{"vps" => gevonden} =
+             conn
+             |> patch(~p"/api/v1/vpses/#{vps.id}", %{"name" => "nieuwe naam"})
+             |> json_response(200)
+
+    assert gevonden["name"] == "nieuwe naam"
+    assert compleet?(gevonden, code), inspect(gevonden)
+  end
+
+  test "herstellen geeft het hele antwoord", %{conn: conn, vps: vps, code: code} do
+    # `Backups.restore/2` geeft de rij terug die hij onder FOR UPDATE opnieuw
+    # las, en zo'n verse rij heeft geen enkele associatie geladen.
+    {:ok, vps} = vps |> Ecto.Changeset.change(provider_vm_id: "106") |> Repo.update()
+    punt = herstelpunt(vps)
+
+    assert %{"vps" => gevonden} =
+             conn
+             |> post(~p"/api/v1/vpses/#{vps.id}/backups/#{punt.id}/restore")
+             |> json_response(202)
+
+    # Eerst bewijzen dat het herstel echt gelukt is: anders slaagt de rest om de
+    # verkeerde reden, op een antwoord dat nooit door dit pad kwam.
+    assert gevonden["status"] == "restoring"
+    assert compleet?(gevonden, code), inspect(gevonden)
+  end
+
+  test "een VPS zonder regio zegt null, en dat betekent dan ook echt geen regio", %{
+    conn: conn,
+    vps: vps
+  } do
+    # Dit kan sinds een regio weg mag terwijl er nog VPS'en naar verwezen
+    # (`ON DELETE SET NULL`). Rechtstreeks in de rij, want de changeset eist een
+    # regio en een regio met een node eraan laat zich niet verwijderen.
+    {1, _} = Repo.update_all(from(v in Vps, where: v.id == ^vps.id), set: [region_id: nil])
+
+    assert %{"vps" => gevonden} =
+             conn |> get(~p"/api/v1/vpses/#{vps.id}") |> json_response(200)
+
+    # Het pad is gehaald: de rest van het antwoord is er gewoon.
+    assert gevonden["public_host"] == "node.example.test", inspect(gevonden)
+    assert gevonden["region"] == nil
+    assert gevonden["location"] == nil
+
+    assert %{"vpses" => [in_lijst]} = conn |> get(~p"/api/v1/vpses") |> json_response(200)
+    assert in_lijst["id"] == vps.id
+    assert in_lijst["region"] == nil
+  end
+
+  defp herstelpunt(vps) do
+    %VpsBackup{}
+    |> VpsBackup.changeset(%{
+      vps_id: vps.id,
+      node_id: vps.node_id,
+      status: :done,
+      volid: "local:backup/vzdump-qemu-#{System.unique_integer([:positive])}.vma.zst",
+      started_at: DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second),
+      finished_at: DateTime.utc_now() |> DateTime.add(-3500) |> DateTime.truncate(:second)
+    })
+    |> Repo.insert!()
   end
 end
