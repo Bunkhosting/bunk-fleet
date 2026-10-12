@@ -55,6 +55,10 @@ defmodule ControlPlane.Provisioning.Results do
       and its held reservation `:committed` on success; on failure the VPS is moved
       to `:failed` and its held reservation `:released`, returning the freed capacity
       to the node, and
+    * a provision result for a VPS that is already `:deleted` leaves its status
+      alone — `:deleted` is final — refunds nothing a second time, and queues a
+      `:delete` for the VM id the agent reports, if any; the command itself is still
+      finished so it is not redelivered, and
     * for a delete command, on success the VPS is moved to `:deleted` and its
       committed reservation `:released`, returning capacity to the node; on failure
       the VPS and reservation are left untouched (the VM may still exist) and the
@@ -180,19 +184,19 @@ defmodule ControlPlane.Provisioning.Results do
 
   # Provision succeeded: activate the VPS (recording provider id / ip) and commit
   # the held reservation. Capacity stays decremented.
-  defp finalize_vps(multi, %Command{kind: :provision, vps_id: vps_id}, :done, result)
+  defp finalize_vps(multi, %Command{kind: :provision, vps_id: vps_id} = command, :done, result)
        when not is_nil(vps_id) do
     vm_id = sane_vm_id(result["vm_id"])
 
     multi
     |> Multi.run(:vps, fn repo, _changes ->
-      settle_provisioned_vps(repo, vps_id, vm_id, result["ip"])
+      settle_provisioned_vps(repo, command, vm_id, result["ip"])
     end)
     |> Multi.run(:reservation, fn repo, %{vps: vps} ->
       commit_or_free_reservation(repo, vps_id, vps)
     end)
     |> Multi.run(:compensate, fn repo, %{vps: vps} ->
-      compensate_deferred_teardown(repo, vps_id, vps, vm_id)
+      compensate_deferred_teardown(repo, command, vps, vm_id)
     end)
   end
 
@@ -200,33 +204,18 @@ defmodule ControlPlane.Provisioning.Results do
   # the freed capacity back to the node.
   defp finalize_vps(multi, %Command{kind: :provision, vps_id: vps_id} = command, :failed, result)
        when not is_nil(vps_id) do
+    vm_id = sane_vm_id(result["vm_id"])
+
     multi
     |> Multi.run(:vps, fn repo, _changes ->
       # FOR UPDATE: apply_result and a concurrent delete_vps both transition this
       # row; locking it here serialises them so a provision-done can't overwrite a
       # just-committed :deleting/:deleted (TOCTOU → free-running / orphaned VM).
-      vps = repo.one!(from(v in Vps, where: v.id == ^vps_id, lock: "FOR UPDATE"))
-
-      vps
-      |> Vps.changeset(%{status: :failed})
-      |> repo.update()
+      # De beslissing hieronder valt op deze gelezen-onder-slot rij, zodat een
+      # verwijdering die net committe niet tussen controle en update door glipt.
+      {:ok, repo.one!(from(v in Vps, where: v.id == ^vps_id, lock: "FOR UPDATE"))}
     end)
-    |> Multi.run(:reservation, fn repo, _changes ->
-      Reservations.release(repo, Reservations.held(repo, vps_id))
-    end)
-    |> Multi.run(:restore_capacity, fn repo, %{reservation: reservation} ->
-      Reservations.restore_capacity(repo, reservation)
-    end)
-    # A provision the customer already paid for at create just died. Refund the
-    # subscription's monthly price and cancel it so recurring billing never charges
-    # for a VM that never existed. Idempotent: refund/cancel run once, since the
-    # subscription is only :cancelled here.
-    |> Multi.run(:refund, fn repo, _changes -> refund_failed_provision(repo, vps_id) end)
-    # A failed provision may have left a half-created VM on the operator's node
-    # (the agent returns its id precisely so we can reconcile it). Enqueue a
-    # compensating :delete so the orphan is destroyed rather than lingering and
-    # silently consuming the operator's real capacity forever.
-    |> maybe_cleanup_orphan(vps_id, sane_vm_id(result["vm_id"]))
+    |> Multi.merge(fn %{vps: vps} -> na_mislukte_uitrol(vps, command, vm_id) end)
     |> maybe_close_node(command, result)
   end
 
@@ -412,25 +401,35 @@ defmodule ControlPlane.Provisioning.Results do
 
   defp gasten_uit(_result), do: nil
 
-  # The VPS row after a successful provision. Three outcomes, because a delete can
-  # have been requested while the provision was still in flight.
-  defp settle_provisioned_vps(repo, vps_id, vm_id, reported_ip) do
+  # The VPS row after a successful provision. Several outcomes, because a delete
+  # can have been requested -- or already finished -- while the provision was
+  # still in flight.
+  defp settle_provisioned_vps(repo, %Command{vps_id: vps_id} = command, vm_id, reported_ip) do
     # FOR UPDATE: apply_result and a concurrent delete_vps both transition this
     # row; locking it here serialises them so a provision-done can't overwrite a
     # just-committed :deleting/:deleted (TOCTOU → free-running / orphaned VM).
     vps = repo.one!(from(v in Vps, where: v.id == ^vps_id, lock: "FOR UPDATE"))
 
     cond do
+      # Al verwijderd: eindstation, de status blijft. Het vm_id wordt wel
+      # vastgelegd, zodat de rij zegt welke VM de afbraak hieronder opruimt.
+      vps.status == :deleted ->
+        meld_laat_resultaat(vps, command, :done)
+
+        if is_binary(vm_id),
+          do: vps |> Vps.changeset(%{provider_vm_id: vm_id}) |> repo.update(),
+          else: {:ok, vps}
+
       # A delete was requested while this provision was in flight (deferred
       # teardown): the VM now exists, so record its id and stay :deleting — the
       # compensating :delete tears it down. Never activate a VPS the customer
       # already deleted.
-      vps.status in [:deleting, :deleted] and is_binary(vm_id) ->
+      vps.status == :deleting and is_binary(vm_id) ->
         vps |> Vps.changeset(%{provider_vm_id: vm_id}) |> repo.update()
 
       # Delete requested but the provision produced no usable VM id → nothing to
       # tear down, so finish the delete now.
-      vps.status in [:deleting, :deleted] ->
+      vps.status == :deleting ->
         vps |> Vps.changeset(%{status: :deleted}) |> repo.update()
 
       # Normal path: activate. The browser console SSHes to exactly
@@ -475,20 +474,22 @@ defmodule ControlPlane.Provisioning.Results do
 
   # A VPS left in :deleting by a provision that succeeded too late still has a
   # real VM behind it. Queue the teardown the customer already asked for.
-  defp compensate_deferred_teardown(repo, vps_id, %Vps{status: :deleting} = vps, vm_id)
-       when is_binary(vm_id) do
-    %Command{}
-    |> Command.changeset(%{
-      node_id: vps.node_id,
-      vps_id: vps_id,
-      kind: :delete,
-      status: :pending,
-      payload: %{"vm_id" => vm_id}
-    })
-    |> repo.insert()
+  defp compensate_deferred_teardown(repo, _command, %Vps{status: :deleting} = vps, vm_id) do
+    plan_afbraak(repo, vps.node_id, vps.id, vm_id)
   end
 
-  defp compensate_deferred_teardown(_repo, _vps_id, %Vps{}, _vm_id), do: {:ok, nil}
+  # Een VPS die al `:deleted` was toen deze uitrol toch nog slaagde. Na
+  # settle_provisioned_vps/4 staat een VPS alleen met een vm_id op :deleted als
+  # hij dat daarvoor al was (een :deleting met VM blijft :deleting), dus dit is
+  # precies het late geval. De VM bestaat echt en niemand anders gaat hem
+  # afbreken: de verwijdering is al klaar. De node van het commando, want daar
+  # heeft de agent hem gebouwd.
+  defp compensate_deferred_teardown(repo, command, %Vps{status: :deleted} = vps, vm_id)
+       when is_binary(vm_id) do
+    plan_afbraak(repo, command.node_id, vps.id, vm_id)
+  end
+
+  defp compensate_deferred_teardown(_repo, _command, %Vps{}, _vm_id), do: {:ok, nil}
 
   # Power commands only move a VPS between the three states a running machine can
   # be in. Anything else (a delete that raced the power command) wins.
@@ -577,18 +578,69 @@ defmodule ControlPlane.Provisioning.Results do
   # zegt wat er mis is, de rest staat in Activiteit.
   defp kort(reden), do: reden |> String.trim() |> String.slice(0, 200)
 
-  defp maybe_cleanup_orphan(multi, _vps_id, nil), do: multi
+  # Een mislukte uitrol voor een VPS die al verwijderd is. `:deleted` is een
+  # eindstation: de klant heeft hem weggegooid of een sweep heeft hem afgehandeld,
+  # en wat daar bij hoorde (abonnement opzeggen, reservering vrijgeven) is toen al
+  # gebeurd. Hem hier op `:failed` zetten liet hem terugkomen in lijsten en in de
+  # quotumtelling, en het geld-en-capaciteitspad hieronder zou voor de tweede keer
+  # lopen. Daarom raakt dit pad alleen nog de VM aan, als de agent er een noemt.
+  # Een vastgehouden reservering laten we aan de housekeeping, die is eigenaar
+  # van reserveringen van verwijderde VPS'en; twee eigenaren is dubbel vrijgeven.
+  defp na_mislukte_uitrol(%Vps{status: :deleted} = vps, command, vm_id) do
+    meld_laat_resultaat(vps, command, :failed)
 
-  defp maybe_cleanup_orphan(multi, vps_id, vm_id) do
-    Multi.insert(multi, :orphan_cleanup, fn %{vps: vps} ->
-      Command.changeset(%Command{}, %{
-        node_id: vps.node_id,
-        vps_id: vps_id,
-        kind: :delete,
-        status: :pending,
-        payload: %{"vm_id" => vm_id}
-      })
+    Multi.run(Multi.new(), :late_teardown, fn repo, _changes ->
+      plan_afbraak(repo, command.node_id, vps.id, vm_id)
     end)
+  end
+
+  defp na_mislukte_uitrol(%Vps{} = vps, _command, vm_id) do
+    Multi.new()
+    |> Multi.update(:failed_vps, Vps.changeset(vps, %{status: :failed}))
+    |> Multi.run(:reservation, fn repo, _changes ->
+      Reservations.release(repo, Reservations.held(repo, vps.id))
+    end)
+    |> Multi.run(:restore_capacity, fn repo, %{reservation: reservation} ->
+      Reservations.restore_capacity(repo, reservation)
+    end)
+    # A provision the customer already paid for at create just died. Refund the
+    # subscription's monthly price and cancel it so recurring billing never charges
+    # for a VM that never existed. Idempotent: refund/cancel run once, since the
+    # subscription is only :cancelled here.
+    |> Multi.run(:refund, fn repo, _changes -> refund_failed_provision(repo, vps.id) end)
+    # A failed provision may have left a half-created VM on the operator's node
+    # (the agent returns its id precisely so we can reconcile it). Enqueue a
+    # compensating :delete so the orphan is destroyed rather than lingering and
+    # silently consuming the operator's real capacity forever.
+    |> Multi.run(:orphan_cleanup, fn repo, _changes ->
+      plan_afbraak(repo, vps.node_id, vps.id, vm_id)
+    end)
+  end
+
+  # Een resultaat dat binnenkomt voor een VPS die al weg is, is geen fout van
+  # deze code maar wel iets wat een mens moet kunnen terugvinden: het betekent
+  # dat de agent doorwerkte aan iets wat de control plane al had afgesloten.
+  defp meld_laat_resultaat(%Vps{} = vps, %Command{} = command, uitkomst) do
+    Logger.warning(
+      "laat #{uitkomst}-resultaat van provision #{command.id} voor vps #{vps.id}, " <>
+        "die al verwijderd is; de status blijft :deleted"
+    )
+  end
+
+  # Zet een afbraak klaar voor een VM die de agent noemde. Zonder vm_id is er
+  # niets om af te breken; een delete zonder id zou de agent alleen laten raden.
+  defp plan_afbraak(_repo, _node_id, _vps_id, nil), do: {:ok, nil}
+
+  defp plan_afbraak(repo, node_id, vps_id, vm_id) do
+    %Command{}
+    |> Command.changeset(%{
+      node_id: node_id,
+      vps_id: vps_id,
+      kind: :delete,
+      status: :pending,
+      payload: %{"vm_id" => vm_id}
+    })
+    |> repo.insert()
   end
 
   # Resolve the console target IP for a provision-done result.
