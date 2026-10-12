@@ -248,6 +248,7 @@ docker run -d --name "$NIEUW_CP" --network "$NET" --network-alias "$CP_ALIAS" \
   -e MAIL_FROM_ADDRESS \
   -e MAIL_FROM_NAME \
   -e OPS_EMAIL \
+  -e MAIL_DAILY_LIMIT \
   -e TURNSTILE_SECRET_KEY \
   "$IMG" >/dev/null
 echo "STARTED $NIEUW_CP (naast de draaiende)"

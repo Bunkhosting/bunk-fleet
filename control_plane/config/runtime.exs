@@ -139,6 +139,13 @@ if config_env() == :prod do
     config :control_plane, max_vpses_per_owner: String.to_integer(max)
   end
 
+  # Hoeveel berichten de mailserver ons per dag laat versturen. Klantmail stopt
+  # in de app een stukje eerder, zodat er ruimte blijft voor storingsmeldingen;
+  # zie "Dagquotum" in ControlPlane.Notifier. Leeg = geen teller.
+  if limiet = System.get_env("MAIL_DAILY_LIMIT") do
+    config :control_plane, mail_daily_limit: String.to_integer(limiet)
+  end
+
   # Transactional email (confirmation, password reset, low-balance warning) via
   # SMTP. When SMTP_HOST is unset we deliberately do NOT crash the boot — mirrors
   # how MOLLIE_API_KEY/TURNSTILE_SECRET_KEY degrade — but mail genuinely will not

@@ -49,7 +49,8 @@ defmodule ControlPlane.Notifier do
       to: user.email,
       subject: "Bevestig je Bunk Hosting account",
       text: text,
-      html: html
+      html: html,
+      soort: :klant
     })
   end
 
@@ -62,7 +63,8 @@ defmodule ControlPlane.Notifier do
       to: user.email,
       subject: "Wachtwoord opnieuw instellen — Bunk Hosting",
       text: text,
-      html: html
+      html: html,
+      soort: :klant
     })
   end
 
@@ -81,7 +83,8 @@ defmodule ControlPlane.Notifier do
       to: user.email,
       subject: "Saldo te laag — #{vps_name} is gepauzeerd",
       text: text,
-      html: html
+      html: html,
+      soort: :klant
     })
   end
 
@@ -137,7 +140,7 @@ defmodule ControlPlane.Notifier do
     case Application.get_env(:control_plane, :ops_email) do
       to when is_binary(to) and to != "" ->
         if mag_melden?(subject) do
-          deliver(%{to: to, subject: "[Bunk] " <> subject, text: body, html: nil})
+          stuur_melding(to, subject, body)
         else
           Logger.warning("melding afgeknepen (al #{@alerts_per_uur}x dit uur): #{subject}")
           {:error, :throttled}
@@ -153,7 +156,75 @@ defmodule ControlPlane.Notifier do
     RateLimiter.hit("alert:" <> subject, @alerts_per_uur, @alert_venster_ms) == :ok
   end
 
-  defp deliver(%{to: to_email, subject: subject, text: text, html: html}) do
+  # Een melding die niet aankomt, mag niet ook nog uit de log verdwijnen. deliver/1
+  # logt alleen de reden en een afgeschermd adres, en dat is voor klantmail genoeg:
+  # die kan opnieuw worden aangevraagd. Een melding niet -- de reconciler of de
+  # systemd-unit die hem stuurde is al verder. Dus staat de inhoud hier in de log,
+  # zodat wie daarna zoekt nog kan lezen wat er gemeld had moeten worden.
+  defp stuur_melding(to, subject, body) do
+    case deliver(%{to: to, subject: "[Bunk] " <> subject, text: body, html: nil, soort: :ops}) do
+      :ok ->
+        :ok
+
+      {:error, reason} = fout ->
+        Logger.error(
+          "operationele melding NIET verstuurd (#{inspect(reason)}): #{subject}\n#{body}"
+        )
+
+        fout
+    end
+  end
+
+  # ## Dagquotum: klantmail stopt eerder dan de mailserver
+  #
+  # Het quotum is niet van ons. De mailserver laat per dag maar zoveel berichten
+  # van ons account toe, en daarna weigert hij ALLES -- een bevestiging net zo goed
+  # als een storingsmelding. In de app was er tot nu toe geen teller; we merkten de
+  # grens pas als de server nee zei, en dan was het te laat voor de melding die er
+  # toe deed.
+  #
+  # Daarom tellen we hier zelf mee, en houden we een stukje van de dag vrij voor
+  # meldingen: klantmail stopt `@ops_reserve` berichten vóór de grens van de
+  # server, operationele mail stopt in de app nooit. Eén teller voor alles wat de
+  # deur uitgaat, want de server telt ook alles; alleen de grens verschilt per soort.
+  # Een aparte teller voor meldingen zou niets toevoegen: wat telt is hoeveel er
+  # vandaag in totaal al weg is.
+  #
+  # Vijftig is ruim: de rem hierboven laat per onderwerp drie meldingen per uur
+  # door, dus één aanhoudende toestand vult de reservering pas na zestien uur, en
+  # tientallen verschillende storingen krijgen elk hun eerste melding. Wie het
+  # ziet, weet het dan al.
+  #
+  # Zonder `:mail_daily_limit` (MAIL_DAILY_LIMIT) is er geen teller: we weten de
+  # grens van de server niet, en een geraden getal weigert klanten zonder reden.
+  #
+  # De teller leeft in ETS en begint na een herstart opnieuw, terwijl de server
+  # doortelt. Het venster is een UTC-dag, wat niet hoeft te kloppen met hoe de
+  # server zijn dag rekent. Beide maken de teller optimistisch, en dat is waarom
+  # MAIL_DAILY_LIMIT liever wat onder de echte grens staat.
+  @ops_reserve 50
+  @dag_ms 24 * 60 * 60 * 1000
+  @dagteller "mail:dagquotum"
+
+  defp past_in_dagquotum?(soort) do
+    case Application.get_env(:control_plane, :mail_daily_limit) do
+      limiet when is_integer(limiet) ->
+        # Ook een melding telt mee, en gaat dan altijd: hij mag de grens voor
+        # klantmail opschuiven, maar zelf nooit in de app tegengehouden worden.
+        uitslag = RateLimiter.hit(@dagteller, grens(soort, limiet), @dag_ms)
+        soort == :ops or uitslag == :ok
+
+      _ ->
+        true
+    end
+  end
+
+  defp grens(:ops, limiet), do: limiet
+  defp grens(:klant, limiet), do: limiet - ops_reserve()
+
+  defp ops_reserve, do: Application.get_env(:control_plane, :mail_ops_reserve, @ops_reserve)
+
+  defp deliver(%{to: to_email, subject: subject, text: text, html: html, soort: soort}) do
     email =
       new()
       |> to(to_email)
@@ -165,7 +236,18 @@ defmodule ControlPlane.Notifier do
     # one, which some clients render as a blank message.
     email = if html, do: html_body(email, html), else: email
 
-    case verstuur_begrensd(email) do
+    # Een klantmail die op de reservering stuit, loopt door dezelfde foutafhandeling
+    # als een mail die de server weigert omdat zijn quotum op is: een Logger.error
+    # en {:error, reden}. Voor de aanroepers -- en dus voor de klant -- verandert er
+    # niets, behalve dat het iets eerder gebeurt.
+    uitkomst =
+      if past_in_dagquotum?(soort) do
+        verstuur_begrensd(email)
+      else
+        {:error, :daily_quota_reserved_for_ops}
+      end
+
+    case uitkomst do
       {:ok, _metadata} ->
         :ok
 

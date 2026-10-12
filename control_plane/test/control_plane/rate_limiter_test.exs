@@ -40,4 +40,24 @@ defmodule ControlPlane.RateLimiterTest do
     Process.sleep(2)
     assert RateLimiter.hit(key, 1, 1) == :ok
   end
+
+  test "de veger ruimt op wat afgelopen is en laat een lopende dag staan" do
+    # De veger keek eerst naar de leeftijd van een teller, niet naar zijn venster:
+    # na tien minuten ging alles weg. Een dagteller begon zo steeds opnieuw, en
+    # "drie per uur" werd drie per tien minuten.
+    kort = unique_key()
+    dag = unique_key()
+
+    assert RateLimiter.hit(kort, 1, 1) == :ok
+    assert RateLimiter.hit(dag, 1, :timer.hours(24)) == :ok
+    Process.sleep(2)
+
+    send(RateLimiter, :sweep)
+    # Een synchrone aanroep na de send: pas als die terugkomt, is :sweep verwerkt.
+    _ = :sys.get_state(RateLimiter)
+
+    sleutels = Enum.map(:ets.tab2list(:rate_limiter), fn {{sleutel, _}, _, _} -> sleutel end)
+    refute kort in sleutels
+    assert RateLimiter.hit(dag, 1, :timer.hours(24)) == {:error, :rate_limited}
+  end
 end

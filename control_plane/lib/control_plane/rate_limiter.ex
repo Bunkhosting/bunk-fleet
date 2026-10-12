@@ -7,17 +7,14 @@ defmodule ControlPlane.RateLimiter do
   keyed by `{key, window}` where `window = system_time / window_ms`, so each window
   has its own counter and an old window's count never bleeds into the next.
 
-  The GenServer owns the table and periodically sweeps counters from elapsed
-  windows so memory stays bounded; the hot path (`hit/3`) is a lock-free
+  The GenServer owns the table and periodically sweeps counters whose window has
+  ended so memory stays bounded; the hot path (`hit/3`) is a lock-free
   `:ets.update_counter/4`, not a GenServer call, so it adds no serialization point.
   """
   use GenServer
 
   @table :rate_limiter
   @sweep_interval_ms 60_000
-  # Counters created longer ago than this are from windows that can no longer be
-  # current for any sane window size, so they're safe to sweep.
-  @stale_after_ms 600_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -39,9 +36,16 @@ defmodule ControlPlane.RateLimiter do
   def hit(key, max, window_ms) do
     now = System.system_time(:millisecond)
     window = div(now, window_ms)
-    # Atomically bump the count at position 2; seed a fresh row carrying the
-    # creation time at position 3 (left untouched by later increments) for sweeping.
-    count = :ets.update_counter(@table, {key, window}, {2, 1}, {{key, window}, 0, now})
+    # Atomically bump the count at position 2; seed a fresh row carrying the end
+    # of its window at position 3 (left untouched by later increments) for sweeping.
+    #
+    # Het einde van het venster, niet het moment van aanmaken. De veger gooide
+    # eerst alles weg dat ouder was dan tien minuten, wat het venster ook was:
+    # "drie per uur" begon zo elke tien minuten opnieuw, en een dagteller hield
+    # nooit langer dan tien minuten stand. Met het venstereinde in de rij weet de
+    # veger per teller wanneer die echt niet meer mee kan tellen.
+    window_end = (window + 1) * window_ms
+    count = :ets.update_counter(@table, {key, window}, {2, 1}, {{key, window}, 0, window_end})
 
     if count > max, do: {:error, :rate_limited}, else: :ok
   end
@@ -62,9 +66,9 @@ defmodule ControlPlane.RateLimiter do
 
   @impl true
   def handle_info(:sweep, state) do
-    cutoff = System.system_time(:millisecond) - @stale_after_ms
-    # Delete counters whose creation time (position 3) is older than the cutoff.
-    :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:<, :"$1", cutoff}], [true]}])
+    now = System.system_time(:millisecond)
+    # Delete counters whose window (ending at position 3) is over.
+    :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:<, :"$1", now}], [true]}])
     schedule_sweep()
     {:noreply, state}
   end

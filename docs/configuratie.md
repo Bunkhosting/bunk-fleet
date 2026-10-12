@@ -40,6 +40,7 @@ anders vermeld.
 | `MAIL_FROM_ADDRESS` | nee | `noreply@bunkhosting.nl` | Ook in dev/test |
 | `MAIL_FROM_NAME` | nee | `Bunk Hosting` | Ook in dev/test |
 | `OPS_EMAIL` | nee | — | Waar operationele meldingen heen gaan. Leeg = alleen in de log |
+| `MAIL_DAILY_LIMIT` | nee | — | Dagquotum van de mailserver. Klantmail stopt 50 berichten eerder, zodat storingsmeldingen er nog door kunnen. Leeg = geen teller |
 | `DEADMAN_URL` | nee | — | Wordt na elke volledige reconcilerronde aangeroepen; blijft hij uit, dan merkt een externe bewaker dat |
 | `RATE_VCPU`, `RATE_RAM_GB`, `RATE_DISK_GB` | nee | `0.010`, `0.004`, `0.0002` | Verbruikstarief per uur per eenheid |
 | `MAX_VPSES_PER_OWNER` | nee | `10` | Quotum per klant |
