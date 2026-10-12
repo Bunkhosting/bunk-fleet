@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { authApi, parseApiError, toPublicKeyOptions, type Passkey } from "@/lib/api";
+import { passkeyFout } from "@/lib/passkey-fout";
 import { useUser } from "@/contexts/UserContext";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -113,16 +114,18 @@ function BeveiligingContent() {
       await refresh();
     } catch (err: unknown) {
       // De browser gooit een DOMException als de gebruiker annuleert of als de
-      // authenticator al geregistreerd is; dat is geen serverfout.
-      const msg =
-        err instanceof DOMException
-          ? err.name === "NotAllowedError"
-            ? "Geannuleerd of geen toestemming gegeven."
-            : err.name === "InvalidStateError"
-              ? "Deze authenticator is al geregistreerd."
-              : err.message
-          : parseApiError(err, "Passkey toevoegen mislukt.");
-      toast({ variant: "destructive", title: "Passkey niet toegevoegd", description: msg });
+      // authenticator al geregistreerd is; dat is geen serverfout. De Engelse
+      // tekst van de browser komt nooit op het scherm, zie passkeyFout.
+      const browser = passkeyFout(err, "registreren");
+      if (browser?.geannuleerd) {
+        toast({ title: "Passkey niet toegevoegd", description: browser.melding });
+        return;
+      }
+      toast({
+        variant: "destructive",
+        title: "Passkey niet toegevoegd",
+        description: browser?.melding ?? parseApiError(err, "Passkey toevoegen is niet gelukt."),
+      });
     } finally {
       setPasskeyBusy(false);
     }

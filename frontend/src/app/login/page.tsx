@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import axios from "axios";
 import { authApi, parseApiError, toPublicKeyOptions, type PasskeyChallenge } from "@/lib/api";
+import { passkeyFout } from "@/lib/passkey-fout";
 import { useToast } from "@/components/ui/use-toast";
 
 type Step = "credentials" | "totp" | "verify_required";
@@ -124,13 +125,22 @@ function LoginForm() {
       if (axios.isAxiosError(err) && err.response?.data?.passkey_challenge) {
         setMfa((m) => ({ ...m, passkey: err.response!.data.passkey_challenge }));
       }
-      // Een storing of een rem (429) is iets anders dan een geweigerde passkey;
-      // parseApiError zegt welke van de twee het was.
-      const msg =
-        err instanceof DOMException && err.name === "NotAllowedError"
-          ? "Geannuleerd of geen toestemming gegeven."
-          : parseApiError(err, "Passkey niet geaccepteerd. Probeer het opnieuw of gebruik je authenticator-code.");
-      toast({ variant: "destructive", title: "Inloggen mislukt", description: msg });
+      // Een fout van de browser (geannuleerd, niet ondersteund) krijgt een eigen
+      // Nederlandse zin; een annulering is geen mislukte login en wordt rustig
+      // gemeld. Een storing of een rem (429) is iets anders dan een geweigerde
+      // passkey; parseApiError zegt welke van de twee het was.
+      const browser = passkeyFout(err, "inloggen");
+      if (browser?.geannuleerd) {
+        toast({ title: "Passkey niet gebruikt", description: browser.melding });
+        return;
+      }
+      toast({
+        variant: "destructive",
+        title: "Inloggen mislukt",
+        description:
+          browser?.melding ??
+          parseApiError(err, "Passkey niet geaccepteerd. Probeer het opnieuw of gebruik je authenticator-code."),
+      });
     } finally {
       setPasskeyBusy(false);
     }

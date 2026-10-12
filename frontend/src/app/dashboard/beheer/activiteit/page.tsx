@@ -1,15 +1,15 @@
 "use client";
 
+import { LoadError } from "@/components/feedback/load-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/components/ui/use-toast";
 import { AdminGuard } from "@/components/admin/admin-guard";
 import { useNieuwste } from "@/hooks/use-nieuwste";
-import { adminApi, type AdminCommand } from "@/lib/api";
+import { adminApi, type AdminCommand, parseApiError } from "@/lib/api";
 
 const FILTERS = [
   { key: "", label: "Alles" },
@@ -29,10 +29,10 @@ const wanneer = (iso: string) =>
   new Date(iso).toLocaleString("nl-NL", { dateStyle: "short", timeStyle: "medium" });
 
 function ActiviteitInner() {
-  const { toast } = useToast();
   const [commands, setCommands] = useState<AdminCommand[] | null>(null);
   const [filter, setFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [laadFout, setLaadFout] = useState<string | null>(null);
   const nieuwste = useNieuwste();
 
   const load = useCallback(
@@ -45,17 +45,22 @@ function ActiviteitInner() {
       adminApi
         .commands(status || undefined)
         .then((c) => {
-          if (isNieuwste()) setCommands(c);
+          if (!isNieuwste()) return;
+          setCommands(c);
+          setLaadFout(null);
         })
-        .catch(() => {
-          if (isNieuwste())
-            toast({ title: "Fout", description: "Kon de activiteit niet laden.", variant: "destructive" });
+        .catch((err: unknown) => {
+          if (!isNieuwste()) return;
+          // De rijen van het vorige filter weg. Ze bleven staan onder het nieuwe
+          // filter, alsof "Mislukt" de lijst van "Alles" was.
+          setCommands(null);
+          setLaadFout(parseApiError(err, "De activiteit kon niet worden geladen."));
         })
         .finally(() => {
           if (isNieuwste()) setLoading(false);
         });
     },
-    [toast, nieuwste],
+    [nieuwste],
   );
 
   useEffect(() => load(filter), [load, filter]);
@@ -95,7 +100,15 @@ function ActiviteitInner() {
 
       <Card>
         <CardContent className="p-4">
-          {loading || !commands ? (
+          {laadFout && !loading ? (
+            <LoadError
+              message={laadFout}
+              onRetry={() => {
+                setLoading(true);
+                load(filter);
+              }}
+            />
+          ) : loading || !commands ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
