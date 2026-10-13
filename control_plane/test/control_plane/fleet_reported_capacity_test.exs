@@ -11,7 +11,7 @@ defmodule ControlPlane.FleetReportedCapacityTest do
   """
   use ControlPlane.DataCase, async: true
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Reservation
@@ -92,7 +92,7 @@ defmodule ControlPlane.FleetReportedCapacityTest do
   end
 
   defp heartbeat(n, extra \\ %{}) do
-    Fleet.mark_online_heartbeat(
+    Liveness.mark_online_heartbeat(
       n,
       Map.merge(
         %{
@@ -166,7 +166,7 @@ defmodule ControlPlane.FleetReportedCapacityTest do
     n = node(r, %{available_ram_mb: 5000})
 
     {:ok, bijgewerkt} =
-      Fleet.mark_online_heartbeat(n, %{
+      Liveness.mark_online_heartbeat(n, %{
         "total_vcpu" => 4,
         "total_ram_mb" => 11_843,
         "total_disk_gb" => 94

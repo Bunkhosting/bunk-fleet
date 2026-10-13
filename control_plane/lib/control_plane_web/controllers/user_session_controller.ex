@@ -3,6 +3,8 @@ defmodule ControlPlaneWeb.UserSessionController do
 
   alias ControlPlane.Accounts
   alias ControlPlane.Accounts.LoginThrottle
+  alias ControlPlane.Accounts.Passkeys
+  alias ControlPlane.Accounts.Totp
   alias ControlPlaneWeb.UserAuth
 
   def new(conn, _params) do
@@ -18,7 +20,7 @@ defmodule ControlPlaneWeb.UserSessionController do
           # Dit scherm kent geen passkeys. Een account dat alleen een passkey als
           # tweede factor heeft, kwam hier eerst binnen met alleen een
           # wachtwoord -- precies wat die passkey moest voorkomen.
-          not Accounts.totp_active?(user) and Accounts.passkeys_active?(user) ->
+          not Totp.totp_active?(user) and Passkeys.passkeys_active?(user) ->
             conn
             |> put_layout(html: false)
             |> put_status(:unauthorized)
@@ -27,7 +29,7 @@ defmodule ControlPlaneWeb.UserSessionController do
                 "Dit account logt in met een passkey. Gebruik het dashboard op app.bunkhosting.nl."
             )
 
-          Accounts.totp_active?(user) ->
+          Totp.totp_active?(user) ->
             # Password verified, but the account requires a second factor. Hold the
             # user id in a fresh session WITHOUT issuing an auth token yet.
             conn
@@ -69,7 +71,7 @@ defmodule ControlPlaneWeb.UserSessionController do
       LoginThrottle.blocked?("2fa:" <> user.email) ->
         ongeldige_code(conn)
 
-      Accounts.valid_totp?(user, code) ->
+      Totp.valid_totp?(user, code) ->
         LoginThrottle.clear("2fa:" <> user.email)
 
         conn

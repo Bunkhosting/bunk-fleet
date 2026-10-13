@@ -3,10 +3,13 @@ defmodule ControlPlane.ProvisioningTest do
 
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Reservation
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.CommandQueue
+  alias ControlPlane.Provisioning.Teardown
 
   # --- inline insert helpers -------------------------------------------------
 
@@ -274,7 +277,7 @@ defmodule ControlPlane.ProvisioningTest do
       _node = insert_node(region)
       vps = active_vps(region)
 
-      assert {:ok, %{vps: deleting, command: command}} = Provisioning.delete_vps(vps.id)
+      assert {:ok, %{vps: deleting, command: command}} = Teardown.delete_vps(vps.id)
 
       assert deleting.status == :deleting
 
@@ -287,7 +290,7 @@ defmodule ControlPlane.ProvisioningTest do
     end
 
     test "returns :not_found for an unknown VPS" do
-      assert {:error, :not_found} = Provisioning.delete_vps(Ecto.UUID.generate())
+      assert {:error, :not_found} = Teardown.delete_vps(Ecto.UUID.generate())
     end
 
     test "deleting while a provision is in flight defers teardown and tears down the created VM" do
@@ -297,11 +300,11 @@ defmodule ControlPlane.ProvisioningTest do
       after_place = Repo.get!(Node, node.id)
 
       # The agent has picked the provision command up (in flight).
-      Provisioning.mark_delivered_all([provision])
+      CommandQueue.mark_delivered_all([provision])
 
       # A delete now must NOT fail the command or free capacity — the agent may
       # still be creating the VM. It defers (marks :deleting, command: nil).
-      assert {:ok, %{vps: deleting, command: nil}} = Provisioning.delete_vps(vps.id)
+      assert {:ok, %{vps: deleting, command: nil}} = Teardown.delete_vps(vps.id)
       assert deleting.status == :deleting
       assert Repo.get!(Command, provision.id).status == :delivered
       assert Repo.get!(Node, node.id).available_vcpu == after_place.available_vcpu
@@ -344,9 +347,9 @@ defmodule ControlPlane.ProvisioningTest do
 
       # No node was ever assigned (no VM, no held reservation), so a delete is a
       # direct cancellation — the customer can cancel a VPS still waiting for
-      # capacity without an agent command (see Provisioning.delete_vps/1).
+      # capacity without an agent command (see Teardown.delete_vps/1).
       assert {:ok, %{command: nil, vps: %Vps{status: :deleted}}} =
-               Provisioning.delete_vps(vps.id)
+               Teardown.delete_vps(vps.id)
     end
   end
 
@@ -358,7 +361,7 @@ defmodule ControlPlane.ProvisioningTest do
 
       after_provision = Repo.get!(Node, node.id)
 
-      {:ok, %{command: command}} = Provisioning.delete_vps(vps.id)
+      {:ok, %{command: command}} = Teardown.delete_vps(vps.id)
 
       assert {:ok, updated} =
                Provisioning.apply_result(command, %{
@@ -390,7 +393,7 @@ defmodule ControlPlane.ProvisioningTest do
       _node = insert_node(region)
       vps = active_vps(region)
 
-      {:ok, %{command: command}} = Provisioning.delete_vps(vps.id)
+      {:ok, %{command: command}} = Teardown.delete_vps(vps.id)
 
       assert {:ok, updated} =
                Provisioning.apply_result(command, %{
@@ -418,8 +421,8 @@ defmodule ControlPlane.ProvisioningTest do
       {:ok, %{command: command}} = Provisioning.create_vps(create_attrs(region))
 
       # Freshly delivered (delivered_at = now) -> not redelivered.
-      {:ok, _} = Provisioning.mark_delivered(command)
-      refute Enum.any?(Provisioning.deliverable_commands_for_node(node), &(&1.id == command.id))
+      {:ok, _} = CommandQueue.mark_delivered(command)
+      refute Enum.any?(CommandQueue.deliverable_commands_for_node(node), &(&1.id == command.id))
 
       # Backdate delivered_at well past the TTL -> becomes deliverable again.
       stale_at = DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:second)
@@ -428,7 +431,7 @@ defmodule ControlPlane.ProvisioningTest do
       |> Ecto.Changeset.change(delivered_at: stale_at)
       |> Repo.update!()
 
-      assert Enum.any?(Provisioning.deliverable_commands_for_node(node), &(&1.id == command.id))
+      assert Enum.any?(CommandQueue.deliverable_commands_for_node(node), &(&1.id == command.id))
     end
 
     test "always returns :pending commands and never terminal ones" do
@@ -437,7 +440,7 @@ defmodule ControlPlane.ProvisioningTest do
       {:ok, %{command: pending}} = Provisioning.create_vps(create_attrs(region))
 
       # Pending is deliverable.
-      assert Enum.any?(Provisioning.deliverable_commands_for_node(node), &(&1.id == pending.id))
+      assert Enum.any?(CommandQueue.deliverable_commands_for_node(node), &(&1.id == pending.id))
 
       # Resolve it; a :done command is never redelivered.
       {:ok, _} =
@@ -448,16 +451,16 @@ defmodule ControlPlane.ProvisioningTest do
           "error" => nil
         })
 
-      refute Enum.any?(Provisioning.deliverable_commands_for_node(node), &(&1.id == pending.id))
+      refute Enum.any?(CommandQueue.deliverable_commands_for_node(node), &(&1.id == pending.id))
     end
   end
 
-  describe "Fleet.delete_node/1" do
+  describe "NodeAdmin.delete_node/1" do
     test "removes a node that hosts no live VPSes" do
       region = insert_region()
       node = insert_node(region)
 
-      assert {:ok, _} = ControlPlane.Fleet.delete_node(node.id)
+      assert {:ok, _} = NodeAdmin.delete_node(node.id)
       refute Repo.get(Node, node.id)
     end
 
@@ -466,12 +469,12 @@ defmodule ControlPlane.ProvisioningTest do
       node = insert_node(region)
       _vps = active_vps(region)
 
-      assert {:error, :node_has_vpses} = ControlPlane.Fleet.delete_node(node.id)
+      assert {:error, :node_has_vpses} = NodeAdmin.delete_node(node.id)
       assert Repo.get(Node, node.id)
     end
 
     test "returns :not_found for an unknown node" do
-      assert {:error, :not_found} = ControlPlane.Fleet.delete_node(Ecto.UUID.generate())
+      assert {:error, :not_found} = NodeAdmin.delete_node(Ecto.UUID.generate())
     end
   end
 end

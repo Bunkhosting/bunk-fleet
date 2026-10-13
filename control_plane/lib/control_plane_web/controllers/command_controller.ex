@@ -20,12 +20,13 @@ defmodule ControlPlaneWeb.CommandController do
   alias ControlPlane.Console
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.CommandQueue
   alias ControlPlane.Repo
   alias ControlPlaneWeb.Fouten
 
   def index(conn, _params) do
     node = conn.assigns.current_node
-    gelezen = Provisioning.deliverable_commands_for_node(node)
+    gelezen = CommandQueue.deliverable_commands_for_node(node)
 
     # Mark the whole batch delivered in one UPDATE rather than one per command
     # (the previous per-row loop was an N+1 on every agent long-poll).
@@ -35,7 +36,7 @@ defmodule ControlPlaneWeb.CommandController do
     # annuleren tussen het lezen hierboven en dit schrijven. Het UPDATE slaat
     # het dan over, maar het stond nog in de gelezen lijst -- en de agent
     # bouwde een VM voor een VPS die niet meer bestond.
-    {_, gemarkeerd} = Provisioning.mark_delivered_all(gelezen)
+    {_, gemarkeerd} = CommandQueue.mark_delivered_all(gelezen)
     gemarkeerd = MapSet.new(gemarkeerd)
     commands = Enum.filter(gelezen, &MapSet.member?(gemarkeerd, &1.id))
 

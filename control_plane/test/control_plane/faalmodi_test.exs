@@ -16,19 +16,20 @@ defmodule ControlPlane.FaalmodiTest do
 
   De tweede test in "een node die tijdens het uitrollen wegvalt" legde eerst een
   gat vast: er was geen enkele opruimer die naar :provisioning keek. Die is er nu
-  (`Provisioning.fail_stuck_provisioning_vpses/1`) en de test beschrijft wat hij
+  (`Sweeps.fail_stuck_provisioning_vpses/1`) en de test beschrijft wat hij
   hoort te doen.
   """
   use ControlPlane.DataCase, async: true
 
   alias ControlPlane.Clock
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Command
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Reservation
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Sweeps
 
   @ram_mb 4096
 
@@ -73,7 +74,7 @@ defmodule ControlPlane.FaalmodiTest do
   # gaat als argument mee.
   defp valt_weg(node) do
     straks = Clock.shift(60)
-    {1, _} = Fleet.mark_stale_nodes_offline(straks)
+    {1, _} = Liveness.mark_stale_nodes_offline(straks)
     Repo.get!(Node, node.id)
   end
 
@@ -109,10 +110,10 @@ defmodule ControlPlane.FaalmodiTest do
       # Binnen de coulanceperiode gebeurt er niets: een node die kort niets zegt
       # mag geen bestelling kosten. De grens is het hele punt, dus hij wordt aan
       # beide kanten aangeraakt.
-      assert Provisioning.fail_stuck_provisioning_vpses(3600) == 0
+      assert Sweeps.fail_stuck_provisioning_vpses(3600) == 0
       assert Repo.get!(Vps, vps.id).status == :provisioning
 
-      assert Provisioning.fail_stuck_provisioning_vpses(-1) == 1
+      assert Sweeps.fail_stuck_provisioning_vpses(-1) == 1
       assert Repo.get!(Vps, vps.id).status == :failed
       assert Repo.get_by!(Reservation, vps_id: vps.id).status == :released
 
@@ -121,7 +122,7 @@ defmodule ControlPlane.FaalmodiTest do
       assert Repo.get!(Node, node.id).available_ram_mb == 65_536
 
       # Tweemaal draaien mag niets extra's doen -- de sweeper loopt elke tik.
-      assert Provisioning.fail_stuck_provisioning_vpses(-1) == 0
+      assert Sweeps.fail_stuck_provisioning_vpses(-1) == 0
     end
 
     test "een node die alleen even stil was houdt zijn bestelling" do
@@ -133,7 +134,7 @@ defmodule ControlPlane.FaalmodiTest do
       _node = fleet_node(r)
       %{vps: vps} = bestel(r)
 
-      assert Provisioning.fail_stuck_provisioning_vpses(-1) == 0
+      assert Sweeps.fail_stuck_provisioning_vpses(-1) == 0
       assert Repo.get!(Vps, vps.id).status == :provisioning
     end
 
@@ -155,7 +156,7 @@ defmodule ControlPlane.FaalmodiTest do
         })
         |> Repo.insert!()
 
-      assert Provisioning.fail_stuck_queued_vpses(-1) == 1
+      assert Sweeps.fail_stuck_queued_vpses(-1) == 1
       assert Repo.get!(Vps, blijven_liggen.id).status == :failed
     end
   end

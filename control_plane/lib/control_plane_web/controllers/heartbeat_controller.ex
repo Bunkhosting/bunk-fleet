@@ -6,7 +6,7 @@ defmodule ControlPlaneWeb.HeartbeatController do
   """
   use ControlPlaneWeb, :controller
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Liveness
 
   def create(conn, %{"node_id" => node_id} = params) do
     node = conn.assigns.current_node
@@ -36,7 +36,7 @@ defmodule ControlPlaneWeb.HeartbeatController do
           "reported_avail_disk_gb" => params["avail_disk_gb"]
         })
 
-      case Fleet.mark_online_heartbeat(node, total_attrs) do
+      case Liveness.mark_online_heartbeat(node, total_attrs) do
         {:ok, bijgewerkt} ->
           # Het antwoord draagt de instellingen die de eigenaar in het dashboard
           # heeft gezet. Zo landt een wijziging binnen een heartbeat op de

@@ -13,6 +13,7 @@ defmodule ControlPlane.ProvisioningClosesNodeTest do
 
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
@@ -103,7 +104,7 @@ defmodule ControlPlane.ProvisioningClosesNodeTest do
       assert {:ok, _} = provision_faalt(node, vps, "proxmox: clone template 9000: boom")
       assert Repo.get!(Node, node.id).drain_reason
 
-      assert {:ok, _} = ControlPlane.Fleet.resume_node(node.id)
+      assert {:ok, _} = NodeAdmin.resume_node(node.id)
 
       hersteld = Repo.get!(Node, node.id)
       assert hersteld.status == :online

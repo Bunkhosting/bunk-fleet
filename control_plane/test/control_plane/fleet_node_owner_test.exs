@@ -10,8 +10,8 @@ defmodule ControlPlane.FleetNodeOwnerTest do
   use ControlPlane.DataCase, async: true
 
   alias ControlPlane.Accounts
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Repo
 
@@ -47,7 +47,7 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       u = gebruiker("eigenaar1@bunk.test")
       n = fleet_node()
 
-      assert {:ok, bijgewerkt} = Fleet.assign_node_owner(n.id, beheerder, u.id)
+      assert {:ok, bijgewerkt} = NodeAdmin.assign_node_owner(n.id, beheerder, u.id)
       assert bijgewerkt.owner_id == u.id
     end
 
@@ -56,7 +56,7 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       n = fleet_node()
       dief = gebruiker("dief@bunk.test")
 
-      assert {:error, :forbidden} = Fleet.assign_node_owner(n.id, dief, dief.id)
+      assert {:error, :forbidden} = NodeAdmin.assign_node_owner(n.id, dief, dief.id)
     end
 
     test "de eigenaar draagt zijn eigen node over" do
@@ -64,9 +64,9 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       eigenaar = gebruiker("eigenaar2@bunk.test")
       opvolger = gebruiker("opvolger@bunk.test")
       n = fleet_node()
-      {:ok, n} = Fleet.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
 
-      assert {:ok, bijgewerkt} = Fleet.assign_node_owner(n.id, eigenaar, opvolger.id)
+      assert {:ok, bijgewerkt} = NodeAdmin.assign_node_owner(n.id, eigenaar, opvolger.id)
       assert bijgewerkt.owner_id == opvolger.id
     end
 
@@ -76,9 +76,9 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm3@bunk.test"), :admin)
       eigenaar = gebruiker("eigenaar3@bunk.test")
       n = fleet_node()
-      {:ok, n} = Fleet.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
 
-      assert {:error, :forbidden} = Fleet.assign_node_owner(n.id, beheerder, beheerder.id)
+      assert {:error, :forbidden} = NodeAdmin.assign_node_owner(n.id, beheerder, beheerder.id)
       assert Repo.get!(Node, n.id).owner_id == eigenaar.id
     end
 
@@ -87,18 +87,18 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       eigenaar = gebruiker("eigenaar4@bunk.test")
       vreemde = gebruiker("vreemde@bunk.test")
       n = fleet_node()
-      {:ok, n} = Fleet.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
 
-      assert {:error, :forbidden} = Fleet.assign_node_owner(n.id, vreemde, vreemde.id)
+      assert {:error, :forbidden} = NodeAdmin.assign_node_owner(n.id, vreemde, vreemde.id)
     end
 
     test "de eigenaar kan zijn node eigenaarloos maken" do
       {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm5@bunk.test"), :admin)
       eigenaar = gebruiker("eigenaar5@bunk.test")
       n = fleet_node()
-      {:ok, n} = Fleet.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
 
-      assert {:ok, bijgewerkt} = Fleet.assign_node_owner(n.id, eigenaar, nil)
+      assert {:ok, bijgewerkt} = NodeAdmin.assign_node_owner(n.id, eigenaar, nil)
       assert is_nil(bijgewerkt.owner_id)
     end
 
@@ -107,7 +107,7 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       n = fleet_node()
 
       assert {:error, :unknown_user} =
-               Fleet.assign_node_owner(n.id, beheerder, Ecto.UUID.generate())
+               NodeAdmin.assign_node_owner(n.id, beheerder, Ecto.UUID.generate())
 
       assert is_nil(Repo.get!(Node, n.id).owner_id)
     end
@@ -116,7 +116,7 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm7@bunk.test"), :admin)
 
       assert {:error, :not_found} =
-               Fleet.assign_node_owner(Ecto.UUID.generate(), beheerder, beheerder.id)
+               NodeAdmin.assign_node_owner(Ecto.UUID.generate(), beheerder, beheerder.id)
     end
   end
 
@@ -126,7 +126,7 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       n = fleet_node()
       n = Repo.update!(Ecto.Changeset.change(n, owner_id: u.id))
 
-      assert Fleet.node_owner?(n, u)
+      assert NodeAdmin.node_owner?(n, u)
     end
 
     test "een ander niet, ook geen beheerder" do
@@ -137,7 +137,7 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       n = fleet_node()
       n = Repo.update!(Ecto.Changeset.change(n, owner_id: eigenaar.id))
 
-      refute Fleet.node_owner?(n, beheerder)
+      refute NodeAdmin.node_owner?(n, beheerder)
     end
 
     test "een node zonder eigenaar is van niemand" do
@@ -145,14 +145,14 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       # kunnen komen tot een beheerder hem heeft toegewezen.
       u = gebruiker("eigenaar6@bunk.test")
 
-      refute Fleet.node_owner?(fleet_node(), u)
+      refute NodeAdmin.node_owner?(fleet_node(), u)
     end
 
     test "niet ingelogd is nooit de eigenaar" do
       n = fleet_node()
       n = Repo.update!(Ecto.Changeset.change(n, owner_id: gebruiker("eigenaar7@bunk.test").id))
 
-      refute Fleet.node_owner?(n, nil)
+      refute NodeAdmin.node_owner?(n, nil)
     end
   end
 end

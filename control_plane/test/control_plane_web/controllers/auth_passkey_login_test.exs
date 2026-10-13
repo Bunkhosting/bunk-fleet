@@ -10,6 +10,8 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
   alias ControlPlane.Accounts
   alias ControlPlane.Accounts.Passkey
   alias ControlPlane.Accounts.PasskeyChallenges
+  alias ControlPlane.Accounts.Passkeys
+  alias ControlPlane.Accounts.Totp
   alias ControlPlane.Repo
 
   @password "test-only-password-4f2b9c1e"
@@ -88,9 +90,9 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
 
   test "een account met alleen TOTP verandert niet van gedrag", %{conn: conn} do
     u = confirmed_user("pl3@bunk.test")
-    u = Accounts.start_totp_setup(u)
+    u = Totp.start_totp_setup(u)
     code = NimbleTOTP.verification_code(u.totp_secret)
-    {:ok, _} = Accounts.confirm_totp(u, code)
+    {:ok, _} = Totp.confirm_totp(u, code)
 
     body = conn |> login("pl3@bunk.test") |> json_response(200)
     assert body["totp_required"] == true
@@ -111,7 +113,7 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
   test "de beheer-endpoints weigeren rommel en andermans sleutels", %{conn: conn} do
     a = confirmed_user("pl5a@bunk.test")
     b = confirmed_user("pl5b@bunk.test") |> with_passkey()
-    [pk_b] = Accounts.list_passkeys(b)
+    [pk_b] = Passkeys.list_passkeys(b)
 
     token = a |> Accounts.generate_user_session_token() |> Base.url_encode64(padding: false)
     authed = put_req_header(conn, "authorization", "Bearer " <> token)
@@ -139,6 +141,6 @@ defmodule ControlPlaneWeb.AuthPasskeyLoginTest do
              |> delete(~p"/api/v1/auth/passkeys/#{pk_b.id}", %{"current_password" => @password})
              |> json_response(404)
 
-    assert Accounts.passkeys_active?(b)
+    assert Passkeys.passkeys_active?(b)
   end
 end

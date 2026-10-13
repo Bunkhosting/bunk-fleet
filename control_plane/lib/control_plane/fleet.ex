@@ -2,74 +2,17 @@ defmodule ControlPlane.Fleet do
   @moduledoc """
   The Fleet context: regions, nodes, VPSes and capacity reservations that make up
   the federated VPS control plane.
+
+  Regio's, nodebeheer, hartslagen en opruimwerk staan in `ControlPlane.Fleet.Regions`,
+  `ControlPlane.Fleet.NodeAdmin`, `ControlPlane.Fleet.Liveness` en
+  `ControlPlane.Fleet.Housekeeping`.
   """
   import Ecto.Query, warn: false
 
   alias ControlPlane.Fleet.Events
-  alias ControlPlane.Fleet.Housekeeping
-  alias ControlPlane.Fleet.Liveness
-  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Package
-  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Repo
-
-  @doc "Zie `ControlPlane.Fleet.Regions.list_regions/0`."
-  defdelegate list_regions(), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.selectable_regions/1`."
-  defdelegate selectable_regions(extra_ids \\ []), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.list_regions_with_counts/0`."
-  defdelegate list_regions_with_counts(), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.update_region/2`."
-  defdelegate update_region(region_id, attrs), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.delete_region/1`."
-  defdelegate delete_region(region_id), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.get_region!/1`."
-  defdelegate get_region!(id), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.region_by_code/1`."
-  defdelegate region_by_code(code), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.create_region/1`."
-  defdelegate create_region(attrs), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.list_nodes/1`."
-  defdelegate list_nodes(opts \\ []), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.drain_node/2`."
-  defdelegate drain_node(node_id, reason \\ nil), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.list_nodes_owned_by/1`."
-  defdelegate list_nodes_owned_by(user), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.move_node_to_region/3`."
-  defdelegate move_node_to_region(node_id, user, region_id), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.move_node_to_named_region/3`."
-  defdelegate move_node_to_named_region(node_id, user, naam), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.Regions.ensure_region/1`."
-  defdelegate ensure_region(naam), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.update_node_settings/3`."
-  defdelegate update_node_settings(node_id, user, attrs), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.assign_node_owner/3`."
-  defdelegate assign_node_owner(node_id, door, owner_id), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.node_owner?/2`."
-  defdelegate node_owner?(node, user), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.resume_node/1`."
-  defdelegate resume_node(node_id), to: NodeAdmin
-
-  @doc "Zie `ControlPlane.Fleet.NodeAdmin.delete_node/1`."
-  defdelegate delete_node(node_id), to: NodeAdmin
 
   @doc """
   Returns all VPSes, with their region preloaded, newest first.
@@ -190,12 +133,6 @@ defmodule ControlPlane.Fleet do
 
   def rename_vps(%Vps{}, _naam), do: {:error, :invalid_status}
 
-  @doc "Zie `ControlPlane.Fleet.Liveness.register_node/1`."
-  defdelegate register_node(attrs), to: Liveness
-
-  @doc "Zie `ControlPlane.Fleet.Liveness.mark_online_heartbeat/2`."
-  defdelegate mark_online_heartbeat(node, total_attrs), to: Liveness
-
   # Runs `fun` only when `result` is `{:ok, value}`, then returns `result`
   # unchanged. Used to fire a best-effort PubSub event as a side-effect after a
   # successful DB write without altering the function's return value.
@@ -205,28 +142,4 @@ defmodule ControlPlane.Fleet do
   end
 
   defp tap_ok(result, _fun), do: result
-
-  @doc "Zie `ControlPlane.Fleet.Liveness.online_nodes_in_region_query/1`."
-  defdelegate online_nodes_in_region_query(region_id), to: Liveness
-
-  @doc "Zie `ControlPlane.Fleet.Regions.auto_region_id/1`."
-  defdelegate auto_region_id(request), to: Regions
-
-  @doc "Zie `ControlPlane.Fleet.Regions.available_regions/0`."
-  defdelegate available_regions(), to: Regions
-
-  @doc false
-  defdelegate heartbeat_ttl_seconds(), to: Liveness
-
-  @doc "Zie `ControlPlane.Fleet.Housekeeping.scrub_deleted_vpses/1`."
-  defdelegate scrub_deleted_vpses(dagen \\ 30), to: Housekeeping
-
-  @doc "Zie `ControlPlane.Fleet.Liveness.mark_stale_nodes_offline/0`."
-  defdelegate mark_stale_nodes_offline(), to: Liveness
-
-  @doc "Zie `ControlPlane.Fleet.Liveness.mark_stale_nodes_offline/1`."
-  defdelegate mark_stale_nodes_offline(cutoff), to: Liveness
-
-  @doc "Zie `ControlPlane.Fleet.Housekeeping.release_orphaned_reservations/0`."
-  defdelegate release_orphaned_reservations(), to: Housekeeping
 end

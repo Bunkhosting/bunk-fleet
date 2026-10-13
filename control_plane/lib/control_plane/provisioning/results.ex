@@ -29,11 +29,11 @@ defmodule ControlPlane.Provisioning.Results do
   alias ControlPlane.Clock
   alias ControlPlane.Console.HostKeys
   alias ControlPlane.Credits
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Drift
   alias ControlPlane.Fleet.Events
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Reservation
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Net
@@ -564,7 +564,7 @@ defmodule ControlPlane.Provisioning.Results do
   defp close_node(node_id, reden) do
     Logger.warning("node #{node_id} afgesloten na een mislukte bestelling: #{kort(reden)}")
 
-    case Fleet.drain_node(node_id, kort(reden)) do
+    case NodeAdmin.drain_node(node_id, kort(reden)) do
       {:ok, node} ->
         {:ok, node}
 

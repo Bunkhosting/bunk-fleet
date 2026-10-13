@@ -1,8 +1,8 @@
 defmodule ControlPlaneWeb.Admin.NodeDrainTest do
   use ControlPlaneWeb.ConnCase, async: true
 
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Repo
 
@@ -71,6 +71,6 @@ defmodule ControlPlaneWeb.Admin.NodeDrainTest do
     assert %{"node" => %{"status" => "draining"}} =
              conn |> auth() |> post(~p"/admin/v1/nodes/#{node.id}/drain") |> json_response(200)
 
-    assert {:ok, %Node{status: :draining}} = Fleet.drain_node(node.id)
+    assert {:ok, %Node{status: :draining}} = NodeAdmin.drain_node(node.id)
   end
 end

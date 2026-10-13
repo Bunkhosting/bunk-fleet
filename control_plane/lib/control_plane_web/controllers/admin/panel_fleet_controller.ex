@@ -12,9 +12,10 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
 
   alias ControlPlane.Accounts.User
   alias ControlPlane.Enrollment
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Repo
 
   @doc """
@@ -25,12 +26,12 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   voordat iemand zich afvraagt waarom er daar niets geplaatst wordt.
   """
   def regions(conn, _params) do
-    json(conn, %{regions: Enum.map(Fleet.list_regions_with_counts(), &region_row/1)})
+    json(conn, %{regions: Enum.map(Regions.list_regions_with_counts(), &region_row/1)})
   end
 
   @doc "Maakt een nieuwe locatie aan."
   def create_region(conn, params) do
-    case Fleet.create_region(%{code: params["code"], name: params["name"]}) do
+    case Regions.create_region(%{code: params["code"], name: params["name"]}) do
       {:ok, region} ->
         conn
         |> put_status(:created)
@@ -49,7 +50,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   """
   def update_region(conn, %{"id" => id} = params) do
     with {:ok, region_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
-         {:ok, region} <- Fleet.update_region(region_id, params) do
+         {:ok, region} <- Regions.update_region(region_id, params) do
       json(conn, %{region: region_row(met_telling(region))})
     else
       :not_found -> error(conn, :not_found, "not_found")
@@ -72,7 +73,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   """
   def delete_region(conn, %{"id" => id}) do
     with {:ok, region_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
-         :ok <- Fleet.delete_region(region_id) do
+         :ok <- Regions.delete_region(region_id) do
       send_resp(conn, :no_content, "")
     else
       :not_found -> error(conn, :not_found, "not_found")
@@ -113,7 +114,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   # die "niet opgevraagd" betekent zou het aantal nodes ter plekke wissen.
   defp met_telling(region) do
     Enum.find(
-      Fleet.list_regions_with_counts(),
+      Regions.list_regions_with_counts(),
       %{region: region, node_count: 0},
       &(&1.region.id == region.id)
     )
@@ -124,7 +125,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   end
 
   def nodes(conn, _params) do
-    json(conn, %{nodes: Enum.map(Fleet.list_nodes(), &node_json/1)})
+    json(conn, %{nodes: Enum.map(NodeAdmin.list_nodes(), &node_json/1)})
   end
 
   @doc """
@@ -134,9 +135,9 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   the scheduler stops placing there while everything already on it keeps running
   and keeps being served. Emptying it afterwards is deliberate and manual.
   """
-  def drain_node(conn, %{"id" => id}), do: node_transition(conn, id, &Fleet.drain_node/1)
+  def drain_node(conn, %{"id" => id}), do: node_transition(conn, id, &NodeAdmin.drain_node/1)
 
-  def resume_node(conn, %{"id" => id}), do: node_transition(conn, id, &Fleet.resume_node/1)
+  def resume_node(conn, %{"id" => id}), do: node_transition(conn, id, &NodeAdmin.resume_node/1)
 
   defp node_transition(conn, id, change) do
     with {:ok, node_id} <- Ecto.UUID.cast(id),
@@ -153,7 +154,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   def delete_node(conn, %{"id" => id}) do
     case Ecto.UUID.cast(id) do
       {:ok, node_id} ->
-        case Fleet.delete_node(node_id) do
+        case NodeAdmin.delete_node(node_id) do
           {:ok, _} -> json(conn, %{detail: "ok"})
           {:error, :not_found} -> error(conn, :not_found, "not_found")
           {:error, :node_has_vpses} -> error(conn, :conflict, "node_has_vpses")
@@ -204,7 +205,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   end
 
   defp resolve_region(%{"region_code" => code}) when is_binary(code) and code != "" do
-    case Fleet.region_by_code(code) do
+    case Regions.region_by_code(code) do
       %Region{} = region -> {:ok, region}
       nil -> {:error, :region_not_found}
     end

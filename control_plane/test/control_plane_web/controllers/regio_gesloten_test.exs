@@ -7,7 +7,7 @@ defmodule ControlPlaneWeb.RegioGeslotenTest do
   De regio verdween uit `GET /regions`, en dat was alles -- wie de code zelf
   meestuurde kwam er gewoon langs.
 
-  Het wrange was welke kant beschermd was. `Fleet.auto_region_id/1` slaat een
+  Het wrange was welke kant beschermd was. `Fleet.Regions.auto_region_id/1` slaat een
   uitgeschakelde regio wél over, met een comment erbij waarom. Alleen de BEWUSTE
   keuze van een klant ging er ongehinderd langs -- een oud tabblad, een script,
   iemands eigen client.

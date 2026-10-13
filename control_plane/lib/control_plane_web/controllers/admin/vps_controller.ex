@@ -13,8 +13,10 @@ defmodule ControlPlaneWeb.Admin.VpsController do
 
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Teardown
   alias ControlPlane.Repo
 
   def index(conn, _params) do
@@ -64,7 +66,7 @@ defmodule ControlPlaneWeb.Admin.VpsController do
   end
 
   defp do_delete(conn, id) do
-    case Provisioning.delete_vps(id) do
+    case Teardown.delete_vps(id) do
       {:ok, %{vps: vps}} ->
         conn
         |> put_status(:accepted)
@@ -109,7 +111,7 @@ defmodule ControlPlaneWeb.Admin.VpsController do
   end
 
   defp resolve_region_id(%{"region_code" => region_code}) when is_binary(region_code) do
-    case Fleet.region_by_code(region_code) do
+    case Regions.region_by_code(region_code) do
       %Region{id: id} -> {:ok, id}
       nil -> {:error, :region_not_found}
     end

@@ -15,7 +15,7 @@ defmodule ControlPlane.VastgelopenToestandenTest do
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Sweeps
 
   defp node_met(status) do
     region =
@@ -67,7 +67,7 @@ defmodule ControlPlane.VastgelopenToestandenTest do
     vps = vps_op(node_met(:online), :restoring)
     cmd = commando(vps, :restore_backup, 7 * 3600)
 
-    assert Provisioning.fail_stuck_restores() == 1
+    assert Sweeps.fail_stuck_restores() == 1
     # :stopped en niet :active: de schijf kan half geschreven zijn.
     assert status(vps) == :stopped
     assert Repo.get!(Command, cmd.id).status == :failed
@@ -77,7 +77,7 @@ defmodule ControlPlane.VastgelopenToestandenTest do
     vps = vps_op(node_met(:online), :restoring)
     commando(vps, :restore_backup, 600)
 
-    assert Provisioning.fail_stuck_restores() == 0
+    assert Sweeps.fail_stuck_restores() == 0
     assert status(vps) == :restoring
   end
 
@@ -85,7 +85,7 @@ defmodule ControlPlane.VastgelopenToestandenTest do
     # Niets zal hem ooit nog verplaatsen.
     vps = vps_op(node_met(:online), :restoring, 3600)
 
-    assert Provisioning.fail_stuck_restores() == 1
+    assert Sweeps.fail_stuck_restores() == 1
     assert status(vps) == :stopped
   end
 
@@ -94,7 +94,7 @@ defmodule ControlPlane.VastgelopenToestandenTest do
     vps = vps_op(node_met(:offline), :deleting)
     commando(vps, :provision, 3600)
 
-    assert Provisioning.fail_stuck_provisioning_vpses() == 1
+    assert Sweeps.fail_stuck_provisioning_vpses() == 1
     refute status(vps) == :deleting
   end
 end

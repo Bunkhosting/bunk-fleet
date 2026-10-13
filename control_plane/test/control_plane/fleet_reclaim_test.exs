@@ -2,7 +2,7 @@ defmodule ControlPlane.FleetReclaimTest do
   @moduledoc "Reclaiming orphaned/stale capacity reservations so nodes free up."
   use ControlPlane.DataCase, async: true
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Housekeeping
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Reservation
@@ -62,7 +62,7 @@ defmodule ControlPlane.FleetReclaimTest do
     {_region, node} = setup_node()
     held(node, nil)
 
-    assert Fleet.release_orphaned_reservations() == 1
+    assert Housekeeping.release_orphaned_reservations() == 1
     n = Repo.get!(Node, node.id)
     assert n.available_vcpu == 4
     assert n.available_ram_mb == 12_288 + 4096
@@ -77,7 +77,7 @@ defmodule ControlPlane.FleetReclaimTest do
     held(node, deleted.id)
     keep = held(node, live.id)
 
-    assert Fleet.release_orphaned_reservations() == 1
+    assert Housekeeping.release_orphaned_reservations() == 1
     assert Repo.get!(Reservation, keep.id).status == :held
     assert Repo.get!(Node, node.id).available_vcpu == 4
   end

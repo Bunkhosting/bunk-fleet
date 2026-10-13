@@ -10,9 +10,10 @@ defmodule ControlPlaneWeb.NodeController do
   use ControlPlaneWeb, :controller
 
   alias ControlPlane.Accounts
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlaneWeb.Fouten
 
   @doc """
@@ -24,9 +25,9 @@ defmodule ControlPlaneWeb.NodeController do
   je een tweede datacenter.
   """
   def index(conn, _params) do
-    nodes = Fleet.list_nodes_owned_by(conn.assigns.current_user)
+    nodes = NodeAdmin.list_nodes_owned_by(conn.assigns.current_user)
 
-    regions = Fleet.selectable_regions(Enum.map(nodes, & &1.region_id))
+    regions = Regions.selectable_regions(Enum.map(nodes, & &1.region_id))
 
     json(conn, %{
       nodes: Enum.map(nodes, &node_json/1),
@@ -43,7 +44,7 @@ defmodule ControlPlaneWeb.NodeController do
   def update_settings(conn, %{"id" => id} = params) do
     with {:ok, node_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
          {:ok, node} <-
-           Fleet.update_node_settings(node_id, conn.assigns.current_user, settings(params)) do
+           NodeAdmin.update_node_settings(node_id, conn.assigns.current_user, settings(params)) do
       json(conn, %{node: node_json(node)})
     else
       anders -> Fouten.fout(conn, anders, changeset_code: "invalid_settings")
@@ -67,7 +68,8 @@ defmodule ControlPlaneWeb.NodeController do
   def assign_owner(conn, %{"id" => id} = params) do
     with {:ok, node_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
          {:ok, owner_id} <- parse_owner(params["owner_email"]),
-         {:ok, node} <- Fleet.assign_node_owner(node_id, conn.assigns.current_user, owner_id) do
+         {:ok, node} <-
+           NodeAdmin.assign_node_owner(node_id, conn.assigns.current_user, owner_id) do
       json(conn, %{node: node_json(node)})
     else
       # Dat `:forbidden` hier een 404 wordt -- een node die van een ander is mag
@@ -111,7 +113,7 @@ defmodule ControlPlaneWeb.NodeController do
   def move_region(conn, %{"id" => id, "region_name" => naam}) when is_binary(naam) do
     with {:ok, node_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
          {:ok, node} <-
-           Fleet.move_node_to_named_region(node_id, conn.assigns.current_user, naam) do
+           NodeAdmin.move_node_to_named_region(node_id, conn.assigns.current_user, naam) do
       json(conn, %{node: node_json(node)})
     else
       anders -> Fouten.fout(conn, anders, changeset_code: "invalid_region")
@@ -121,7 +123,8 @@ defmodule ControlPlaneWeb.NodeController do
   def move_region(conn, %{"id" => id, "region_id" => region_id}) do
     with {:ok, node_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
          {:ok, target} <- Ecto.UUID.cast(region_id) |> ok_or(:unknown_region),
-         {:ok, node} <- Fleet.move_node_to_region(node_id, conn.assigns.current_user, target) do
+         {:ok, node} <-
+           NodeAdmin.move_node_to_region(node_id, conn.assigns.current_user, target) do
       json(conn, %{node: node_json(node)})
     else
       anders -> Fouten.fout(conn, anders)

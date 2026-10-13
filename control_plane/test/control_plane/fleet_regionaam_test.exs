@@ -1,7 +1,7 @@
 defmodule ControlPlane.FleetRegionaamTest do
   use ControlPlane.DataCase, async: true
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Regions
 
   # De naam komt van de eigenaar van een node en wordt getoond aan klanten die
   # een VPS bestellen. Geen XSS-gat -- de schermen escapen -- maar wel tekst van
@@ -9,13 +9,13 @@ defmodule ControlPlane.FleetRegionaamTest do
 
   test "echte plaatsnamen komen erdoor, ook de lastige" do
     for naam <- ["Eindhoven", "Den Haag", "'s-Hertogenbosch", "Saint-Denis", "Z\u00fcrich", "A1"] do
-      assert {:ok, _} = Fleet.ensure_region(naam), "#{naam} werd geweigerd"
+      assert {:ok, _} = Regions.ensure_region(naam), "#{naam} werd geweigerd"
     end
   end
 
   test "dezelfde plaats levert dezelfde regio op, hoe je hem ook typt" do
-    assert {:ok, een} = Fleet.ensure_region("Maastricht")
-    assert {:ok, twee} = Fleet.ensure_region("  maastricht  ")
+    assert {:ok, een} = Regions.ensure_region("Maastricht")
+    assert {:ok, twee} = Regions.ensure_region("  maastricht  ")
     assert een.id == twee.id
   end
 
@@ -28,7 +28,7 @@ defmodule ControlPlane.FleetRegionaamTest do
           "a",
           String.duplicate("x", 61)
         ] do
-      assert {:error, :invalid_region} = Fleet.ensure_region(onzin),
+      assert {:error, :invalid_region} = Regions.ensure_region(onzin),
              "#{inspect(onzin)} werd geaccepteerd als regionaam"
     end
   end

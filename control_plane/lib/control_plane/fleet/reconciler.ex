@@ -5,7 +5,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   Nodes report heartbeats; a node whose agent dies keeps `status: :online` in the
   database forever (the heartbeat TTL only hides it from the scheduler), so the
   operator dashboard would keep showing a dead node as online. On a fixed
-  interval this GenServer calls `ControlPlane.Fleet.mark_stale_nodes_offline/0`,
+  interval this GenServer calls `Liveness.mark_stale_nodes_offline/0`,
   which marks every `:online` node with a stale/absent heartbeat as `:offline`.
 
   Each tick also drives billing: after reconciling node health it meters every
@@ -40,13 +40,16 @@ defmodule ControlPlane.Fleet.Reconciler do
   alias ControlPlane.Billing
   alias ControlPlane.Billing.MollieAfhandeling
   alias ControlPlane.Credits
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.AgentUpdate
   alias ControlPlane.Fleet.Drift
   alias ControlPlane.Fleet.HartslagNaarBuiten
+  alias ControlPlane.Fleet.Housekeeping
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.StilleNodes
   alias ControlPlane.Mollie
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.CommandQueue
+  alias ControlPlane.Provisioning.Sweeps
+  alias ControlPlane.Provisioning.Teardown
   alias ControlPlane.Schijfruimte
   alias ControlPlane.Subscriptions
 
@@ -294,7 +297,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   defp maybe_check_drift(state), do: state
 
   # Afgehandelde commando's van drie maanden oud. Zie
-  # `Provisioning.purge_old_commands/2` voor waarom die weg mogen en waarom er
+  # `CommandQueue.purge_old_commands/2` voor waarom die weg mogen en waarom er
   # een bovengrens per ronde op zit.
   defp maybe_purge_commands(%{purge_interval_ms: pi, last_purge_ms: last} = state) do
     now = System.monotonic_time(:millisecond)
@@ -326,7 +329,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   defp maybe_scrub_vpses(state), do: state
 
   defp scrub_vpses do
-    case Fleet.scrub_deleted_vpses() do
+    case Housekeeping.scrub_deleted_vpses() do
       0 -> :ok
       n -> Logger.info("persoonsgegevens gewist van verwijderde vps'en", count: n)
     end
@@ -461,7 +464,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   # zo'n commando alsnog laten falen zou een draaiende machine terugbetalen en
   # verwijderen.
   defp meld_vastgelopen_commandos do
-    case Provisioning.vastgelopen_commandos() do
+    case CommandQueue.vastgelopen_commandos() do
       [] ->
         :ok
 
@@ -476,7 +479,7 @@ defmodule ControlPlane.Fleet.Reconciler do
         ControlPlane.Notifier.deliver_operational_alert(
           "#{length(commandos)} commando(s) zitten vast in herlevering",
           """
-          Deze commando's zijn #{Provisioning.max_afleveringen()} keer of vaker
+          Deze commando's zijn #{CommandQueue.max_afleveringen()} keer of vaker
           aan een node gegeven zonder dat er ooit een resultaat terugkwam:
 
           #{regels}
@@ -495,7 +498,7 @@ defmodule ControlPlane.Fleet.Reconciler do
         # Pas markeren NA het versturen: gaat het melden mis, dan hoort het bij
         # de volgende tik opnieuw geprobeerd te worden in plaats van stil te
         # verdwijnen.
-        Provisioning.markeer_gemeld(commandos)
+        CommandQueue.markeer_gemeld(commandos)
     end
   rescue
     exception ->
@@ -542,7 +545,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp purge_commands do
-    case Provisioning.purge_old_commands() do
+    case CommandQueue.purge_old_commands() do
       0 -> :ok
       n -> Logger.info("oude commando's opgeruimd", count: n)
     end
@@ -589,7 +592,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp reconcile_nodes do
-    {count, _} = Fleet.mark_stale_nodes_offline()
+    {count, _} = Liveness.mark_stale_nodes_offline()
 
     if count > 0 do
       Logger.info("fleet reconciler marked stale nodes offline", marked_offline: count)
@@ -603,7 +606,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp reclaim_reservations do
-    count = Fleet.release_orphaned_reservations()
+    count = Housekeeping.release_orphaned_reservations()
 
     if count > 0 do
       Logger.info("fleet reconciler reclaimed orphaned reservations", reclaimed: count)
@@ -617,7 +620,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp fail_stuck_creates do
-    count = Provisioning.fail_stuck_queued_vpses()
+    count = Sweeps.fail_stuck_queued_vpses()
 
     if count > 0 do
       # Hard, en naar een mens: elke rij hier is een klant die betaalde voor een
@@ -653,7 +656,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp fail_stuck_restores do
-    case Provisioning.fail_stuck_restores() do
+    case Sweeps.fail_stuck_restores() do
       0 -> :ok
       n -> Logger.error("#{n} vps(en) losgemaakt uit :restoring waar ze nooit meer uit kwamen")
     end
@@ -669,7 +672,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   # `fail_stuck_creates/0` hierboven ziet die niet: die kijkt naar :queued, en
   # deze staat op :provisioning.
   defp fail_stuck_provisionings do
-    count = Provisioning.fail_stuck_provisioning_vpses()
+    count = Sweeps.fail_stuck_provisioning_vpses()
 
     if count > 0 do
       Logger.error("#{count} vps(en) losgemaakt van een node die niet meer terugkwam")
@@ -731,7 +734,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   defp retry_stuck_deletes do
     # Wees-VM's (VPS al :deleted) horen erbij: hun afbraak werd anders maar één
     # keer geprobeerd, en een mislukking bleef dan stil staan tot de driftmelding.
-    count = Provisioning.retry_stuck_deletes() + Provisioning.retry_orphan_deletes()
+    count = Teardown.retry_stuck_deletes() + Teardown.retry_orphan_deletes()
 
     if count > 0 do
       Logger.info("fleet reconciler retried failed teardowns", retried: count)

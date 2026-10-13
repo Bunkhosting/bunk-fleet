@@ -5,16 +5,16 @@ defmodule ControlPlaneWeb.RegionController do
   Only regions with an online node reporting free capacity are listed: a region
   with nothing behind it is not a choice, it is a disappointment. A customer who
   expresses no preference gets placed automatically on the emptiest machine in the
-  fleet (see `ControlPlane.Fleet.auto_region_id/1`), which is why this list can be
+  fleet (see `Regions.auto_region_id/1`), which is why this list can be
   empty without the create flow breaking.
   """
   use ControlPlaneWeb, :controller
 
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
 
   def index(conn, _params) do
-    json(conn, %{regions: Enum.map(Fleet.available_regions(), &region_json/1)})
+    json(conn, %{regions: Enum.map(Regions.available_regions(), &region_json/1)})
   end
 
   defp region_json(%Region{} = region) do

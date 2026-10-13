@@ -16,6 +16,8 @@ defmodule ControlPlaneWeb.DashboardLive do
 
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Events
+  alias ControlPlane.Fleet.NodeAdmin
+  alias ControlPlane.Fleet.Regions
 
   # Slow backstop refresh. Updates normally arrive via PubSub (sub-second); this
   # only catches a dropped/best-effort broadcast, so it can be far less frequent
@@ -46,8 +48,8 @@ defmodule ControlPlaneWeb.DashboardLive do
 
   # Reads all dashboard data and computes the summary aggregates.
   defp load(socket) do
-    regions = Fleet.list_regions()
-    nodes = Fleet.list_nodes()
+    regions = Regions.list_regions()
+    nodes = NodeAdmin.list_nodes()
     vpses = Fleet.list_vpses()
 
     summary = %{

@@ -2,13 +2,14 @@ defmodule ControlPlaneWeb.UserSessionMfaTest do
   use ControlPlaneWeb.ConnCase
 
   alias ControlPlane.Accounts
+  alias ControlPlane.Accounts.Totp
 
   @pw "test-only-password-4f2b9c1e"
 
   defp mfa_user(email) do
     {:ok, u} = Accounts.register_user(%{email: email, password: @pw})
-    u = Accounts.start_totp_setup(u)
-    {:ok, u} = Accounts.confirm_totp(u, NimbleTOTP.verification_code(u.totp_secret))
+    u = Totp.start_totp_setup(u)
+    {:ok, u} = Totp.confirm_totp(u, NimbleTOTP.verification_code(u.totp_secret))
     u
   end
 

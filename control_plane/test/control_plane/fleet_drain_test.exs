@@ -1,8 +1,9 @@
 defmodule ControlPlane.FleetDrainTest do
   use ControlPlane.DataCase, async: true
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Scheduler
 
@@ -35,7 +36,7 @@ defmodule ControlPlane.FleetDrainTest do
 
     assert {:ok, _} = Scheduler.place(Map.put(@request, :region_id, r.id))
 
-    {:ok, _} = Fleet.drain_node(node.id)
+    {:ok, _} = NodeAdmin.drain_node(node.id)
 
     assert {:error, :no_capacity} = Scheduler.place(Map.put(@request, :region_id, r.id))
   end
@@ -45,7 +46,7 @@ defmodule ControlPlane.FleetDrainTest do
     draining = online_node(r)
     keeping = online_node(r)
 
-    {:ok, _} = Fleet.drain_node(draining.id)
+    {:ok, _} = NodeAdmin.drain_node(draining.id)
 
     assert {:ok, %{node: placed}} = Scheduler.place(Map.put(@request, :region_id, r.id))
     assert placed.id == keeping.id
@@ -56,10 +57,10 @@ defmodule ControlPlane.FleetDrainTest do
     # stamped :online the node would quietly refill within thirty seconds.
     r = region()
     node = online_node(r)
-    {:ok, node} = Fleet.drain_node(node.id)
+    {:ok, node} = NodeAdmin.drain_node(node.id)
 
     {:ok, after_heartbeat} =
-      Fleet.mark_online_heartbeat(node, %{
+      Liveness.mark_online_heartbeat(node, %{
         total_vcpu: 16,
         total_ram_mb: 32_768,
         total_disk_gb: 500
@@ -72,8 +73,8 @@ defmodule ControlPlane.FleetDrainTest do
   test "resuming puts it back in rotation" do
     r = region()
     node = online_node(r)
-    {:ok, _} = Fleet.drain_node(node.id)
-    {:ok, resumed} = Fleet.resume_node(node.id)
+    {:ok, _} = NodeAdmin.drain_node(node.id)
+    {:ok, resumed} = NodeAdmin.resume_node(node.id)
 
     assert resumed.status == :online
     assert {:ok, _} = Scheduler.place(Map.put(@request, :region_id, r.id))
@@ -83,19 +84,19 @@ defmodule ControlPlane.FleetDrainTest do
     r = region()
     node = online_node(r)
 
-    assert {:ok, _} = Fleet.drain_node(node.id)
-    assert {:ok, %Node{status: :draining}} = Fleet.drain_node(node.id)
+    assert {:ok, _} = NodeAdmin.drain_node(node.id)
+    assert {:ok, %Node{status: :draining}} = NodeAdmin.drain_node(node.id)
   end
 
   test "resuming a node that was never drained is refused, not silently applied" do
     r = region()
     node = online_node(r)
 
-    assert {:ok, %Node{status: :online}} = Fleet.resume_node(node.id)
+    assert {:ok, %Node{status: :online}} = NodeAdmin.resume_node(node.id)
   end
 
   test "an unknown node is not found" do
-    assert {:error, :not_found} = Fleet.drain_node(Ecto.UUID.generate())
+    assert {:error, :not_found} = NodeAdmin.drain_node(Ecto.UUID.generate())
   end
 
   test "a drained node keeps the VPSes it already has" do
@@ -105,7 +106,7 @@ defmodule ControlPlane.FleetDrainTest do
     {:ok, %{node: placed}} = Scheduler.place(Map.put(@request, :region_id, r.id))
     assert placed.id == node.id
 
-    {:ok, _} = Fleet.drain_node(node.id)
+    {:ok, _} = NodeAdmin.drain_node(node.id)
 
     # Capacity accounting is untouched: the reservation it already holds is
     # still held, so resuming does not double-count.

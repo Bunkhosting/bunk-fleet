@@ -19,6 +19,7 @@ defmodule ControlPlaneWeb.BillingController do
 
   alias ControlPlane.Billing
   alias ControlPlane.Credits
+  alias ControlPlane.Credits.Topups
   alias ControlPlaneWeb.TimeWindow
 
   @doc """
@@ -32,7 +33,7 @@ defmodule ControlPlaneWeb.BillingController do
     json(conn, %{
       balance_cents: Credits.balance_cents(uid),
       entries: Enum.map(Credits.list_entries(uid, 25), &entry_json/1),
-      topups: Enum.map(Credits.list_topup_requests(uid, 10), &topup_json/1)
+      topups: Enum.map(Topups.list_topup_requests(uid, 10), &topup_json/1)
     })
   end
 

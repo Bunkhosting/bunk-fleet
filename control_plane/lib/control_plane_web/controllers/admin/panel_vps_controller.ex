@@ -11,7 +11,8 @@ defmodule ControlPlaneWeb.Admin.PanelVpsController do
   import ControlPlaneWeb.Admin.PanelHelpers, only: [error: 3, vps_json: 1]
 
   alias ControlPlane.Fleet.Vps
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
+  alias ControlPlane.Provisioning.Teardown
   alias ControlPlane.Repo
 
   def vpses(conn, _params) do
@@ -27,12 +28,12 @@ defmodule ControlPlaneWeb.Admin.PanelVpsController do
     json(conn, %{vpses: Enum.map(vpses, &vps_json/1)})
   end
 
-  def vps_start(conn, %{"id" => id}), do: vps_action(conn, id, &Provisioning.start_vps/1)
-  def vps_stop(conn, %{"id" => id}), do: vps_action(conn, id, &Provisioning.stop_vps/1)
+  def vps_start(conn, %{"id" => id}), do: vps_action(conn, id, &Power.start_vps/1)
+  def vps_stop(conn, %{"id" => id}), do: vps_action(conn, id, &Power.stop_vps/1)
 
   def vps_delete(conn, %{"id" => id}) do
     with_valid_vps(conn, id, fn vps_id ->
-      case Provisioning.delete_vps(vps_id) do
+      case Teardown.delete_vps(vps_id) do
         {:ok, _} -> json(conn, %{detail: "deleting"})
         {:error, :not_found} -> error(conn, :not_found, "not_found")
         {:error, reason} -> error(conn, :unprocessable_entity, to_string(reason))

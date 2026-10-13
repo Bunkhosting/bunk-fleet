@@ -14,7 +14,7 @@ defmodule ControlPlaneWeb.MollieController do
   require Logger
 
   alias ControlPlane.Billing.MollieAfhandeling
-  alias ControlPlane.Credits
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Mollie
   alias ControlPlaneWeb.Fouten
 
@@ -38,9 +38,9 @@ defmodule ControlPlaneWeb.MollieController do
     with {:ok, cents} <- parse_amount(params),
          true <- Mollie.configured?() || {:error, :not_configured},
          :ok <- check_pending_cap(user.id),
-         {:ok, tr} <- Credits.create_topup_request(user.id, cents),
+         {:ok, tr} <- Topups.create_topup_request(user.id, cents),
          {:ok, payment} <- vraag_betaling(tr, cents),
-         {:ok, _} <- Credits.attach_mollie_payment(tr, payment.id) do
+         {:ok, _} <- Topups.attach_mollie_payment(tr, payment.id) do
       json(conn, %{checkout_url: payment.checkout_url, payment_id: payment.id})
     else
       {:error, {:mollie_http, status, body}} when status in 400..499 ->
@@ -91,7 +91,7 @@ defmodule ControlPlaneWeb.MollieController do
         {:ok, payment}
 
       {:error, reden} ->
-        Credits.delete_topup_request(tr)
+        Topups.delete_topup_request(tr)
         {:error, reden}
     end
   end
@@ -138,7 +138,7 @@ defmodule ControlPlaneWeb.MollieController do
   defp parse_amount(_), do: {:error, :invalid_amount}
 
   defp check_pending_cap(user_id) do
-    if Credits.count_pending_topups(user_id) >= @max_pending_topups,
+    if Topups.count_pending_topups(user_id) >= @max_pending_topups,
       do: {:error, :too_many_pending},
       else: :ok
   end

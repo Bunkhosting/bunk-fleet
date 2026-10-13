@@ -7,11 +7,11 @@ defmodule ControlPlaneWeb.Admin.RegionController do
   """
   use ControlPlaneWeb, :controller
 
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
 
   def index(conn, _params) do
-    regions = Enum.map(Fleet.list_regions(), &region_json/1)
+    regions = Enum.map(Regions.list_regions(), &region_json/1)
     json(conn, %{regions: regions})
   end
 
@@ -27,7 +27,7 @@ defmodule ControlPlaneWeb.Admin.RegionController do
         end
       end)
 
-    case Fleet.create_region(attrs) do
+    case Regions.create_region(attrs) do
       {:ok, region} ->
         conn
         |> put_status(:created)

@@ -22,7 +22,10 @@ defmodule ControlPlaneWeb.AuthController do
   use ControlPlaneWeb, :controller
 
   alias ControlPlane.Accounts
+  alias ControlPlane.Accounts.Deletion
   alias ControlPlane.Accounts.LoginThrottle
+  alias ControlPlane.Accounts.Passkeys
+  alias ControlPlane.Accounts.Totp
   alias ControlPlaneWeb.Fouten
   alias ControlPlaneWeb.Plugs.Bearer
 
@@ -78,14 +81,14 @@ defmodule ControlPlaneWeb.AuthController do
         # alone — require a valid TOTP code (matches the browser MFA flow). The
         # client first calls without a code, gets {totp_required: true}, then
         # retries with the code.
-        totp = Accounts.totp_active?(user)
+        totp = Totp.totp_active?(user)
 
         case second_factor(user, totp, params) do
           :ok ->
             # Heeft het account een tweede factor, dan heeft second_factor/3 die
             # zojuist gezien -- anders was het geen :ok. De sessie onthoudt dat;
             # het beheerpaneel vraagt erom.
-            issue_session(conn, user, mfa: totp or Accounts.passkeys_active?(user))
+            issue_session(conn, user, mfa: totp or Passkeys.passkeys_active?(user))
 
           :prompt ->
             conn |> put_status(:ok) |> json(mfa_prompt(user, totp, nil))
@@ -322,12 +325,12 @@ defmodule ControlPlaneWeb.AuthController do
       role: user.role,
       confirmed_at: user.confirmed_at,
       totp_enabled: not is_nil(user.totp_confirmed_at),
-      passkeys_enabled: Accounts.passkeys_active?(user),
+      passkeys_enabled: Passkeys.passkeys_active?(user),
       # Of deze gebruiker hardware beheert. Het dashboard toont het nodescherm
       # alleen dan: een klant die geen node heeft hoeft geen leeg scherm in zijn
       # menu, en een operator die er wel een heeft moet hem kunnen vinden zonder
       # het pad te kennen.
-      owns_nodes: Accounts.owns_nodes?(user),
+      owns_nodes: Deletion.owns_nodes?(user),
       inserted_at: user.inserted_at
     }
   end
@@ -347,7 +350,7 @@ defmodule ControlPlaneWeb.AuthController do
     sleutel = "2fa:" <> user.email
 
     cond do
-      not totp and not Accounts.passkeys_active?(user) ->
+      not totp and not Passkeys.passkeys_active?(user) ->
         :ok
 
       poging?(params) and LoginThrottle.blocked?(sleutel) ->
@@ -388,7 +391,7 @@ defmodule ControlPlaneWeb.AuthController do
     end
   end
 
-  defp totp_ok?(user, true, code) when is_binary(code), do: Accounts.valid_totp?(user, code)
+  defp totp_ok?(user, true, code) when is_binary(code), do: Totp.valid_totp?(user, code)
   defp totp_ok?(_user, _totp, _code), do: false
 
   defp passkey_result(user, assertion) do
@@ -403,7 +406,7 @@ defmodule ControlPlaneWeb.AuthController do
   # zegt `methods` welke factoren dit account heeft, en als er passkeys zijn gaat
   # de challenge meteen mee zodat de browser er niet nog een rondje voor hoeft.
   defp mfa_prompt(user, totp, error) do
-    passkey = Accounts.start_passkey_login(user)
+    passkey = Passkeys.start_passkey_login(user)
 
     %{
       mfa_required: true,
@@ -419,7 +422,7 @@ defmodule ControlPlaneWeb.AuthController do
          {:ok, authenticator_data} <- b64(get_in(p, ["response", "authenticatorData"])),
          {:ok, signature} <- b64(get_in(p, ["response", "signature"])),
          {:ok, client_data_json} <- b64(get_in(p, ["response", "clientDataJSON"])) do
-      Accounts.finish_passkey_login(user, cid, %{
+      Passkeys.finish_passkey_login(user, cid, %{
         credential_id: credential_id,
         authenticator_data: authenticator_data,
         signature: signature,
@@ -440,12 +443,12 @@ defmodule ControlPlaneWeb.AuthController do
   # --- Passkeys (WebAuthn) ----------------------------------------------------
 
   def passkeys_list(conn, _params) do
-    keys = Accounts.list_passkeys(conn.assigns.current_user)
+    keys = Passkeys.list_passkeys(conn.assigns.current_user)
     json(conn, %{passkeys: Enum.map(keys, &passkey_json/1)})
   end
 
   def passkey_register_challenge(conn, _params) do
-    json(conn, Accounts.start_passkey_registration(conn.assigns.current_user))
+    json(conn, Passkeys.start_passkey_registration(conn.assigns.current_user))
   end
 
   def passkey_register(conn, %{"challenge_id" => cid, "credential" => cred} = params)
@@ -461,7 +464,7 @@ defmodule ControlPlaneWeb.AuthController do
     with {:ok, attestation_object} <- b64(get_in(cred, ["response", "attestationObject"])),
          {:ok, client_data_json} <- b64(get_in(cred, ["response", "clientDataJSON"])),
          {:ok, pk} <-
-           Accounts.finish_passkey_registration(conn.assigns.current_user, cid, %{
+           Passkeys.finish_passkey_registration(conn.assigns.current_user, cid, %{
              attestation_object: attestation_object,
              client_data_json: client_data_json,
              label: label
@@ -489,14 +492,14 @@ defmodule ControlPlaneWeb.AuthController do
   Verwijdert een passkey. Het huidige wachtwoord moet erbij, net als bij
   wachtwoord wijzigen: een passkey kan de tweede factor zijn, en wie alleen een
   sessie in handen heeft mag de 2FA niet kunnen uitzetten. Zie
-  `Accounts.delete_passkey/3`.
+  `Passkeys.delete_passkey/3`.
 
   Dezelfde codes als bij wachtwoord wijzigen, zodat het scherm ze al kent.
   """
   def passkey_delete(conn, %{"id" => id, "current_password" => huidig})
       when is_binary(huidig) do
     with {:ok, uuid} <- Ecto.UUID.cast(id),
-         {:ok, _} <- Accounts.delete_passkey(conn.assigns.current_user, uuid, huidig) do
+         {:ok, _} <- Passkeys.delete_passkey(conn.assigns.current_user, uuid, huidig) do
       send_resp(conn, :no_content, "")
     else
       {:error, :invalid_current_password} ->
@@ -525,21 +528,21 @@ defmodule ControlPlaneWeb.AuthController do
 
   @doc "Starts TOTP setup: persists a fresh secret and returns it + a QR data URL."
   def totp_setup(conn, _params) do
-    case Accounts.start_totp_setup(conn.assigns.current_user) do
+    case Totp.start_totp_setup(conn.assigns.current_user) do
       {:error, :already_enabled} ->
         conn |> put_status(:conflict) |> json(%{error: "totp_already_enabled"})
 
       user ->
         json(conn, %{
-          secret: Accounts.totp_secret_base32(user),
-          qr_data_url: qr_data_url(Accounts.totp_uri(user))
+          secret: Totp.totp_secret_base32(user),
+          qr_data_url: qr_data_url(Totp.totp_uri(user))
         })
     end
   end
 
   @doc "Confirms TOTP setup with a code from the authenticator app."
   def totp_confirm(conn, %{"code" => code}) when is_binary(code) do
-    case Accounts.confirm_totp(conn.assigns.current_user, code) do
+    case Totp.confirm_totp(conn.assigns.current_user, code) do
       {:ok, _user} -> json(conn, %{detail: "ok"})
       {:error, _} -> conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_code"})
     end
@@ -555,8 +558,8 @@ defmodule ControlPlaneWeb.AuthController do
   def totp_disable(conn, %{"code" => code}) when is_binary(code) do
     user = conn.assigns.current_user
 
-    if Accounts.valid_totp?(user, code) do
-      {:ok, _} = Accounts.disable_totp(user)
+    if Totp.valid_totp?(user, code) do
+      {:ok, _} = Totp.disable_totp(user)
       json(conn, %{detail: "ok"})
     else
       conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_code"})

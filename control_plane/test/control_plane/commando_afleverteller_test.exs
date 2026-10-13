@@ -7,7 +7,7 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.CommandQueue
   alias ControlPlane.Repo
 
   # Zelfde opzet als commando_opruimen_test: een node heeft een regio nodig, en
@@ -53,10 +53,10 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
 
     assert Repo.get!(Command, cmd.id).delivery_count == 0
 
-    Provisioning.mark_delivered_all([cmd])
+    CommandQueue.mark_delivered_all([cmd])
     assert Repo.get!(Command, cmd.id).delivery_count == 1
 
-    Provisioning.mark_delivered_all([cmd])
+    CommandQueue.mark_delivered_all([cmd])
     assert Repo.get!(Command, cmd.id).delivery_count == 2
   end
 
@@ -64,23 +64,23 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
     node = fleet_node()
     cmd = commando(node)
 
-    for _ <- 1..Provisioning.max_afleveringen() do
-      Provisioning.mark_delivered_all([cmd])
+    for _ <- 1..CommandQueue.max_afleveringen() do
+      CommandQueue.mark_delivered_all([cmd])
       verouder(cmd)
     end
 
-    assert Provisioning.deliverable_commands_for_node(node) == []
+    assert CommandQueue.deliverable_commands_for_node(node) == []
   end
 
   test "en dan staat hij in de lijst die gemeld wordt" do
     node = fleet_node()
     cmd = commando(node)
 
-    for _ <- 1..Provisioning.max_afleveringen() do
-      Provisioning.mark_delivered_all([cmd])
+    for _ <- 1..CommandQueue.max_afleveringen() do
+      CommandQueue.mark_delivered_all([cmd])
     end
 
-    vast = Provisioning.vastgelopen_commandos()
+    vast = CommandQueue.vastgelopen_commandos()
     assert Enum.any?(vast, &(&1.id == cmd.id))
   end
 
@@ -88,11 +88,11 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
     node = fleet_node()
     cmd = commando(node)
 
-    Provisioning.mark_delivered_all([cmd])
+    CommandQueue.mark_delivered_all([cmd])
     verouder(cmd)
 
-    assert Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [cmd.id]
-    assert Provisioning.vastgelopen_commandos() == []
+    assert CommandQueue.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [cmd.id]
+    assert CommandQueue.vastgelopen_commandos() == []
   end
 
   test "een commando dat tussen lezen en markeren werd geannuleerd, gaat niet mee" do
@@ -103,12 +103,12 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
     blijft = commando(node)
     geannuleerd = commando(node)
 
-    gelezen = Provisioning.deliverable_commands_for_node(node)
+    gelezen = CommandQueue.deliverable_commands_for_node(node)
     assert length(gelezen) == 2
 
     Repo.update_all(from(c in Command, where: c.id == ^geannuleerd.id), set: [status: :failed])
 
-    assert {1, [id]} = Provisioning.mark_delivered_all(gelezen)
+    assert {1, [id]} = CommandQueue.mark_delivered_all(gelezen)
     assert id == blijft.id
   end
 
@@ -125,27 +125,27 @@ defmodule ControlPlane.CommandoAfleverTellerTest do
     # en bleef een VPS die allang draaide voorgoed in "aanmaken" staan.
     node = fleet_node()
     cmd = commando(node)
-    for _ <- 1..Provisioning.max_afleveringen(), do: Provisioning.mark_delivered_all([cmd])
+    for _ <- 1..CommandQueue.max_afleveringen(), do: CommandQueue.mark_delivered_all([cmd])
 
     verouder_met(cmd, 600)
-    assert Provisioning.deliverable_commands_for_node(node) == []
+    assert CommandQueue.deliverable_commands_for_node(node) == []
 
     verouder_met(cmd, 1900)
-    assert Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [cmd.id]
+    assert CommandQueue.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [cmd.id]
   end
 
   test "een lopende back-up wordt niet na anderhalve minuut opnieuw uitgedeeld" do
     node = fleet_node()
     backup = commando(node, %{kind: :backup})
     provision = commando(node)
-    Provisioning.mark_delivered_all([backup, provision])
+    CommandQueue.mark_delivered_all([backup, provision])
 
     # Vijf minuten: lang voor een uitrol, normaal voor een back-up.
     verouder_met(backup, 300)
     verouder_met(provision, 300)
-    assert Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [provision.id]
+    assert CommandQueue.deliverable_commands_for_node(node) |> Enum.map(& &1.id) == [provision.id]
 
     verouder_met(backup, 1000)
-    assert backup.id in (Provisioning.deliverable_commands_for_node(node) |> Enum.map(& &1.id))
+    assert backup.id in (CommandQueue.deliverable_commands_for_node(node) |> Enum.map(& &1.id))
   end
 end

@@ -24,6 +24,7 @@ defmodule ControlPlane.MollieVerzoeningTest do
   alias ControlPlane.Billing.MollieAfhandeling
   alias ControlPlane.Credits
   alias ControlPlane.Credits.TopupRequest
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Mollie
   alias ControlPlane.Repo
 
@@ -36,7 +37,7 @@ defmodule ControlPlane.MollieVerzoeningTest do
   end
 
   defp openstaand(user, cents, payment_id) do
-    {:ok, tr} = Credits.create_mollie_topup(user.id, cents, payment_id)
+    {:ok, tr} = Topups.create_mollie_topup(user.id, cents, payment_id)
     tr
   end
 
@@ -128,7 +129,7 @@ defmodule ControlPlane.MollieVerzoeningTest do
   end
 
   test "een opwaardering zonder betaal-id komt niet in de verzoening", %{user: user} do
-    {:ok, tr} = Credits.create_topup_request(user.id, 2500)
+    {:ok, tr} = Topups.create_topup_request(user.id, 2500)
     verouder(tr, 3600)
 
     assert MollieAfhandeling.verzoen(900) == 0

@@ -18,10 +18,10 @@ defmodule ControlPlane.RegioVerwijderenTest do
   import Ecto.Query, only: [from: 2]
 
   alias ControlPlane.Clock
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.EnrollToken
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Fleet.Vps
 
   defp regio do
@@ -32,7 +32,7 @@ defmodule ControlPlane.RegioVerwijderenTest do
   test "een ongebruikte locatie gaat weg" do
     r = regio()
 
-    assert Fleet.delete_region(r.id) == :ok
+    assert Regions.delete_region(r.id) == :ok
     refute Repo.get(Region, r.id)
   end
 
@@ -43,7 +43,7 @@ defmodule ControlPlane.RegioVerwijderenTest do
     |> Node.changeset(%{name: "node-#{System.unique_integer([:positive])}", region_id: r.id})
     |> Repo.insert!()
 
-    assert Fleet.delete_region(r.id) == {:error, :has_nodes}
+    assert Regions.delete_region(r.id) == {:error, :has_nodes}
     assert Repo.get(Region, r.id)
   end
 
@@ -69,7 +69,7 @@ defmodule ControlPlane.RegioVerwijderenTest do
       })
       |> Repo.insert!()
 
-    assert Fleet.delete_region(r.id) == :ok
+    assert Regions.delete_region(r.id) == :ok
     refute Repo.get(Region, r.id)
 
     opnieuw = Repo.get!(Vps, vps.id)
@@ -96,7 +96,7 @@ defmodule ControlPlane.RegioVerwijderenTest do
     })
     |> Repo.insert!()
 
-    assert Fleet.delete_region(r.id) == {:error, :has_vpses}
+    assert Regions.delete_region(r.id) == {:error, :has_vpses}
     assert Repo.get(Region, r.id)
   end
 
@@ -124,7 +124,7 @@ defmodule ControlPlane.RegioVerwijderenTest do
     })
     |> Repo.insert!()
 
-    assert Fleet.delete_region(r.id) == :ok
+    assert Regions.delete_region(r.id) == :ok
     refute Repo.get(Region, r.id)
     # En ze zijn meegegaan: een token wijst naar een locatie die niet meer bestaat.
     assert Repo.aggregate(from(t in EnrollToken, where: t.region_id == ^r.id), :count) == 0
@@ -141,11 +141,11 @@ defmodule ControlPlane.RegioVerwijderenTest do
     })
     |> Repo.insert!()
 
-    assert Fleet.delete_region(r.id) == {:error, :has_enroll_tokens}
+    assert Regions.delete_region(r.id) == {:error, :has_enroll_tokens}
     assert Repo.get(Region, r.id)
   end
 
   test "een locatie die niet bestaat" do
-    assert Fleet.delete_region(Ecto.UUID.generate()) == {:error, :not_found}
+    assert Regions.delete_region(Ecto.UUID.generate()) == {:error, :not_found}
   end
 end

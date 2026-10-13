@@ -6,13 +6,13 @@ defmodule ControlPlane.Credits do
 
   New users receive a signup bonus; creating a VPS charges a flat monthly price
   by size. This is the *customer-facing* side only — internal cost accounting uses the
-  separate per-resource-hour metering in `ControlPlane.Billing`.
+  separate per-resource-hour metering in `ControlPlane.Billing`. Opwaarderingen
+  staan in `ControlPlane.Credits.Topups`.
   """
   import Ecto.Query
 
   require Logger
   alias ControlPlane.Credits.LedgerEntry
-  alias ControlPlane.Credits.Topups
   alias ControlPlane.Repo
 
   @signup_bonus_cents 1000
@@ -316,45 +316,4 @@ defmodule ControlPlane.Credits do
 
   def refund(user_id, amount_cents, kind, description),
     do: add_entry(user_id, amount_cents, kind, description)
-
-  ## Top-up requests (self-service wallet funding; admin confirms receipt)
-
-  @doc "Zie `ControlPlane.Credits.Topups.create_topup_request/2`."
-  defdelegate create_topup_request(user_id, amount_cents), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.list_topup_requests/2`."
-  defdelegate list_topup_requests(user_id, limit \\ 20), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.list_pending_topups/0`."
-  defdelegate list_pending_topups, to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.count_pending_topups/1`."
-  defdelegate count_pending_topups(user_id), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.mark_topup_paid/2`."
-  defdelegate mark_topup_paid(id, paid_via), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.cancel_topup_request/2`."
-  defdelegate cancel_topup_request(user_id, id), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.create_mollie_topup/3`."
-  defdelegate create_mollie_topup(user_id, amount_cents, mollie_payment_id), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.delete_topup_request/1`."
-  defdelegate delete_topup_request(tr), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.attach_mollie_payment/2`."
-  defdelegate attach_mollie_payment(tr, mollie_payment_id), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.mark_topup_paid_by_id/2`."
-  defdelegate mark_topup_paid_by_id(topup_id, paid_amount \\ nil), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.mark_topup_paid_by_mollie_id/2`."
-  defdelegate mark_topup_paid_by_mollie_id(mollie_payment_id, paid_amount \\ nil), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.openstaande_topups_om_te_verzoenen/1`."
-  defdelegate openstaande_topups_om_te_verzoenen(ouder_dan_seconden), to: Topups
-
-  @doc "Zie `ControlPlane.Credits.Topups.cancel_topup_by_mollie_id/1`."
-  defdelegate cancel_topup_by_mollie_id(mollie_payment_id), to: Topups
 end

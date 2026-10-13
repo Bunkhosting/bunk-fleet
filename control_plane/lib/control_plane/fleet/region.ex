@@ -37,7 +37,7 @@ defmodule ControlPlane.Fleet.Region do
     |> validate_length(:code, max: 32)
     # Wel een bovengrens en geen ondergrens: de naam is een label op een scherm,
     # en een beheerder die er bewust "R" van maakt heeft daar zijn reden voor.
-    # Voor de vrije invoer uit het dashboard bewaakt `Fleet.ensure_region/1` de
+    # Voor de vrije invoer uit het dashboard bewaakt `Fleet.Regions.ensure_region/1` de
     # ondergrens -- dáár is een enkel teken een typfout en geen keuze.
     |> validate_length(:name, max: 60)
     |> unique_constraint(:code)

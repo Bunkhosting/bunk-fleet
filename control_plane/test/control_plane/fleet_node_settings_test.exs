@@ -11,8 +11,8 @@ defmodule ControlPlane.FleetNodeSettingsTest do
   use ControlPlane.DataCase, async: true
 
   alias ControlPlane.Accounts
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Package
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Repo
@@ -36,7 +36,7 @@ defmodule ControlPlane.FleetNodeSettingsTest do
     |> Repo.insert!()
   end
 
-  defp wijzig(node, user, attrs), do: Fleet.update_node_settings(node.id, user, attrs)
+  defp wijzig(node, user, attrs), do: NodeAdmin.update_node_settings(node.id, user, attrs)
 
   describe "wie mag wijzigen" do
     test "de eigenaar wel" do

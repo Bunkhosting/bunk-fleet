@@ -12,8 +12,8 @@ defmodule ControlPlaneWeb.Admin.EnrollTokenController do
   use ControlPlaneWeb, :controller
 
   alias ControlPlane.Enrollment
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
 
   @default_ttl_seconds 3600
 
@@ -52,7 +52,7 @@ defmodule ControlPlaneWeb.Admin.EnrollTokenController do
     # from Ecto.Query.CastError inside get_region!/1.
     case Ecto.UUID.cast(region_id) do
       {:ok, id} ->
-        case Fleet.get_region!(id) do
+        case Regions.get_region!(id) do
           %Region{} = region -> {:ok, region}
         end
 
@@ -64,7 +64,7 @@ defmodule ControlPlaneWeb.Admin.EnrollTokenController do
   end
 
   defp resolve_region(%{"region_code" => region_code}) when is_binary(region_code) do
-    case Fleet.region_by_code(region_code) do
+    case Regions.region_by_code(region_code) do
       %Region{} = region -> {:ok, region}
       nil -> {:error, :region_not_found}
     end

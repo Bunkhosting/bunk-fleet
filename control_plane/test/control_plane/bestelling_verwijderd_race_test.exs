@@ -26,6 +26,7 @@ defmodule ControlPlane.BestellingVerwijderdRaceTest do
   alias ControlPlane.Fleet.Reservation
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Teardown
 
   setup do
     user = confirmed_user_fixture()
@@ -131,7 +132,7 @@ defmodule ControlPlane.BestellingVerwijderdRaceTest do
 
       # De klant verwijdert de VPS die hij in zijn lijst ziet. Zonder node gaat
       # dat via mark_vps_deleted: direct :deleted, niets vrij te geven.
-      assert {:ok, %{vps: %Vps{status: :deleted}}} = Provisioning.delete_vps(verouderd.id)
+      assert {:ok, %{vps: %Vps{status: :deleted}}} = Teardown.delete_vps(verouderd.id)
 
       # Het pad moet echt gehaald zijn: de struct waarmee besteld wordt, is nog
       # de :queued van vóór het verwijderen.
@@ -178,7 +179,7 @@ defmodule ControlPlane.BestellingVerwijderdRaceTest do
       attrs = bestelling(ctx, leeg)
       verouderd = wachtende_vps(attrs)
 
-      assert {:ok, _} = Provisioning.delete_vps(verouderd.id)
+      assert {:ok, _} = Teardown.delete_vps(verouderd.id)
 
       assert {:error, :no_capacity} = Provisioning.plaats_en_verstuur(verouderd, attrs)
       assert status(verouderd.id) == :deleted

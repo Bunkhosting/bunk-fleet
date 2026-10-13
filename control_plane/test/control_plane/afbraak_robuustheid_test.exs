@@ -18,6 +18,8 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.CommandQueue
+  alias ControlPlane.Provisioning.Teardown
 
   setup do
     vorig = Application.get_env(:control_plane, :ops_email)
@@ -86,7 +88,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
 
   defp deletes_zonder_vm_id_voor(fleet_node) do
     fleet_node
-    |> Provisioning.deliverable_commands_for_node()
+    |> CommandQueue.deliverable_commands_for_node()
     |> Enum.filter(&(&1.kind == :delete and not is_binary(&1.payload["vm_id"])))
   end
 
@@ -95,13 +97,13 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       v = vps(ctx, :provisioning, nil)
       commando(v, :provision, :delivered, %{})
 
-      assert {:ok, %{command: nil, vps: %Vps{status: :deleting}}} = Provisioning.delete_vps(v.id)
+      assert {:ok, %{command: nil, vps: %Vps{status: :deleting}}} = Teardown.delete_vps(v.id)
 
       # Het pad moet echt gehaald zijn: de VPS staat op een uitgestelde afbraak.
       assert %Vps{status: :deleting, provider_vm_id: nil} = Repo.get!(Vps, v.id)
 
-      assert {:error, :already_deleting} = Provisioning.delete_vps(v.id)
-      assert {:error, :already_deleting} = Provisioning.delete_vps(v.id)
+      assert {:error, :already_deleting} = Teardown.delete_vps(v.id)
+      assert {:error, :already_deleting} = Teardown.delete_vps(v.id)
 
       assert deletes(v.id) == []
       assert deletes_zonder_vm_id_voor(ctx.fleet_node) == []
@@ -111,7 +113,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
     test "tegenproef: zonder lopende uitrol wordt hij lokaal afgesloten, zonder agent", ctx do
       v = vps(ctx, :deleting, nil)
 
-      assert {:ok, %{command: nil}} = Provisioning.delete_vps(v.id)
+      assert {:ok, %{command: nil}} = Teardown.delete_vps(v.id)
       assert Repo.get!(Vps, v.id).status == :deleted
       assert deletes(v.id) == []
     end
@@ -122,14 +124,14 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       commando(v, :delete, :failed, %{"vm_id" => id}, 3600)
 
       assert {:ok, %{command: %Command{kind: :delete, payload: %{"vm_id" => ^id}}}} =
-               Provisioning.delete_vps(v.id)
+               Teardown.delete_vps(v.id)
     end
 
     test "retry_stuck_deletes stuurt geen delete voor een :deleting VPS zonder VM", ctx do
       v = vps(ctx, :deleting, nil)
       Repo.insert!(%Command{node_id: v.node_id, vps_id: v.id, kind: :delete, status: :failed})
 
-      assert Provisioning.retry_stuck_deletes(0) == 0
+      assert Teardown.retry_stuck_deletes(0) == 0
       assert deletes_zonder_vm_id_voor(ctx.fleet_node) == []
     end
   end
@@ -181,7 +183,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       v = vps(ctx, :deleted, id)
       commando(v, :delete, :failed, %{"vm_id" => id}, 3600)
 
-      assert Provisioning.retry_orphan_deletes(300) == 1
+      assert Teardown.retry_orphan_deletes(300) == 1
 
       assert [%Command{node_id: node_id, payload: %{"vm_id" => ^id}}] =
                Enum.filter(deletes(v.id), &(&1.status == :pending))
@@ -189,7 +191,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       assert node_id == ctx.fleet_node.id
 
       # Een lopende poging wordt niet verdubbeld.
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
     end
 
     test "tegenproef: een mislukking van zojuist wacht nog", ctx do
@@ -197,7 +199,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       v = vps(ctx, :deleted, id)
       commando(v, :delete, :failed, %{"vm_id" => id}, 10)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
       assert Enum.all?(deletes(v.id), &(&1.status == :failed))
     end
 
@@ -209,14 +211,14 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       v = vps(ctx, :deleted, id)
       for age <- [9000, 8000, 7000, 1200], do: mislukte_delete(v, id, age)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
 
       # Dezelfde vier, de nieuwste 50 minuten oud: wel aan de beurt.
       id2 = vm_id()
       w = vps(ctx, :deleted, id2)
       for age <- [9000, 8000, 7000, 3000], do: mislukte_delete(w, id2, age)
 
-      assert Provisioning.retry_orphan_deletes(300) == 1
+      assert Teardown.retry_orphan_deletes(300) == 1
       assert Enum.any?(deletes(w.id), &(&1.status == :pending))
       refute Enum.any?(deletes(v.id), &(&1.status == :pending))
     end
@@ -227,12 +229,12 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
 
       for age <- [90_000, 80_000, 70_000, 60_000, 50_000, 40_000], do: mislukte_delete(v, id, age)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
       assert_email_sent(subject: "[Bunk] Wees-VM #{id} laat zich niet afbreken")
       assert Enum.all?(deletes(v.id), &(&1.status == :failed))
 
       # De volgende ronde: geen poging, en geen tweede melding.
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
       refute_email_sent()
       assert Enum.all?(deletes(v.id), &(&1.status == :failed))
     end
@@ -243,7 +245,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
 
       for age <- [90_000, 80_000, 70_000, 60_000, 50_000], do: mislukte_delete(v, id, age)
 
-      assert Provisioning.retry_orphan_deletes(300) == 1
+      assert Teardown.retry_orphan_deletes(300) == 1
       refute_email_sent()
     end
 
@@ -253,7 +255,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       commando(v, :delete, :failed, %{"vm_id" => id}, 7200)
       commando(v, :delete, :done, %{"vm_id" => id}, 3600)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
     end
 
     test "tegenproef: een VM-nummer dat weer bij een levende VPS hoort, blijft staan", ctx do
@@ -262,7 +264,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       commando(v, :delete, :failed, %{"vm_id" => id}, 3600)
       _levend = vps(ctx, :active, id)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
     end
 
     test "tegenproef: een VPS die nog op :deleting staat is niet van deze ronde", ctx do
@@ -270,8 +272,8 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       v = vps(ctx, :deleting, id)
       commando(v, :delete, :failed, %{"vm_id" => id}, 3600)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
-      assert Provisioning.retry_stuck_deletes(300) == 1
+      assert Teardown.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_stuck_deletes(300) == 1
     end
 
     test "tegenproef: een mislukking van langer dan een week geleden blijft liggen", ctx do
@@ -279,7 +281,7 @@ defmodule ControlPlane.AfbraakRobuustheidTest do
       v = vps(ctx, :deleted, id)
       commando(v, :delete, :failed, %{"vm_id" => id}, 8 * 24 * 3600)
 
-      assert Provisioning.retry_orphan_deletes(300) == 0
+      assert Teardown.retry_orphan_deletes(300) == 0
     end
   end
 end

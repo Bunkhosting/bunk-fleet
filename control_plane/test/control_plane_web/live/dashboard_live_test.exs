@@ -4,8 +4,9 @@ defmodule ControlPlaneWeb.DashboardLiveTest do
   import Phoenix.LiveViewTest
 
   alias ControlPlane.Accounts
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Events
+  alias ControlPlane.Fleet.Liveness
+  alias ControlPlane.Fleet.Regions
 
   # The fleet dashboard at "/" is admin-only (UserAuth :ensure_staff). Put an
   # authenticated admin in the session so the LiveView mounts instead of
@@ -30,10 +31,10 @@ defmodule ControlPlaneWeb.DashboardLiveTest do
   end
 
   setup %{conn: conn} do
-    {:ok, region} = Fleet.create_region(%{code: "nl-1", name: "Netherlands 1"})
+    {:ok, region} = Regions.create_region(%{code: "nl-1", name: "Netherlands 1"})
 
     {:ok, node} =
-      Fleet.register_node(%{
+      Liveness.register_node(%{
         name: "node-a",
         region_id: region.id,
         status: :online,
@@ -68,7 +69,7 @@ defmodule ControlPlaneWeb.DashboardLiveTest do
     refute html =~ "node-late"
 
     {:ok, _node} =
-      Fleet.register_node(%{
+      Liveness.register_node(%{
         name: "node-late",
         region_id: region.id,
         status: :online,
@@ -91,7 +92,7 @@ defmodule ControlPlaneWeb.DashboardLiveTest do
     {:ok, view, _html} = live(conn, "/")
 
     {:ok, _node} =
-      Fleet.register_node(%{
+      Liveness.register_node(%{
         name: "node-broadcast",
         region_id: region.id,
         status: :online,

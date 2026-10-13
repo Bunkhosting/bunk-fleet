@@ -555,10 +555,10 @@ defmodule ControlPlane.Fleet.Node do
   node's advertised totals AND (re)asserts it as `:online`.
 
   Unlike `heartbeat_changeset/2`, this one is allowed to set `:status` because it is
-  driven by trusted server logic (`ControlPlane.Fleet.mark_online_heartbeat/2`)
+  driven by trusted server logic (`ControlPlane.Fleet.Liveness.mark_online_heartbeat/2`)
   after the agent's bearer token has been authenticated — not directly from agent
   input. `available_*` may be set ONLY here and ONLY to seed a brand-new node's
-  capacity on its first heartbeat (see `Fleet.mark_online_heartbeat/2`); steady-state
+  capacity on its first heartbeat (see `Fleet.Liveness.mark_online_heartbeat/2`); steady-state
   it stays scheduler-owned.
   """
   def mark_online_changeset(node, attrs) do

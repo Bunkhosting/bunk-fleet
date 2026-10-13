@@ -61,7 +61,7 @@ defmodule ControlPlane.SoftwareAuthenticator do
 
   @doc """
   De origin die de browser meestuurt: het publieke adres van het control plane,
-  met dezelfde terugval als `Accounts`.
+  met dezelfde terugval als `ControlPlane.Accounts.Passkeys`.
   """
   @spec origin() :: String.t()
   def origin, do: Application.get_env(:control_plane, :public_url) || "http://localhost:4000"
@@ -69,10 +69,10 @@ defmodule ControlPlane.SoftwareAuthenticator do
   @doc """
   Het antwoord op `navigator.credentials.create()`: `attestation_object` en
   `client_data_json` als rauwe bytes, zoals de controller ze na het
-  base64url-decoderen aan `Accounts.finish_passkey_registration/3` geeft.
+  base64url-decoderen aan `ControlPlane.Accounts.Passkeys.finish_passkey_registration/3` geeft.
 
   `public_key` is de `public_key`-map uit de registratie-challenge, met atoom-
-  of stringsleutels (`Accounts` geeft atomen, de API strings).
+  of stringsleutels (`Passkeys` geeft atomen, de API strings).
   """
   @spec registratie(t(), map(), keyword()) :: map()
   def registratie(%__MODULE__{} = auth, public_key, opts \\ []) do
@@ -107,7 +107,7 @@ defmodule ControlPlane.SoftwareAuthenticator do
   @doc """
   Het antwoord op `navigator.credentials.get()`: credential-id,
   authenticatorData, handtekening en clientDataJSON als rauwe bytes, in de vorm
-  die `Accounts.finish_passkey_login/3` verwacht.
+  die `ControlPlane.Accounts.Passkeys.finish_passkey_login/3` verwacht.
 
   `public_key` is de `public_key`-map uit de inlog-challenge.
   """

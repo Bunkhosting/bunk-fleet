@@ -24,6 +24,7 @@ defmodule ControlPlane.GrenswaardenTest do
   alias ControlPlane.Credits.LedgerEntry
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Provisioning
 
@@ -234,5 +235,5 @@ defmodule ControlPlane.GrenswaardenTest do
     u
   end
 
-  defp wijzig(node, user, attrs), do: Fleet.update_node_settings(node.id, user, attrs)
+  defp wijzig(node, user, attrs), do: NodeAdmin.update_node_settings(node.id, user, attrs)
 end

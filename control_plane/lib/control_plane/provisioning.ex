@@ -5,11 +5,16 @@ defmodule ControlPlane.Provisioning do
     1. `create_vps/1` records the VPS, asks the `ControlPlane.Fleet.Scheduler` to
        place it onto a node (holding capacity), and enqueues a `:provision`
        `ControlPlane.Fleet.Command` for that node's agent.
-    2. The node's agent polls `deliverable_commands_for_node/1` (via the command
-       API), each marked delivered with `mark_delivered/1`. A command lost to an
-       agent crash (delivered but never resolved) is redelivered after a TTL.
+    2. The node's agent polls `CommandQueue.deliverable_commands_for_node/1` (via
+       the command API), each marked delivered with `CommandQueue.mark_delivered/1`.
+       A command lost to an agent crash (delivered but never resolved) is
+       redelivered after a TTL.
     3. The agent reports the outcome through `apply_result/2`, which finalises both
        the command and the VPS, committing or releasing the held reservation.
+
+  De commandowachtrij, aan/uit, afbreken en het opruimen van vastgelopen
+  toestanden staan in `ControlPlane.Provisioning.CommandQueue`, `Power`,
+  `Teardown` en `Sweeps`.
 
   ## Lockvolgorde
 
@@ -46,12 +51,8 @@ defmodule ControlPlane.Provisioning do
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Locks
   alias ControlPlane.Net
-  alias ControlPlane.Provisioning.CommandQueue
   alias ControlPlane.Provisioning.GuestName
-  alias ControlPlane.Provisioning.Power
   alias ControlPlane.Provisioning.Reservations
-  alias ControlPlane.Provisioning.Sweeps
-  alias ControlPlane.Provisioning.Teardown
   alias ControlPlane.Repo
   alias ControlPlane.Subscriptions
   alias Ecto.Multi
@@ -111,22 +112,6 @@ defmodule ControlPlane.Provisioning do
       place_and_dispatch(vps, req, attrs)
     end
   end
-
-  @doc "Zie `ControlPlane.Provisioning.Sweeps.fail_stuck_queued_vpses/1`."
-  defdelegate fail_stuck_queued_vpses(grace_seconds \\ 600), to: Sweeps
-
-  # Publiek voor de test die het gat in `fail_stuck_queued_vpses/1` vastlegt.
-  @doc false
-  defdelegate faal_wachtende_vps(vps_id), to: Sweeps
-
-  @doc "Zie `ControlPlane.Provisioning.Sweeps.fail_stuck_provisioning_vpses/1`."
-  defdelegate fail_stuck_provisioning_vpses(grace_seconds \\ 1800), to: Sweeps
-
-  @doc "Zie `ControlPlane.Provisioning.Sweeps.fail_stuck_restores/1`."
-  defdelegate fail_stuck_restores(uren \\ 6), to: Sweeps
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.purge_old_commands/2`."
-  defdelegate purge_old_commands(dagen \\ 90, hoogstens \\ 5_000), to: CommandQueue
 
   @doc """
   Creates a VPS on behalf of an authenticated owner, enforcing the per-owner quota
@@ -449,50 +434,6 @@ defmodule ControlPlane.Provisioning do
     end
   end
 
-  @doc "Zie `ControlPlane.Provisioning.Teardown.delete_vps/1`."
-  defdelegate delete_vps(vps_id), to: Teardown
-
-  @doc "Zie `ControlPlane.Provisioning.Teardown.retry_stuck_deletes/2`."
-  defdelegate retry_stuck_deletes(grace_seconds \\ 300, max_backoff_seconds \\ 6 * 3600),
-    to: Teardown
-
-  @doc "Zie `ControlPlane.Provisioning.Teardown.retry_orphan_deletes/2`."
-  defdelegate retry_orphan_deletes(grace_seconds \\ 300, max_backoff_seconds \\ 6 * 3600),
-    to: Teardown
-
-  @doc "Zie `ControlPlane.Provisioning.Power.start_vps/1`."
-  defdelegate start_vps(vps_id), to: Power
-
-  @doc "Zie `ControlPlane.Provisioning.Power.stop_vps/1`."
-  defdelegate stop_vps(vps_id), to: Power
-
-  @doc "Zie `ControlPlane.Provisioning.Power.pause_vps/1`."
-  defdelegate pause_vps(vps_id), to: Power
-
-  @doc "Zie `ControlPlane.Provisioning.Power.resume_vps/1`."
-  defdelegate resume_vps(vps_id), to: Power
-
-  @doc "Zie `ControlPlane.Provisioning.Power.reboot_vps/1`."
-  defdelegate reboot_vps(vps_id), to: Power
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.deliverable_commands_for_node/1`."
-  defdelegate deliverable_commands_for_node(node), to: CommandQueue
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.vastgelopen_commandos/0`."
-  defdelegate vastgelopen_commandos(), to: CommandQueue
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.markeer_gemeld/1`."
-  defdelegate markeer_gemeld(commandos), to: CommandQueue
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.mark_delivered/1`."
-  defdelegate mark_delivered(command), to: CommandQueue
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.mark_delivered_all/1`."
-  defdelegate mark_delivered_all(commands), to: CommandQueue
-
-  @doc "Zie `ControlPlane.Provisioning.CommandQueue.max_afleveringen/0`."
-  defdelegate max_afleveringen(), to: CommandQueue
-
   @doc """
   Applies an agent-reported command result.
 
@@ -561,7 +502,7 @@ defmodule ControlPlane.Provisioning do
   # The exact snake_case payload the Go agent expects for a provision command.
   defp provision_payload(%Vps{} = vps, attrs, node) do
     %{
-      "name" => guest_name(vps, node),
+      "name" => GuestName.guest_name(vps, node),
       "vcpu" => vps.vcpu,
       "ram_mb" => vps.ram_mb,
       "disk_gb" => vps.disk_gb,
@@ -592,12 +533,6 @@ defmodule ControlPlane.Provisioning do
       _ -> nil
     end
   end
-
-  @doc "Zie `ControlPlane.Provisioning.GuestName.guest_name/2`."
-  defdelegate guest_name(vps, node), to: GuestName
-
-  @doc "Zie `ControlPlane.Provisioning.GuestName.guest_name/1`."
-  defdelegate guest_name(vps), to: GuestName
 
   # Geen plek op een node. De voorwaarde staat in de UPDATE zelf, net als in
   # `Sweeps.faal_wachtende_vps/1`: een VPS die de klant intussen verwijderde,

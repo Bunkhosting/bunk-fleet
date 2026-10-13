@@ -11,7 +11,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
   manipulatie slaagt wél. Zonder die tegenproef zou een kapotte testopzet --
   een verkeerde CBOR-byte, een handtekening over de verkeerde bytes -- elke
   weigering hier groen maken. Het eerste blok praat daarom rechtstreeks met wax,
-  zodat ook zichtbaar is OP WELKE controle een manipulatie strandt; `Accounts`
+  zodat ook zichtbaar is OP WELKE controle een manipulatie strandt; `Passkeys`
   maakt van elke wax-weigering één `:invalid_passkey` en verbergt dat.
   """
   use ControlPlane.DataCase, async: false
@@ -21,6 +21,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
   alias ControlPlane.Accounts
   alias ControlPlane.Accounts.Passkey
   alias ControlPlane.Accounts.PasskeyChallenges
+  alias ControlPlane.Accounts.Passkeys
   alias ControlPlane.Repo
   alias ControlPlane.SoftwareAuthenticator, as: Authenticator
 
@@ -32,7 +33,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
   # {naam, opties voor de authenticator, verwachte wax-fout}. De verwachte fout
   # is de `reason` van een Wax.InvalidClientDataError, of de module van een
   # andere wax-fout. Dezelfde lijst draait twee keer: tegen wax (op welke
-  # controle strandt het) en tegen Accounts (wat de klant ervan merkt, en dat er
+  # controle strandt het) en tegen Passkeys (wat de klant ervan merkt, en dat er
   # niets is opgeslagen).
   @registratie_manipulaties [
     {"een andere challenge", [challenge: <<1::256>>], :challenge_mismatch},
@@ -53,14 +54,14 @@ defmodule ControlPlane.PasskeyCeremonieTest do
   ]
 
   defp registreer(user, auth, opts \\ []) do
-    %{challenge_id: id, public_key: pk} = Accounts.start_passkey_registration(user)
+    %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_registration(user)
     antwoord = Authenticator.registratie(auth, pk, opts)
-    Accounts.finish_passkey_registration(user, id, Map.put(antwoord, :label, "Testsleutel"))
+    Passkeys.finish_passkey_registration(user, id, Map.put(antwoord, :label, "Testsleutel"))
   end
 
   defp inloggen(user, auth, opts \\ []) do
-    %{challenge_id: id, public_key: pk} = Accounts.start_passkey_login(user)
-    Accounts.finish_passkey_login(user, id, Authenticator.assertie(auth, pk, ondertekenaar(opts)))
+    %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_login(user)
+    Passkeys.finish_passkey_login(user, id, Authenticator.assertie(auth, pk, ondertekenaar(opts)))
   end
 
   # `signer: :ander` in de tabellen staat voor "een willekeurige andere
@@ -203,7 +204,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
         auth = Authenticator.new()
 
         assert {:error, :invalid_passkey} = registreer(user, auth, unquote(opts))
-        assert Accounts.list_passkeys(user) == []
+        assert Passkeys.list_passkeys(user) == []
 
         # Tegenproef: dezelfde gebruiker, dezelfde authenticator, zonder de
         # manipulatie.
@@ -213,32 +214,32 @@ defmodule ControlPlane.PasskeyCeremonieTest do
 
     test "hetzelfde antwoord twee keer insturen is een replay" do
       user = confirmed_user_fixture()
-      %{challenge_id: id, public_key: pk} = Accounts.start_passkey_registration(user)
+      %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_registration(user)
       antwoord = Authenticator.new() |> Authenticator.registratie(pk) |> Map.put(:label, "x")
 
-      assert {:ok, _} = Accounts.finish_passkey_registration(user, id, antwoord)
+      assert {:ok, _} = Passkeys.finish_passkey_registration(user, id, antwoord)
 
       assert {:error, :challenge_expired} =
-               Accounts.finish_passkey_registration(user, id, antwoord)
+               Passkeys.finish_passkey_registration(user, id, antwoord)
 
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
     end
 
     test "een antwoord op challenge A is niet bruikbaar onder challenge B" do
       user = confirmed_user_fixture()
       auth = Authenticator.new()
-      %{challenge_id: _a, public_key: pk_a} = Accounts.start_passkey_registration(user)
-      %{challenge_id: b, public_key: pk_b} = Accounts.start_passkey_registration(user)
+      %{challenge_id: _a, public_key: pk_a} = Passkeys.start_passkey_registration(user)
+      %{challenge_id: b, public_key: pk_b} = Passkeys.start_passkey_registration(user)
       refute pk_a.challenge == pk_b.challenge
 
       voor_a = auth |> Authenticator.registratie(pk_a) |> Map.put(:label, "x")
-      assert {:error, :invalid_passkey} = Accounts.finish_passkey_registration(user, b, voor_a)
-      assert Accounts.list_passkeys(user) == []
+      assert {:error, :invalid_passkey} = Passkeys.finish_passkey_registration(user, b, voor_a)
+      assert Passkeys.list_passkeys(user) == []
 
       # Tegenproef met een verse challenge: het antwoord op B, onder B.
-      %{challenge_id: c, public_key: pk_c} = Accounts.start_passkey_registration(user)
+      %{challenge_id: c, public_key: pk_c} = Passkeys.start_passkey_registration(user)
       voor_c = auth |> Authenticator.registratie(pk_c) |> Map.put(:label, "x")
-      assert {:ok, _} = Accounts.finish_passkey_registration(user, c, voor_c)
+      assert {:ok, _} = Passkeys.finish_passkey_registration(user, c, voor_c)
     end
 
     test "een inlog-challenge kan geen passkey registreren" do
@@ -249,7 +250,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
       # WithClauseError: een 500.
       {user, _} = met_passkey()
       nieuw = Authenticator.new()
-      %{challenge_id: id, public_key: inlog_pk} = Accounts.start_passkey_login(user)
+      %{challenge_id: id, public_key: inlog_pk} = Passkeys.start_passkey_login(user)
 
       antwoord =
         nieuw
@@ -257,9 +258,9 @@ defmodule ControlPlane.PasskeyCeremonieTest do
         |> Map.put(:label, "x")
 
       assert {:error, :challenge_expired} =
-               Accounts.finish_passkey_registration(user, id, antwoord)
+               Passkeys.finish_passkey_registration(user, id, antwoord)
 
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
 
       # Tegenproef: dezelfde nieuwe authenticator via een registratie-challenge.
       assert {:ok, _} = registreer(user, nieuw)
@@ -268,14 +269,14 @@ defmodule ControlPlane.PasskeyCeremonieTest do
     test "een verlopen challenge weigert ook een verder geldig antwoord" do
       user = confirmed_user_fixture()
       auth = Authenticator.new()
-      %{challenge_id: id, public_key: pk} = Accounts.start_passkey_registration(user)
+      %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_registration(user)
       antwoord = auth |> Authenticator.registratie(pk) |> Map.put(:label, "x")
 
       # De vervaltijd is het vierde veld van de rij; zet hem in het verleden.
       :ets.update_element(:passkey_challenges, id, {4, 0})
 
       assert {:error, :challenge_expired} =
-               Accounts.finish_passkey_registration(user, id, antwoord)
+               Passkeys.finish_passkey_registration(user, id, antwoord)
 
       assert {:ok, _} = registreer(user, auth)
     end
@@ -286,7 +287,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
       # rij er nog, maar is de challenge erin te oud.
       user = confirmed_user_fixture()
       auth = Authenticator.new()
-      %{challenge_id: id, public_key: pk} = Accounts.start_passkey_registration(user)
+      %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_registration(user)
       antwoord = auth |> Authenticator.registratie(pk) |> Map.put(:label, "x")
 
       [{^id, challenge, meta, verloopt}] = :ets.lookup(:passkey_challenges, id)
@@ -294,7 +295,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
       :ets.insert(:passkey_challenges, {id, oud, meta, verloopt})
 
       assert {:error, :invalid_passkey} =
-               Accounts.finish_passkey_registration(user, id, antwoord)
+               Passkeys.finish_passkey_registration(user, id, antwoord)
 
       assert {:ok, _} = registreer(user, auth)
     end
@@ -304,7 +305,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
 
       assert {:error, %Ecto.Changeset{} = cs} = registreer(user, auth)
       assert %{credential_id: [_]} = errors_on(cs)
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
     end
 
     test "andermans credential-id is niet over te nemen" do
@@ -316,7 +317,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
       kaper = %{Authenticator.new() | credential_id: auth.credential_id}
 
       assert {:error, %Ecto.Changeset{}} = registreer(indringer, kaper)
-      assert Accounts.list_passkeys(indringer) == []
+      assert Passkeys.list_passkeys(indringer) == []
       assert Passkey.cose_key(opgeslagen(auth)) == Authenticator.cose_key(auth)
 
       # De eigenaar logt nog gewoon in met zijn eigen sleutel.
@@ -349,16 +350,16 @@ defmodule ControlPlane.PasskeyCeremonieTest do
 
     test "hetzelfde antwoord twee keer insturen is een replay" do
       {user, auth} = met_passkey()
-      %{challenge_id: id, public_key: pk} = Accounts.start_passkey_login(user)
+      %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_login(user)
       assertie = Authenticator.assertie(auth, pk)
 
-      assert {:ok, _} = Accounts.finish_passkey_login(user, id, assertie)
-      assert {:error, :challenge_expired} = Accounts.finish_passkey_login(user, id, assertie)
+      assert {:ok, _} = Passkeys.finish_passkey_login(user, id, assertie)
+      assert {:error, :challenge_expired} = Passkeys.finish_passkey_login(user, id, assertie)
 
       # Ook onder een verse challenge doet het oude antwoord niets: het is over
       # andere bytes getekend.
-      %{challenge_id: nieuw} = Accounts.start_passkey_login(user)
-      assert {:error, :invalid_passkey} = Accounts.finish_passkey_login(user, nieuw, assertie)
+      %{challenge_id: nieuw} = Passkeys.start_passkey_login(user)
+      assert {:error, :invalid_passkey} = Passkeys.finish_passkey_login(user, nieuw, assertie)
     end
 
     test "een sleutel die niet bij dit account hoort wordt geweigerd" do
@@ -386,10 +387,10 @@ defmodule ControlPlane.PasskeyCeremonieTest do
     test "andermans inlog-challenge is niet bruikbaar" do
       {a, _} = met_passkey()
       {b, auth_b} = met_passkey()
-      %{challenge_id: id, public_key: pk} = Accounts.start_passkey_login(a)
+      %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_login(a)
 
       assert {:error, :challenge_expired} =
-               Accounts.finish_passkey_login(b, id, Authenticator.assertie(auth_b, pk))
+               Passkeys.finish_passkey_login(b, id, Authenticator.assertie(auth_b, pk))
 
       assert {:ok, _} = inloggen(b, auth_b)
     end
@@ -397,10 +398,10 @@ defmodule ControlPlane.PasskeyCeremonieTest do
     test "een registratie-challenge kan niet inloggen" do
       # Eerst crashte dit met een WithClauseError: een 500 op het inlogpad.
       {user, auth} = met_passkey()
-      %{challenge_id: id, public_key: reg_pk} = Accounts.start_passkey_registration(user)
+      %{challenge_id: id, public_key: reg_pk} = Passkeys.start_passkey_registration(user)
       assertie = Authenticator.assertie(auth, %{challenge: reg_pk.challenge, rpId: reg_pk.rp.id})
 
-      assert {:error, :challenge_expired} = Accounts.finish_passkey_login(user, id, assertie)
+      assert {:error, :challenge_expired} = Passkeys.finish_passkey_login(user, id, assertie)
       assert {:ok, _} = inloggen(user, auth)
     end
 
@@ -412,7 +413,7 @@ defmodule ControlPlane.PasskeyCeremonieTest do
       assert {:ok, _} = inloggen(user, auth)
 
       assert {:ok, _} =
-               Accounts.delete_passkey(user, opgeslagen(auth).id, valid_user_password())
+               Passkeys.delete_passkey(user, opgeslagen(auth).id, valid_user_password())
 
       assert {:error, :invalid_passkey} = inloggen(user, auth)
     end

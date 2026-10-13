@@ -5,7 +5,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Teardown
 
   defp region do
     code = "r-#{System.unique_integer([:positive])}"
@@ -61,7 +61,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     vps = deleting_vps(r, node_in(r))
     delete_command(vps, :failed, 3600)
 
-    assert Provisioning.retry_stuck_deletes(300) == 1
+    assert Teardown.retry_stuck_deletes(300) == 1
     assert Enum.any?(delete_commands(vps.id), &(&1.status == :pending))
   end
 
@@ -70,7 +70,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     vps = deleting_vps(r, node_in(r))
     delete_command(vps, :failed, 10)
 
-    assert Provisioning.retry_stuck_deletes(300) == 0
+    assert Teardown.retry_stuck_deletes(300) == 0
   end
 
   test "a teardown still in flight is not duplicated" do
@@ -80,7 +80,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     delete_command(vps, :failed, 3600)
     delete_command(vps, :delivered, 5)
 
-    assert Provisioning.retry_stuck_deletes(300) == 0
+    assert Teardown.retry_stuck_deletes(300) == 0
   end
 
   test "the wait doubles with each failure" do
@@ -95,7 +95,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     delete_command(vps, :failed, 3000)
     delete_command(vps, :failed, 1200)
 
-    assert Provisioning.retry_stuck_deletes(300) == 1
+    assert Teardown.retry_stuck_deletes(300) == 1
   end
 
   test "with more failures the same age is no longer due" do
@@ -105,7 +105,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     # Five failures: the next attempt waits 5 * 2^4 = 80 minutes.
     for age <- [9000, 8000, 7000, 6000, 1200], do: delete_command(vps, :failed, age)
 
-    assert Provisioning.retry_stuck_deletes(300) == 0
+    assert Teardown.retry_stuck_deletes(300) == 0
   end
 
   test "the backoff has a ceiling, so a long-dead node is still retried" do
@@ -116,7 +116,7 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     for i <- 1..10, do: delete_command(vps, :failed, 100_000 + i)
     delete_command(vps, :failed, 8 * 3600)
 
-    assert Provisioning.retry_stuck_deletes(300, 6 * 3600) == 1
+    assert Teardown.retry_stuck_deletes(300, 6 * 3600) == 1
   end
 
   test "a VPS that is not being deleted is never touched" do
@@ -126,13 +126,13 @@ defmodule ControlPlane.ProvisioningDeleteRetryTest do
     {:ok, _} = vps |> Vps.changeset(%{status: :active}) |> Repo.update()
     delete_command(vps, :failed, 3600)
 
-    assert Provisioning.retry_stuck_deletes(300) == 0
+    assert Teardown.retry_stuck_deletes(300) == 0
   end
 
   test "a VPS with no failed teardown behind it is not retried" do
     r = region()
     _vps = deleting_vps(r, node_in(r))
 
-    assert Provisioning.retry_stuck_deletes(300) == 0
+    assert Teardown.retry_stuck_deletes(300) == 0
   end
 end

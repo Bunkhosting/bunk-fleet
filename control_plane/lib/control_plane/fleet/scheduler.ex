@@ -14,7 +14,7 @@ defmodule ControlPlane.Fleet.Scheduler do
   """
   import Ecto.Query
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Reservation
   alias ControlPlane.Repo
@@ -81,7 +81,7 @@ defmodule ControlPlane.Fleet.Scheduler do
   # Load online nodes in the region that fit the request, locking the rows FOR
   # UPDATE so capacity decisions are serialized across concurrent schedulers.
   defp lock_candidates(repo, %{vcpu: vcpu, ram_mb: ram_mb, disk_gb: disk_gb} = request) do
-    Fleet.online_nodes_in_region_query(request.region_id)
+    Liveness.online_nodes_in_region_query(request.region_id)
     |> where(
       [n],
       n.available_vcpu >= ^vcpu and

@@ -14,6 +14,7 @@ defmodule ControlPlaneWeb.MollieTopupTest do
 
   alias ControlPlane.Accounts
   alias ControlPlane.Credits.TopupRequest
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Mollie
   alias ControlPlane.Repo
 
@@ -96,7 +97,7 @@ defmodule ControlPlaneWeb.MollieTopupTest do
     oud = DateTime.add(DateTime.utc_now(), -7200, :second)
 
     for _ <- 1..5 do
-      {:ok, tr} = ControlPlane.Credits.create_topup_request(u.id, 2500)
+      {:ok, tr} = Topups.create_topup_request(u.id, 2500)
       Repo.update_all(from(t in TopupRequest, where: t.id == ^tr.id), set: [inserted_at: oud])
     end
 
@@ -109,7 +110,7 @@ defmodule ControlPlaneWeb.MollieTopupTest do
   end
 
   test "verse opwaarderingen zonder Mollie-id tellen wel mee", %{conn: conn, user: u} do
-    for _ <- 1..5, do: {:ok, _} = ControlPlane.Credits.create_topup_request(u.id, 2500)
+    for _ <- 1..5, do: {:ok, _} = Topups.create_topup_request(u.id, 2500)
 
     mollie_antwoordt(geslaagde_betaling())
 

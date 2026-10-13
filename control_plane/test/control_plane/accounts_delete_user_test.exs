@@ -10,6 +10,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
   use ControlPlane.DataCase, async: true
 
   alias ControlPlane.Accounts
+  alias ControlPlane.Accounts.Deletion
   alias ControlPlane.Accounts.User
   alias ControlPlane.Credits
   alias ControlPlane.Credits.LedgerEntry
@@ -45,7 +46,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
     test "wordt echt verwijderd" do
       u = gebruiker("leeg@bunk.test")
 
-      assert {:ok, :deleted} = Accounts.delete_or_anonymise_user(u)
+      assert {:ok, :deleted} = Deletion.delete_or_anonymise_user(u)
       assert is_nil(Repo.get(User, u.id))
     end
 
@@ -62,7 +63,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
       u = gebruiker("betaald@bunk.test")
       {:ok, _} = Credits.add_entry(u.id, 5000, "topup", "test")
 
-      assert {:ok, :anonymised} = Accounts.delete_or_anonymise_user(u)
+      assert {:ok, :anonymised} = Deletion.delete_or_anonymise_user(u)
 
       bewaard = Repo.get!(User, u.id)
       refute bewaard.email == "betaald@bunk.test"
@@ -83,7 +84,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
       {:ok, _} = Credits.add_entry(u.id, 1000, "topup", "test")
       _token = Accounts.generate_user_session_token(u)
 
-      assert {:ok, :anonymised} = Accounts.delete_or_anonymise_user(u)
+      assert {:ok, :anonymised} = Deletion.delete_or_anonymise_user(u)
 
       assert is_nil(
                Accounts.get_user_by_email_and_password(
@@ -104,7 +105,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
       {:ok, u} = Accounts.update_user_role(u, :admin)
       {:ok, _} = Credits.add_entry(u.id, 1000, "topup", "test")
 
-      assert {:ok, :anonymised} = Accounts.delete_or_anonymise_user(u)
+      assert {:ok, :anonymised} = Deletion.delete_or_anonymise_user(u)
       assert Repo.get!(User, u.id).role == :user
     end
   end
@@ -116,7 +117,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
       u = gebruiker("draait@bunk.test")
       vps_van(u, :active)
 
-      assert {:error, :has_vpses} = Accounts.delete_or_anonymise_user(u)
+      assert {:error, :has_vpses} = Deletion.delete_or_anonymise_user(u)
       assert Repo.get!(User, u.id).email == "draait@bunk.test"
     end
 
@@ -125,7 +126,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
       vps_van(u, :deleted)
       vps_van(u, :failed)
 
-      assert {:ok, :deleted} = Accounts.delete_or_anonymise_user(u)
+      assert {:ok, :deleted} = Deletion.delete_or_anonymise_user(u)
     end
   end
 
@@ -162,7 +163,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
     # Deze gebruiker heeft financiële geschiedenis, dus hij wordt geanonimiseerd
     # en niet verwijderd -- dat is het pad waarop het label bleef staan.
     {:ok, _} = Credits.add_entry(user.id, 500, "admin_adjustment", "geschiedenis")
-    {:ok, :anonymised} = Accounts.delete_or_anonymise_user(user)
+    {:ok, :anonymised} = Deletion.delete_or_anonymise_user(user)
 
     bijgewerkt = Repo.get!(Vps, vps.id)
     refute bijgewerkt.owner_email == user.email
@@ -195,7 +196,7 @@ defmodule ControlPlane.AccountsDeleteUserTest do
       |> Ecto.Changeset.change(%{owner_id: user.id, status: :deleted})
       |> Repo.insert!()
 
-    {:ok, :deleted} = Accounts.delete_or_anonymise_user(user)
+    {:ok, :deleted} = Deletion.delete_or_anonymise_user(user)
 
     assert is_nil(Repo.get!(Vps, vps.id).owner_email)
   end

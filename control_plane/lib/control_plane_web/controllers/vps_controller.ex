@@ -24,9 +24,12 @@ defmodule ControlPlaneWeb.VpsController do
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Package
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Idempotency
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
+  alias ControlPlane.Provisioning.Teardown
   alias ControlPlane.Repo
   alias ControlPlane.Subscriptions
   alias ControlPlaneWeb.Fouten
@@ -204,7 +207,7 @@ defmodule ControlPlaneWeb.VpsController do
     # someone else's VPS all collapse to 404 so ownership isn't leaked.
     with {:ok, id} <- valid_id(id),
          %Vps{} <- Fleet.get_vps_for_owner(conn.assigns.current_user.id, id),
-         {:ok, %{vps: vps}} <- Provisioning.delete_vps(id) do
+         {:ok, %{vps: vps}} <- Teardown.delete_vps(id) do
       conn
       |> put_status(:accepted)
       |> json(%{vps: vps_json(vps)})
@@ -281,7 +284,7 @@ defmodule ControlPlaneWeb.VpsController do
   def start(conn, params), do: power(conn, params, &start_als_betaald/1)
 
   @doc "Stops an owned, running VPS. 404 if not owned."
-  def stop(conn, params), do: power(conn, params, &Provisioning.stop_vps/1)
+  def stop(conn, params), do: power(conn, params, &Power.stop_vps/1)
 
   @doc """
   Hernoemt een eigen VPS.
@@ -308,14 +311,14 @@ defmodule ControlPlaneWeb.VpsController do
   op. Wie de stekker eruit wil trekken doet stop en daarna start -- dat is een
   andere handeling en hoort er ook als een andere handeling uit te zien.
   """
-  def reboot(conn, params), do: power(conn, params, &Provisioning.reboot_vps/1)
+  def reboot(conn, params), do: power(conn, params, &Power.reboot_vps/1)
 
   # Een VPS die wegens een onbetaalde verlenging stilstaat, start de klant niet
   # zelf. Hij komt vanzelf terug zodra de betaling lukt (Subscriptions.settle_due).
   defp start_als_betaald(id) do
     if Subscriptions.geschorst?(id),
       do: {:error, :vps_suspended},
-      else: Provisioning.start_vps(id)
+      else: Power.start_vps(id)
   end
 
   defp power(conn, %{"id" => id}, transition) do
@@ -437,20 +440,20 @@ defmodule ControlPlaneWeb.VpsController do
   end
 
   defp resolve_region_id(%{"region_code" => region_code}, _attrs) when is_binary(region_code) do
-    open_regio(Fleet.region_by_code(region_code))
+    open_regio(Regions.region_by_code(region_code))
   end
 
   # No preference: Bunk picks. A named region that does not exist is still an
   # error — only the *absence* of one means "anywhere", so a typo'd region code
   # cannot quietly land a customer on the other side of the country.
-  defp resolve_region_id(_params, attrs), do: Fleet.auto_region_id(attrs)
+  defp resolve_region_id(_params, attrs), do: Regions.auto_region_id(attrs)
 
   # Een gesloten locatie staat niet in de lijst die de klant te zien krijgt,
   # maar dat is geen slot. Wie de code zelf meestuurt -- een oud tabblad, een
   # script, iemands eigen client -- kwam er gewoon langs, en kreeg een draaiende
   # machine in een regio die bewust dicht stond.
   #
-  # Het wrange was welke kant beschermd was: `Fleet.auto_region_id/1` slaat een
+  # Het wrange was welke kant beschermd was: `Regions.auto_region_id/1` slaat een
   # uitgeschakelde regio wél over, met een comment erbij waarom. Alleen de
   # BEWUSTE keuze van een klant ging er ongehinderd langs. Gemeten op productie
   # op 23 september: ehv stond dicht, en een bestelling met `region_code: "ehv"`

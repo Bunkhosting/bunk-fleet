@@ -12,7 +12,7 @@ defmodule ControlPlane.Fleet.StilleNodesTest do
 
   import Swoosh.TestAssertions
 
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.StilleNodes
@@ -127,7 +127,7 @@ defmodule ControlPlane.Fleet.StilleNodesTest do
 
     # De node komt terug.
     {:ok, _} =
-      Fleet.mark_online_heartbeat(Repo.get!(Node, node.id), %{
+      Liveness.mark_online_heartbeat(Repo.get!(Node, node.id), %{
         total_vcpu: 4,
         total_ram_mb: 8192,
         total_disk_gb: 100,

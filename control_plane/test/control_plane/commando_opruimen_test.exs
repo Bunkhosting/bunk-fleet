@@ -13,7 +13,7 @@ defmodule ControlPlane.CommandoOpruimenTest do
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.CommandQueue
 
   defp fleet_node do
     code = "r-#{System.unique_integer([:positive])}"
@@ -39,7 +39,7 @@ defmodule ControlPlane.CommandoOpruimenTest do
     oud = commando(node, :done, 200)
     vers = commando(node, :done, 3)
 
-    assert Provisioning.purge_old_commands(90) == 1
+    assert CommandQueue.purge_old_commands(90) == 1
     refute Repo.get(Command, oud.id)
     assert Repo.get(Command, vers.id)
   end
@@ -49,7 +49,7 @@ defmodule ControlPlane.CommandoOpruimenTest do
     wacht = commando(node, :pending, 400)
     onderweg = commando(node, :delivered, 400)
 
-    assert Provisioning.purge_old_commands(90) == 0
+    assert CommandQueue.purge_old_commands(90) == 0
     assert Repo.get(Command, wacht.id)
     assert Repo.get(Command, onderweg.id)
   end
@@ -60,9 +60,9 @@ defmodule ControlPlane.CommandoOpruimenTest do
     node = fleet_node()
     for _ <- 1..5, do: commando(node, :failed, 120)
 
-    assert Provisioning.purge_old_commands(90, 2) == 2
-    assert Provisioning.purge_old_commands(90, 2) == 2
-    assert Provisioning.purge_old_commands(90, 2) == 1
-    assert Provisioning.purge_old_commands(90, 2) == 0
+    assert CommandQueue.purge_old_commands(90, 2) == 2
+    assert CommandQueue.purge_old_commands(90, 2) == 2
+    assert CommandQueue.purge_old_commands(90, 2) == 1
+    assert CommandQueue.purge_old_commands(90, 2) == 0
   end
 end

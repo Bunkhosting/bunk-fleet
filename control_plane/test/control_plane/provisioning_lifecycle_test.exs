@@ -5,6 +5,8 @@ defmodule ControlPlane.ProvisioningLifecycleTest do
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
+  alias ControlPlane.Provisioning.Teardown
 
   defp insert_region do
     code = "r-#{System.unique_integer([:positive])}"
@@ -51,82 +53,82 @@ defmodule ControlPlane.ProvisioningLifecycleTest do
   describe "power dispatch guards" do
     test "start_vps from :stopped enqueues a :start command with the vm id" do
       vps = setup_vps(:stopped)
-      assert {:ok, %{command: cmd}} = Provisioning.start_vps(vps.id)
+      assert {:ok, %{command: cmd}} = Power.start_vps(vps.id)
       assert cmd.kind == :start
       assert cmd.payload == %{"vm_id" => "105"}
     end
 
     test "stop_vps allowed from :active and :paused" do
       for status <- [:active, :paused] do
-        assert {:ok, %{command: cmd}} = Provisioning.stop_vps(setup_vps(status).id)
+        assert {:ok, %{command: cmd}} = Power.stop_vps(setup_vps(status).id)
         assert cmd.kind == :stop
       end
     end
 
     test "pause_vps only from :active" do
-      assert {:ok, %{command: cmd}} = Provisioning.pause_vps(setup_vps(:active).id)
+      assert {:ok, %{command: cmd}} = Power.pause_vps(setup_vps(:active).id)
       assert cmd.kind == :pause
 
       assert {:error, {:invalid_status, :stopped}} =
-               Provisioning.pause_vps(setup_vps(:stopped).id)
+               Power.pause_vps(setup_vps(:stopped).id)
     end
 
     test "resume_vps only from :paused" do
-      assert {:ok, %{command: cmd}} = Provisioning.resume_vps(setup_vps(:paused).id)
+      assert {:ok, %{command: cmd}} = Power.resume_vps(setup_vps(:paused).id)
       assert cmd.kind == :resume
-      assert {:error, {:invalid_status, :active}} = Provisioning.resume_vps(setup_vps(:active).id)
+      assert {:error, {:invalid_status, :active}} = Power.resume_vps(setup_vps(:active).id)
     end
 
     test "start_vps invalid from :active" do
-      assert {:error, {:invalid_status, :active}} = Provisioning.start_vps(setup_vps(:active).id)
+      assert {:error, {:invalid_status, :active}} = Power.start_vps(setup_vps(:active).id)
     end
 
     test "not_provisioned when provider_vm_id is missing" do
       assert {:error, :not_provisioned} =
-               Provisioning.start_vps(setup_vps(:stopped, provider_vm_id: nil).id)
+               Power.start_vps(setup_vps(:stopped, provider_vm_id: nil).id)
     end
 
     test "not_found for unknown vps" do
-      assert {:error, :not_found} = Provisioning.start_vps(Ecto.UUID.generate())
+      assert {:error, :not_found} = Power.start_vps(Ecto.UUID.generate())
     end
   end
 
   describe "apply_result power transitions" do
     test "start done -> :active" do
       vps = setup_vps(:stopped)
-      {:ok, %{command: cmd}} = Provisioning.start_vps(vps.id)
+      {:ok, %{command: cmd}} = Power.start_vps(vps.id)
       assert {:ok, _} = Provisioning.apply_result(cmd, %{"status" => "done"})
       assert Repo.get!(Vps, vps.id).status == :active
     end
 
     test "stop done -> :stopped" do
       vps = setup_vps(:active)
-      {:ok, %{command: cmd}} = Provisioning.stop_vps(vps.id)
+      {:ok, %{command: cmd}} = Power.stop_vps(vps.id)
       assert {:ok, _} = Provisioning.apply_result(cmd, %{"status" => "done"})
       assert Repo.get!(Vps, vps.id).status == :stopped
     end
 
     test "pause done -> :paused then resume done -> :active" do
       vps = setup_vps(:active)
-      {:ok, %{command: pcmd}} = Provisioning.pause_vps(vps.id)
+      {:ok, %{command: pcmd}} = Power.pause_vps(vps.id)
       {:ok, _} = Provisioning.apply_result(pcmd, %{"status" => "done"})
       assert Repo.get!(Vps, vps.id).status == :paused
 
-      {:ok, %{command: rcmd}} = Provisioning.resume_vps(vps.id)
+      {:ok, %{command: rcmd}} = Power.resume_vps(vps.id)
       {:ok, _} = Provisioning.apply_result(rcmd, %{"status" => "done"})
       assert Repo.get!(Vps, vps.id).status == :active
     end
 
     test "failed power command leaves status unchanged" do
       vps = setup_vps(:active)
-      {:ok, %{command: cmd}} = Provisioning.stop_vps(vps.id)
+      {:ok, %{command: cmd}} = Power.stop_vps(vps.id)
       assert {:ok, _} = Provisioning.apply_result(cmd, %{"status" => "failed", "error" => "boom"})
       assert Repo.get!(Vps, vps.id).status == :active
     end
 
     test "power result is idempotent on redelivery" do
       vps = setup_vps(:active)
-      {:ok, %{command: cmd}} = Provisioning.stop_vps(vps.id)
+      {:ok, %{command: cmd}} = Power.stop_vps(vps.id)
       assert {:ok, _} = Provisioning.apply_result(cmd, %{"status" => "done"})
       assert {:ok, _} = Provisioning.apply_result(cmd, %{"status" => "done"})
       assert Repo.get!(Vps, vps.id).status == :stopped
@@ -136,7 +138,7 @@ defmodule ControlPlane.ProvisioningLifecycleTest do
   describe "delete retry" do
     test "re-dispatches a delete after the previous one terminally failed" do
       vps = setup_vps(:active)
-      {:ok, %{command: cmd}} = Provisioning.delete_vps(vps.id)
+      {:ok, %{command: cmd}} = Teardown.delete_vps(vps.id)
       # Agent reports the destroy failed (e.g. transient Proxmox error); the
       # command becomes terminal but the VPS stays :deleting.
       {:ok, _} =
@@ -145,15 +147,15 @@ defmodule ControlPlane.ProvisioningLifecycleTest do
       assert Repo.get!(Vps, vps.id).status == :deleting
 
       # A fresh delete is allowed (no in-flight command) and enqueues a new one.
-      assert {:ok, %{command: cmd2}} = Provisioning.delete_vps(vps.id)
+      assert {:ok, %{command: cmd2}} = Teardown.delete_vps(vps.id)
       assert cmd2.kind == :delete
       assert cmd2.id != cmd.id
     end
 
     test "blocks a second delete while one is still in flight" do
       vps = setup_vps(:active)
-      {:ok, _} = Provisioning.delete_vps(vps.id)
-      assert {:error, :already_deleting} = Provisioning.delete_vps(vps.id)
+      {:ok, _} = Teardown.delete_vps(vps.id)
+      assert {:error, :already_deleting} = Teardown.delete_vps(vps.id)
     end
   end
 end

@@ -20,6 +20,7 @@ defmodule ControlPlaneWeb.MollieWebhookTest do
   alias ControlPlane.Accounts
   alias ControlPlane.Credits
   alias ControlPlane.Credits.TopupRequest
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Mollie
   alias ControlPlane.Repo
 
@@ -33,7 +34,7 @@ defmodule ControlPlaneWeb.MollieWebhookTest do
   end
 
   defp pending_topup(user, cents, payment_id) do
-    {:ok, tr} = Credits.create_mollie_topup(user.id, cents, payment_id)
+    {:ok, tr} = Topups.create_mollie_topup(user.id, cents, payment_id)
     tr
   end
 
@@ -82,7 +83,7 @@ defmodule ControlPlaneWeb.MollieWebhookTest do
     # en die komt langs Mollie terug. Dat is veilig om op af te gaan: het komt
     # niet uit de webhook maar uit de betaling die we zojuist bij Mollie hebben
     # opgehaald, en we kijken er pas naar nadat die op "paid" stond.
-    {:ok, tr} = Credits.create_topup_request(user.id, 2500)
+    {:ok, tr} = Topups.create_topup_request(user.id, 2500)
     assert is_nil(tr.mollie_payment_id)
     id = "tr_#{System.unique_integer([:positive])}"
     before = balance(user)

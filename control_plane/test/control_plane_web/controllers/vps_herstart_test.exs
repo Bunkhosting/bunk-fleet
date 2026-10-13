@@ -18,6 +18,7 @@ defmodule ControlPlaneWeb.VpsHerstartTest do
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
   alias ControlPlane.Repo
 
   defp gebruiker do
@@ -114,7 +115,7 @@ defmodule ControlPlaneWeb.VpsHerstartTest do
     u = gebruiker()
     v = vps(u, :active)
 
-    {:ok, %{command: cmd}} = Provisioning.reboot_vps(v.id)
+    {:ok, %{command: cmd}} = Power.reboot_vps(v.id)
     {:ok, _} = Provisioning.apply_result(cmd, %{"status" => "done", "vm_id" => "2001"})
 
     assert Repo.get!(Vps, v.id).status == :active

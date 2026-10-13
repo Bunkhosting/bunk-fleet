@@ -19,7 +19,7 @@ defmodule ControlPlane.MachtscommandoGelijktijdigTest do
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
   alias ControlPlane.Repo
 
   defp draaiende_vps do
@@ -61,15 +61,15 @@ defmodule ControlPlane.MachtscommandoGelijktijdigTest do
   test "twee keer herstarten achter elkaar levert één commando op" do
     vps = draaiende_vps()
 
-    assert {:ok, %{command: %Command{}}} = Provisioning.reboot_vps(vps.id)
-    assert {:ok, %{command: nil}} = Provisioning.reboot_vps(vps.id)
+    assert {:ok, %{command: %Command{}}} = Power.reboot_vps(vps.id)
+    assert {:ok, %{command: nil}} = Power.reboot_vps(vps.id)
 
     assert aantal_commandos(vps, :reboot) == 1
   end
 
   test "de database laat er maar één door, ook als de voorwacht wordt overgeslagen" do
     vps = draaiende_vps()
-    assert {:ok, %{command: %Command{}}} = Provisioning.reboot_vps(vps.id)
+    assert {:ok, %{command: %Command{}}} = Power.reboot_vps(vps.id)
 
     # Rechtstreeks invoegen, zoals een gelijktijdig verzoek doet dat de controle
     # al voorbij was. Zonder de index zou dit gewoon lukken.
@@ -90,8 +90,8 @@ defmodule ControlPlane.MachtscommandoGelijktijdigTest do
 
   test "een ander soort commando mag er wel naast" do
     vps = draaiende_vps()
-    assert {:ok, %{command: %Command{}}} = Provisioning.reboot_vps(vps.id)
-    assert {:ok, %{command: %Command{}}} = Provisioning.stop_vps(vps.id)
+    assert {:ok, %{command: %Command{}}} = Power.reboot_vps(vps.id)
+    assert {:ok, %{command: %Command{}}} = Power.stop_vps(vps.id)
 
     assert aantal_commandos(vps, :reboot) == 1
     assert aantal_commandos(vps, :stop) == 1

@@ -2,7 +2,7 @@ defmodule ControlPlane.Fleet.StilleNodes do
   @moduledoc """
   Een melding aan de operator als een node wegvalt.
 
-  `Fleet.mark_stale_nodes_offline/0` zette een node na twee minuten zonder
+  `Fleet.Liveness.mark_stale_nodes_offline/0` zette een node na twee minuten zonder
   hartslag op `:offline` en vertelde dat aan de open dashboards. Aan niemand
   anders. Een node kon dus acht dagen stil liggen zonder dat iemand het hoorde,
   en dat is gebeurd: Maastricht viel op 24 september weg en op 2 oktober was het

@@ -12,6 +12,7 @@ defmodule ControlPlaneWeb.Admin.PanelInsightTest do
 
   alias ControlPlane.Accounts
   alias ControlPlane.Credits
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
@@ -75,9 +76,9 @@ defmodule ControlPlaneWeb.Admin.PanelInsightTest do
       {:ok, _} = Credits.add_entry(klant.id, 5000, "admin_topup", "Handmatig")
 
       {:ok, betaling} =
-        Credits.create_mollie_topup(klant.id, 2500, "tr_pi_#{System.unique_integer([:positive])}")
+        Topups.create_mollie_topup(klant.id, 2500, "tr_pi_#{System.unique_integer([:positive])}")
 
-      {:ok, _} = Credits.mark_topup_paid(betaling.id, "mollie")
+      {:ok, _} = Topups.mark_topup_paid(betaling.id, "mollie")
 
       Repo.insert!(%Subscription{
         owner_id: klant.id,

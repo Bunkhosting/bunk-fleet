@@ -16,7 +16,7 @@ defmodule ControlPlane.BewaartermijnVpsTest do
   import ControlPlane.Fixtures
 
   alias ControlPlane.Clock
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Housekeeping
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
 
@@ -57,7 +57,7 @@ defmodule ControlPlane.BewaartermijnVpsTest do
     vps = vps_met(:deleted, 40)
     user_id = vps.owner_id
 
-    assert Fleet.scrub_deleted_vpses(30) == 1
+    assert Housekeeping.scrub_deleted_vpses(30) == 1
 
     opnieuw = Repo.get!(Vps, vps.id)
     assert is_nil(opnieuw.ip_address)
@@ -76,7 +76,7 @@ defmodule ControlPlane.BewaartermijnVpsTest do
   test "binnen de termijn blijft alles staan" do
     vps = vps_met(:deleted, 5)
 
-    assert Fleet.scrub_deleted_vpses(30) == 0
+    assert Housekeeping.scrub_deleted_vpses(30) == 0
     assert Repo.get!(Vps, vps.id).ip_address != nil
   end
 
@@ -86,14 +86,14 @@ defmodule ControlPlane.BewaartermijnVpsTest do
     # IP-adres van een machine waar iemand op dat moment op werkt.
     vps = vps_met(:active, 400)
 
-    assert Fleet.scrub_deleted_vpses(30) == 0
+    assert Housekeeping.scrub_deleted_vpses(30) == 0
     assert Repo.get!(Vps, vps.id).ip_address != nil
   end
 
   test "twee keer vegen doet de tweede keer niets" do
     _vps = vps_met(:deleted, 40)
 
-    assert Fleet.scrub_deleted_vpses(30) == 1
-    assert Fleet.scrub_deleted_vpses(30) == 0
+    assert Housekeeping.scrub_deleted_vpses(30) == 1
+    assert Housekeeping.scrub_deleted_vpses(30) == 0
   end
 end

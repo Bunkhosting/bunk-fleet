@@ -14,6 +14,8 @@ defmodule ControlPlaneWeb.Admin.PanelUsersController do
     only: [error: 3, ok_or: 2, subscription_json: 1, vps_json: 1]
 
   alias ControlPlane.Accounts
+  alias ControlPlane.Accounts.Deletion
+  alias ControlPlane.Accounts.Passkeys
   alias ControlPlane.Accounts.User
   alias ControlPlane.Credits
   alias ControlPlane.Credits.LedgerEntry
@@ -81,7 +83,7 @@ defmodule ControlPlaneWeb.Admin.PanelUsersController do
           role: user.role,
           confirmed: not is_nil(user.confirmed_at),
           totp_enabled: not is_nil(user.totp_confirmed_at),
-          passkeys: length(Accounts.list_passkeys(user)),
+          passkeys: length(Passkeys.list_passkeys(user)),
           created_at: user.inserted_at
         },
         balance_cents: Credits.balance_cents(user.id),
@@ -173,7 +175,7 @@ defmodule ControlPlaneWeb.Admin.PanelUsersController do
     with {:ok, uid} <- Ecto.UUID.cast(id) |> ok_or(:not_found),
          %User{} = user <- Accounts.get_user(uid) || :not_found,
          :ok <- niet_jezelf(conn, user),
-         {:ok, uitkomst} <- Accounts.delete_or_anonymise_user(user) do
+         {:ok, uitkomst} <- Deletion.delete_or_anonymise_user(user) do
       json(conn, %{result: uitkomst})
     else
       :not_found -> error(conn, :not_found, "not_found")

@@ -27,7 +27,7 @@ worden, wel overlegd op verzoek van de Autoriteit Persoonsgegevens.
 | **Grondslag** | Uitvoering van de overeenkomst (art. 6 lid 1 sub b). Voor de tweede factor en de controle op gelekte wachtwoorden: gerechtvaardigd belang (sub f) — beveiliging van het account van de klant zelf. |
 | **Ontvangers** | Geen. Resend (e-mail, zie §7) ziet het adres bij het versturen van een bevestigings- of herstelmail. |
 | **Buiten de EER** | Resend is gevestigd in de VS; doorgifte op basis van het EU-US Data Privacy Framework en standaardcontractbepalingen. |
-| **Bewaartermijn** | Zolang het account bestaat. Daarna verwijderd, of geanonimiseerd als er administratie aan hangt die bewaard moet blijven (`Accounts.delete_or_anonymise_user/1`): e-mailadres, naam en de losse e-mailvelden op VPS- en verbruiksrijen worden onherkenbaar gemaakt. Verlopen sessies worden elke 30 seconden opgeruimd door de `Reconciler`. |
+| **Bewaartermijn** | Zolang het account bestaat. Daarna verwijderd, of geanonimiseerd als er administratie aan hangt die bewaard moet blijven (`Accounts.Deletion.delete_or_anonymise_user/1`): e-mailadres, naam en de losse e-mailvelden op VPS- en verbruiksrijen worden onherkenbaar gemaakt. Verlopen sessies worden elke 30 seconden opgeruimd door de `Reconciler`. |
 | **Beveiliging** | Wachtwoorden als pbkdf2, nooit in leesbare vorm. TOTP-geheimen en consolesleutels versleuteld in rust. Sessietokens gehasht opgeslagen. Snelheidsbegrenzing op inloggen, registreren en de tweede factor. Een wachtwoord dat in een bekend datalek staat wordt geweigerd (§8). |
 | **Bron** | De betrokkene zelf. |
 
@@ -41,7 +41,7 @@ worden, wel overlegd op verzoek van de Autoriteit Persoonsgegevens.
 | **Grondslag** | Uitvoering van de overeenkomst. |
 | **Ontvangers** | De node waarop de VPS draait. Staat die node bij iemand anders dan Bunk, dan verwerkt die persoon uitsluitend voor Bunk. |
 | **Buiten de EER** | Nee. Alle nodes staan in Nederland. |
-| **Bewaartermijn** | Zolang de VPS bestaat. Een verwijderde VPS wordt na **30 dagen** ontdaan van alles wat naar een persoon wijst (`Fleet.scrub_deleted_vpses/1`); de rij blijft bestaan voor de administratie. Opdrachten worden na **90 dagen** verwijderd (`Provisioning.purge_old_commands/2`). |
+| **Bewaartermijn** | Zolang de VPS bestaat. Een verwijderde VPS wordt na **30 dagen** ontdaan van alles wat naar een persoon wijst (`Fleet.Housekeeping.scrub_deleted_vpses/1`); de rij blijft bestaan voor de administratie. Opdrachten worden na **90 dagen** verwijderd (`Provisioning.CommandQueue.purge_old_commands/2`). |
 | **Beveiliging** | Eigenaarschap wordt per object afgedwongen, niet per scherm. Een node kan alleen opdrachten ophalen die voor hem bestemd zijn. De gastnaam bevat een deel van de VPS-UUID zodat een node geen machine van een ander kan overnemen. |
 | **Bron** | De betrokkene zelf; het IP-adres wordt door Bunk toegekend. |
 

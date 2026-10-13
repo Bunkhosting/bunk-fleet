@@ -6,16 +6,18 @@ defmodule ControlPlane.Accounts do
   constant-time comparison, and bearer session tokens. Session tokens are stored
   hashed at rest — see `ControlPlane.Accounts.UserToken` — and the raw token is
   returned to the caller exactly once at generation time.
+
+  TOTP, passkeys en het verwijderen van een account staan in
+  `ControlPlane.Accounts.Totp`, `ControlPlane.Accounts.Passkeys` en
+  `ControlPlane.Accounts.Deletion`.
   """
   import Ecto.Query, warn: false
 
   require Logger
 
   alias ControlPlane.Accounts.BreachedPasswords
-  alias ControlPlane.Accounts.Deletion
   alias ControlPlane.Accounts.LoginThrottle
   alias ControlPlane.Accounts.Passkeys
-  alias ControlPlane.Accounts.Totp
   alias ControlPlane.Accounts.User
   alias ControlPlane.Accounts.UserToken
   alias ControlPlane.Clock
@@ -35,29 +37,6 @@ defmodule ControlPlane.Accounts do
 
   @doc "Looks up a user by id, or nil if not found."
   def get_user(id), do: Repo.get(User, id)
-
-  ## TOTP multi-factor authentication
-
-  @doc "Zie `ControlPlane.Accounts.Totp.totp_active?/1`."
-  defdelegate totp_active?(user), to: Totp
-
-  @doc "Zie `ControlPlane.Accounts.Totp.start_totp_setup/1`."
-  defdelegate start_totp_setup(user), to: Totp
-
-  @doc "Zie `ControlPlane.Accounts.Totp.confirm_totp/2`."
-  defdelegate confirm_totp(user, code), to: Totp
-
-  @doc "Zie `ControlPlane.Accounts.Totp.disable_totp/1`."
-  defdelegate disable_totp(user), to: Totp
-
-  @doc "Zie `ControlPlane.Accounts.Totp.valid_totp?/2`."
-  defdelegate valid_totp?(user, code), to: Totp
-
-  @doc "Zie `ControlPlane.Accounts.Totp.totp_uri/1`."
-  defdelegate totp_uri(user), to: Totp
-
-  @doc "Zie `ControlPlane.Accounts.Totp.totp_secret_base32/1`."
-  defdelegate totp_secret_base32(user), to: Totp
 
   @doc """
   Registers a new user from `attrs` (`email`, `password`, optionally `name`/`role`).
@@ -451,15 +430,6 @@ defmodule ControlPlane.Accounts do
 
   def session_mfa?(_token), do: false
 
-  @doc "Zie `ControlPlane.Accounts.Deletion.delete_or_anonymise_user/1`."
-  defdelegate delete_or_anonymise_user(user), to: Deletion
-
-  @doc "Zie `ControlPlane.Accounts.Deletion.has_live_vpses?/1`."
-  defdelegate has_live_vpses?(user), to: Deletion
-
-  @doc "Zie `ControlPlane.Accounts.Deletion.has_financial_history?/1`."
-  defdelegate has_financial_history?(user), to: Deletion
-
   @doc """
   Of dit account meer dan een wachtwoord nodig heeft om binnen te komen.
 
@@ -473,9 +443,6 @@ defmodule ControlPlane.Accounts do
   def has_second_factor?(%User{} = user), do: Passkeys.passkeys_active?(user)
 
   def has_second_factor?(_), do: false
-
-  @doc "Zie `ControlPlane.Accounts.Deletion.owns_nodes?/1`."
-  defdelegate owns_nodes?(user), to: Deletion
 
   @doc """
   Returns the user owning a valid, non-expired session `token`, or `nil`.
@@ -547,27 +514,4 @@ defmodule ControlPlane.Accounts do
     Repo.delete_all(UserToken.by_user_and_contexts_query(user, ["session"]))
     :ok
   end
-
-  ## Passkeys (WebAuthn)
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.passkeys_active?/1`."
-  defdelegate passkeys_active?(user), to: Passkeys
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.list_passkeys/1`."
-  defdelegate list_passkeys(user), to: Passkeys
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.start_passkey_registration/1`."
-  defdelegate start_passkey_registration(user), to: Passkeys
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.finish_passkey_registration/3`."
-  defdelegate finish_passkey_registration(user, challenge_id, attrs), to: Passkeys
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.delete_passkey/3`."
-  defdelegate delete_passkey(user, passkey_id, huidig), to: Passkeys
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.start_passkey_login/1`."
-  defdelegate start_passkey_login(user), to: Passkeys
-
-  @doc "Zie `ControlPlane.Accounts.Passkeys.finish_passkey_login/3`."
-  defdelegate finish_passkey_login(user, challenge_id, attrs), to: Passkeys
 end

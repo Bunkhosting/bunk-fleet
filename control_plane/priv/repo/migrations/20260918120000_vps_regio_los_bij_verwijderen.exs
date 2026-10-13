@@ -15,7 +15,7 @@ defmodule ControlPlane.Repo.Migrations.VpsRegioLosBijVerwijderen do
   Landhorst". Wat blijft is alles waar de administratie aan hangt: het
   grootboek, de abonnementen en het verbruik verwijzen naar de VPS en niet naar
   de regio. Een locatie mag pas weg als er geen node meer in staat en geen enkele
-  VPS er nog in draait -- zie `Fleet.delete_region/1` -- dus dit raakt alleen
+  VPS er nog in draait -- zie `Fleet.Regions.delete_region/1` -- dus dit raakt alleen
   geschiedenis van machines die er niet meer zijn.
 
   De kolom blijft verplicht in de changeset: een nieuwe VPS zonder locatie

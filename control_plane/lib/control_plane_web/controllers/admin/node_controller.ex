@@ -8,22 +8,22 @@ defmodule ControlPlaneWeb.Admin.NodeController do
   """
   use ControlPlaneWeb, :controller
 
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Repo
 
   def index(conn, _params) do
-    nodes = Enum.map(Fleet.list_nodes(), &node_json/1)
+    nodes = Enum.map(NodeAdmin.list_nodes(), &node_json/1)
     json(conn, %{nodes: nodes})
   end
 
   @doc """
   Closes a node to new VPSes. Existing ones keep running and keep being served.
   """
-  def drain(conn, %{"id" => id}), do: transition(conn, id, &Fleet.drain_node/1)
+  def drain(conn, %{"id" => id}), do: transition(conn, id, &NodeAdmin.drain_node/1)
 
   @doc "Reopens a drained node."
-  def resume(conn, %{"id" => id}), do: transition(conn, id, &Fleet.resume_node/1)
+  def resume(conn, %{"id" => id}), do: transition(conn, id, &NodeAdmin.resume_node/1)
 
   defp transition(conn, id, change) do
     with {:ok, uuid} <- Ecto.UUID.cast(id),

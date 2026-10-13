@@ -12,6 +12,7 @@ defmodule ControlPlane.AccountsPasskeyTest do
   alias ControlPlane.Accounts
   alias ControlPlane.Accounts.Passkey
   alias ControlPlane.Accounts.PasskeyChallenges
+  alias ControlPlane.Accounts.Passkeys
   alias ControlPlane.Repo
 
   @password "test-only-password-4f2b9c1e"
@@ -59,7 +60,7 @@ defmodule ControlPlane.AccountsPasskeyTest do
   describe "registreren" do
     test "de challenge heeft de vorm die navigator.credentials.create verwacht" do
       u = user("pk1@bunk.test")
-      %{challenge_id: id, public_key: pk} = Accounts.start_passkey_registration(u)
+      %{challenge_id: id, public_key: pk} = Passkeys.start_passkey_registration(u)
 
       assert is_binary(id)
       assert {:ok, bytes} = Base.url_decode64(pk.challenge, padding: false)
@@ -73,7 +74,7 @@ defmodule ControlPlane.AccountsPasskeyTest do
     test "bestaande sleutels gaan mee als excludeCredentials" do
       u = user("pk2@bunk.test")
       pk = fake_passkey(u)
-      %{public_key: opts} = Accounts.start_passkey_registration(u)
+      %{public_key: opts} = Passkeys.start_passkey_registration(u)
 
       assert [%{id: id}] = opts.excludeCredentials
       assert id == Base.url_encode64(pk.credential_id, padding: false)
@@ -81,10 +82,10 @@ defmodule ControlPlane.AccountsPasskeyTest do
 
     test "rommel als antwoord wordt geweigerd en verbruikt de challenge" do
       u = user("pk3@bunk.test")
-      %{challenge_id: id} = Accounts.start_passkey_registration(u)
+      %{challenge_id: id} = Passkeys.start_passkey_registration(u)
 
       assert {:error, :invalid_passkey} =
-               Accounts.finish_passkey_registration(u, id, %{
+               Passkeys.finish_passkey_registration(u, id, %{
                  attestation_object: "geen cbor",
                  client_data_json: "{}",
                  label: "x"
@@ -92,22 +93,22 @@ defmodule ControlPlane.AccountsPasskeyTest do
 
       # De challenge is nu weg: nog een poging met hetzelfde id kan niet.
       assert {:error, :challenge_expired} =
-               Accounts.finish_passkey_registration(u, id, %{
+               Passkeys.finish_passkey_registration(u, id, %{
                  attestation_object: "geen cbor",
                  client_data_json: "{}",
                  label: "x"
                })
 
-      assert Accounts.list_passkeys(u) == []
+      assert Passkeys.list_passkeys(u) == []
     end
 
     test "andermans challenge is niet bruikbaar" do
       a = user("pk4a@bunk.test")
       b = user("pk4b@bunk.test")
-      %{challenge_id: id} = Accounts.start_passkey_registration(a)
+      %{challenge_id: id} = Passkeys.start_passkey_registration(a)
 
       assert {:error, :challenge_expired} =
-               Accounts.finish_passkey_registration(b, id, %{
+               Passkeys.finish_passkey_registration(b, id, %{
                  attestation_object: "x",
                  client_data_json: "{}",
                  label: "x"
@@ -118,13 +119,13 @@ defmodule ControlPlane.AccountsPasskeyTest do
   describe "beheer" do
     test "passkeys_active? en de lijst volgen de rijen" do
       u = user("pk5@bunk.test")
-      refute Accounts.passkeys_active?(u)
+      refute Passkeys.passkeys_active?(u)
 
       fake_passkey(u, "Laptop")
       fake_passkey(u, "Telefoon")
 
-      assert Accounts.passkeys_active?(u)
-      assert ["Laptop", "Telefoon"] = u |> Accounts.list_passkeys() |> Enum.map(& &1.label)
+      assert Passkeys.passkeys_active?(u)
+      assert ["Laptop", "Telefoon"] = u |> Passkeys.list_passkeys() |> Enum.map(& &1.label)
     end
 
     test "verwijderen kan alleen je eigen sleutel" do
@@ -133,11 +134,11 @@ defmodule ControlPlane.AccountsPasskeyTest do
       pk = fake_passkey(a)
 
       # b met zijn eigen, juiste wachtwoord: de weigering gaat dan over eigendom.
-      assert {:error, :not_found} = Accounts.delete_passkey(b, pk.id, @password)
-      assert Accounts.passkeys_active?(a)
+      assert {:error, :not_found} = Passkeys.delete_passkey(b, pk.id, @password)
+      assert Passkeys.passkeys_active?(a)
 
-      assert {:ok, _} = Accounts.delete_passkey(a, pk.id, @password)
-      refute Accounts.passkeys_active?(a)
+      assert {:ok, _} = Passkeys.delete_passkey(a, pk.id, @password)
+      refute Passkeys.passkeys_active?(a)
     end
 
     test "verwijderen vraagt het huidige wachtwoord" do
@@ -147,13 +148,13 @@ defmodule ControlPlane.AccountsPasskeyTest do
       pk = fake_passkey(u)
 
       assert {:error, :invalid_current_password} =
-               Accounts.delete_passkey(u, pk.id, "niet-het-wachtwoord")
+               Passkeys.delete_passkey(u, pk.id, "niet-het-wachtwoord")
 
-      assert {:error, :invalid_current_password} = Accounts.delete_passkey(u, pk.id, "")
-      assert Accounts.passkeys_active?(u)
+      assert {:error, :invalid_current_password} = Passkeys.delete_passkey(u, pk.id, "")
+      assert Passkeys.passkeys_active?(u)
 
-      assert {:ok, _} = Accounts.delete_passkey(u, pk.id, @password)
-      refute Accounts.passkeys_active?(u)
+      assert {:ok, _} = Passkeys.delete_passkey(u, pk.id, @password)
+      refute Passkeys.passkeys_active?(u)
     end
 
     test "een sleutel verdwijnt met het account" do
@@ -167,14 +168,14 @@ defmodule ControlPlane.AccountsPasskeyTest do
   describe "inloggen" do
     test "zonder passkeys is er geen challenge aan te bieden" do
       u = user("pk8@bunk.test")
-      assert Accounts.start_passkey_login(u) == nil
+      assert Passkeys.start_passkey_login(u) == nil
     end
 
     test "met passkeys somt de challenge precies die sleutels op" do
       u = user("pk9@bunk.test")
       pk = fake_passkey(u)
 
-      %{challenge_id: id, public_key: opts} = Accounts.start_passkey_login(u)
+      %{challenge_id: id, public_key: opts} = Passkeys.start_passkey_login(u)
       assert is_binary(id)
       assert [%{id: cid}] = opts.allowCredentials
       assert cid == Base.url_encode64(pk.credential_id, padding: false)
@@ -183,10 +184,10 @@ defmodule ControlPlane.AccountsPasskeyTest do
     test "een assertie van een onbekende sleutel wordt geweigerd" do
       u = user("pk10@bunk.test")
       fake_passkey(u)
-      %{challenge_id: id} = Accounts.start_passkey_login(u)
+      %{challenge_id: id} = Passkeys.start_passkey_login(u)
 
       assert {:error, :invalid_passkey} =
-               Accounts.finish_passkey_login(u, id, %{
+               Passkeys.finish_passkey_login(u, id, %{
                  credential_id: :crypto.strong_rand_bytes(32),
                  authenticator_data: "x",
                  signature: "x",
@@ -197,10 +198,10 @@ defmodule ControlPlane.AccountsPasskeyTest do
     test "een verkeerde handtekening op een bekende sleutel wordt geweigerd" do
       u = user("pk11@bunk.test")
       pk = fake_passkey(u)
-      %{challenge_id: id} = Accounts.start_passkey_login(u)
+      %{challenge_id: id} = Passkeys.start_passkey_login(u)
 
       assert {:error, :invalid_passkey} =
-               Accounts.finish_passkey_login(u, id, %{
+               Passkeys.finish_passkey_login(u, id, %{
                  credential_id: pk.credential_id,
                  authenticator_data: <<0::size(37 * 8)>>,
                  signature: "nep",

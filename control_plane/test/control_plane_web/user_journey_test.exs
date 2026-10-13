@@ -17,6 +17,7 @@ defmodule ControlPlaneWeb.UserJourneyTest do
 
   alias ControlPlane.Accounts
   alias ControlPlane.Credits
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Package
   alias ControlPlane.Fleet.Region
@@ -279,9 +280,9 @@ defmodule ControlPlaneWeb.UserJourneyTest do
       {:ok, _} = Credits.add_entry(admin.id, 5000, "admin_topup", "Handmatig door beheerder")
 
       {:ok, req} =
-        Credits.create_mollie_topup(admin.id, 2500, "tr_#{System.unique_integer([:positive])}")
+        Topups.create_mollie_topup(admin.id, 2500, "tr_#{System.unique_integer([:positive])}")
 
-      {:ok, _} = Credits.mark_topup_paid(req.id, "mollie")
+      {:ok, _} = Topups.mark_topup_paid(req.id, "mollie")
 
       omzet = conn |> bearer(token) |> get(~p"/api/v1/beheer/omzet") |> json_response(200)
 

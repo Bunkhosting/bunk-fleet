@@ -18,8 +18,11 @@ defmodule ControlPlane.VpsZonderRegioTest do
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
+  alias ControlPlane.Provisioning.Teardown
 
   defp regio do
     code = "r-#{System.unique_integer([:positive])}"
@@ -37,7 +40,7 @@ defmodule ControlPlane.VpsZonderRegioTest do
   end
 
   # Een draaiende VPS waarvan de regio daarna leeg is gezet. In productie
-  # gebeurt dat alleen met een verwijderde VPS (`Fleet.delete_region/1` weigert
+  # gebeurt dat alleen met een verwijderde VPS (`Regions.delete_region/1` weigert
   # anders); hier met een draaiende, zodat ook de statuspaden aan bod komen.
   defp vps_zonder_regio(status \\ :active) do
     r = regio()
@@ -88,7 +91,7 @@ defmodule ControlPlane.VpsZonderRegioTest do
   test "een agentresultaat voor een machtscommando komt aan" do
     vps = vps_zonder_regio()
 
-    assert {:ok, %{command: %Command{} = cmd}} = Provisioning.stop_vps(vps.id)
+    assert {:ok, %{command: %Command{} = cmd}} = Power.stop_vps(vps.id)
     assert {:ok, %Command{status: :done}} = Provisioning.apply_result(cmd, %{"status" => "done"})
     assert Repo.get!(Vps, vps.id).status == :stopped
   end
@@ -97,7 +100,7 @@ defmodule ControlPlane.VpsZonderRegioTest do
     vps = vps_zonder_regio()
 
     assert {:ok, %{vps: %Vps{status: :deleting}, command: %Command{} = cmd}} =
-             Provisioning.delete_vps(vps.id)
+             Teardown.delete_vps(vps.id)
 
     assert {:ok, %Command{status: :done}} = Provisioning.apply_result(cmd, %{"status" => "done"})
     assert Repo.get!(Vps, vps.id).status == :deleted
@@ -106,7 +109,7 @@ defmodule ControlPlane.VpsZonderRegioTest do
   test "een mislukte VPS zonder regio kan worden opgeruimd" do
     vps = vps_zonder_regio(:failed)
 
-    assert {:ok, %{vps: %Vps{status: :deleted}, command: nil}} = Provisioning.delete_vps(vps.id)
+    assert {:ok, %{vps: %Vps{status: :deleted}, command: nil}} = Teardown.delete_vps(vps.id)
   end
 
   test "het echte pad: een verwijderde VPS uit een opgeruimde regio blijft bij te werken" do
@@ -119,7 +122,7 @@ defmodule ControlPlane.VpsZonderRegioTest do
       |> Ecto.Changeset.put_change(:status, :deleted)
       |> Repo.insert!()
 
-    assert Fleet.delete_region(r.id) == :ok
+    assert Regions.delete_region(r.id) == :ok
     vps = Repo.get!(Vps, vps.id)
     assert is_nil(vps.region_id)
 

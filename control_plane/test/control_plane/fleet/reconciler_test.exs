@@ -2,7 +2,7 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
   use ControlPlane.DataCase, async: false
 
   alias ControlPlane.Billing.UsageRecord
-  alias ControlPlane.Fleet
+  alias ControlPlane.Fleet.Liveness
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Reconciler
   alias ControlPlane.Fleet.Region
@@ -40,18 +40,18 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
 
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:second)
 
-  defp stale_at, do: DateTime.add(now(), -(Fleet.heartbeat_ttl_seconds() + 60), :second)
+  defp stale_at, do: DateTime.add(now(), -(Liveness.heartbeat_ttl_seconds() + 60), :second)
 
   defp reload(node), do: Repo.get!(Node, node.id)
 
-  # --- Fleet.mark_stale_nodes_offline/0 --------------------------------------
+  # --- Liveness.mark_stale_nodes_offline/0 --------------------------------------
 
   describe "mark_stale_nodes_offline/0" do
     test "flips an :online node with a stale heartbeat to :offline" do
       region = insert_region()
       stale = insert_node(region, %{status: :online, last_heartbeat_at: stale_at()})
 
-      assert {1, _} = Fleet.mark_stale_nodes_offline()
+      assert {1, _} = Liveness.mark_stale_nodes_offline()
       assert reload(stale).status == :offline
     end
 
@@ -59,7 +59,7 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
       region = insert_region()
       fresh = insert_node(region, %{status: :online, last_heartbeat_at: now()})
 
-      assert {0, _} = Fleet.mark_stale_nodes_offline()
+      assert {0, _} = Liveness.mark_stale_nodes_offline()
       assert reload(fresh).status == :online
     end
 
@@ -67,7 +67,7 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
       region = insert_region()
       never = insert_node(region, %{status: :online, last_heartbeat_at: nil})
 
-      assert {1, _} = Fleet.mark_stale_nodes_offline()
+      assert {1, _} = Liveness.mark_stale_nodes_offline()
       assert reload(never).status == :offline
     end
 
@@ -75,7 +75,7 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
       region = insert_region()
       draining = insert_node(region, %{status: :draining, last_heartbeat_at: stale_at()})
 
-      assert {0, _} = Fleet.mark_stale_nodes_offline()
+      assert {0, _} = Liveness.mark_stale_nodes_offline()
       assert reload(draining).status == :draining
     end
 
@@ -84,7 +84,7 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
       pending = insert_node(region, %{status: :pending, last_heartbeat_at: stale_at()})
       offline = insert_node(region, %{status: :offline, last_heartbeat_at: stale_at()})
 
-      assert {0, _} = Fleet.mark_stale_nodes_offline()
+      assert {0, _} = Liveness.mark_stale_nodes_offline()
       assert reload(pending).status == :pending
       assert reload(offline).status == :offline
     end
@@ -94,7 +94,7 @@ defmodule ControlPlane.Fleet.ReconcilerTest do
       stale = insert_node(region, %{status: :online, last_heartbeat_at: stale_at()})
       fresh = insert_node(region, %{status: :online, last_heartbeat_at: now()})
 
-      assert {1, _} = Fleet.mark_stale_nodes_offline()
+      assert {1, _} = Liveness.mark_stale_nodes_offline()
       assert reload(stale).status == :offline
       assert reload(fresh).status == :online
     end

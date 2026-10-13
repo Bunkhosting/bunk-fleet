@@ -9,7 +9,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Sweeps
 
   defp region do
     code = "r-#{System.unique_integer([:positive])}"
@@ -52,7 +52,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
     r = region()
     abandoned = queued_vps(r, 3600)
 
-    assert Provisioning.fail_stuck_queued_vpses(600) == 1
+    assert Sweeps.fail_stuck_queued_vpses(600) == 1
     assert Repo.get!(Vps, abandoned.id).status == :failed
   end
 
@@ -62,7 +62,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
     r = region()
     fresh = queued_vps(r, 5)
 
-    assert Provisioning.fail_stuck_queued_vpses(600) == 0
+    assert Sweeps.fail_stuck_queued_vpses(600) == 0
     assert Repo.get!(Vps, fresh.id).status == :queued
   end
 
@@ -81,7 +81,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
       })
     )
 
-    assert Provisioning.fail_stuck_queued_vpses(600) == 0
+    assert Sweeps.fail_stuck_queued_vpses(600) == 0
     assert Repo.get!(Vps, dispatched.id).status == :queued
   end
 
@@ -96,7 +96,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
         v
       end
 
-    assert Provisioning.fail_stuck_queued_vpses(600) == 0
+    assert Sweeps.fail_stuck_queued_vpses(600) == 0
 
     for v <- others do
       assert Repo.get!(Vps, v.id).status == v.status
@@ -107,8 +107,8 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
     r = region()
     queued_vps(r, 3600)
 
-    assert Provisioning.fail_stuck_queued_vpses(600) == 1
-    assert Provisioning.fail_stuck_queued_vpses(600) == 0
+    assert Sweeps.fail_stuck_queued_vpses(600) == 1
+    assert Sweeps.fail_stuck_queued_vpses(600) == 0
   end
 
   describe "terugbetalen hoort bij het op :failed zetten" do
@@ -118,7 +118,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
       voor = Credits.balance_cents(u.id)
       {:ok, _} = Credits.add_entry(u.id, -400, "vps_charge", "VPS Starter", v.id)
 
-      assert Provisioning.fail_stuck_queued_vpses(600) == 1
+      assert Sweeps.fail_stuck_queued_vpses(600) == 1
       assert Repo.get!(Vps, v.id).status == :failed
       assert Credits.balance_cents(u.id) == voor
     end
@@ -135,7 +135,7 @@ defmodule ControlPlane.ProvisioningStuckQueuedTest do
       {:ok, _} = Credits.add_entry(u.id, -400, "vps_charge", "VPS Starter", v.id)
       {:ok, _} = v |> Vps.changeset(%{status: :provisioning}) |> Repo.update()
 
-      refute Provisioning.faal_wachtende_vps(v.id)
+      refute Sweeps.faal_wachtende_vps(v.id)
       assert Repo.get!(Vps, v.id).status == :provisioning
       assert Credits.balance_cents(u.id) == voor - 400
     end

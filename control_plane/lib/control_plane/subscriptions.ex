@@ -9,7 +9,7 @@ defmodule ControlPlane.Subscriptions do
   alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Notifier
-  alias ControlPlane.Provisioning
+  alias ControlPlane.Provisioning.Power
   alias ControlPlane.Repo
   alias ControlPlane.Subscriptions.Subscription
 
@@ -229,7 +229,7 @@ defmodule ControlPlane.Subscriptions do
   # Stop a still-running VPS when its owner can't pay (dispatch happens outside the
   # money transaction). Returns 1 if a stop was dispatched, else 0.
   defp maybe_suspend(%Subscription{vps: %Vps{status: st}} = sub) when st in [:active, :paused] do
-    case Provisioning.stop_vps(sub.vps_id) do
+    case Power.stop_vps(sub.vps_id) do
       {:ok, _} -> 1
       _ -> 0
     end
@@ -251,7 +251,7 @@ defmodule ControlPlane.Subscriptions do
 
   # Resume a VPS we previously suspended, now that the owner has paid again.
   defp maybe_resume(%Subscription{vps: %Vps{status: :stopped}} = sub) do
-    case Provisioning.start_vps(sub.vps_id) do
+    case Power.start_vps(sub.vps_id) do
       {:ok, _} -> 1
       _ -> 0
     end

@@ -5,6 +5,7 @@ defmodule ControlPlane.BillingRevenueTest do
   alias ControlPlane.Billing.Revenue
   alias ControlPlane.Credits
   alias ControlPlane.Credits.TopupRequest
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Repo
 
   defp user(email) do
@@ -16,9 +17,9 @@ defmodule ControlPlane.BillingRevenueTest do
     # Met een Mollie-id, want alleen een betaling die bij de provider bestond is
     # omzet. Zie de test "handmatig toegekend tegoed telt niet mee".
     {:ok, r} =
-      Credits.create_mollie_topup(user.id, cents, "tr_#{System.unique_integer([:positive])}")
+      Topups.create_mollie_topup(user.id, cents, "tr_#{System.unique_integer([:positive])}")
 
-    {:ok, r} = Credits.mark_topup_paid(r.id, "mollie")
+    {:ok, r} = Topups.mark_topup_paid(r.id, "mollie")
 
     # De datum zetten we expliciet: een aangifte gaat over een periode, en een
     # test die alles op vandaag zet bewijst niets over de afbakening ervan.
@@ -54,7 +55,7 @@ defmodule ControlPlane.BillingRevenueTest do
     test "telt alleen betaalde topups, niet openstaande of geannuleerde" do
       u = user("rev1@bunk.test")
       paid_topup(u, 2500, ~D[2026-02-10])
-      {:ok, _open} = Credits.create_topup_request(u.id, 5000)
+      {:ok, _open} = Topups.create_topup_request(u.id, 5000)
 
       totals = Revenue.summary(~D[2026-01-01], ~D[2026-12-31])
 
@@ -161,9 +162,9 @@ defmodule ControlPlane.BillingRevenueTest do
       u = user("hand4@bunk.test")
 
       {:ok, r} =
-        Credits.create_mollie_topup(u.id, 5000, "tr_hand_#{System.unique_integer([:positive])}")
+        Topups.create_mollie_topup(u.id, 5000, "tr_hand_#{System.unique_integer([:positive])}")
 
-      {:ok, _} = Credits.mark_topup_paid(r.id, "manual")
+      {:ok, _} = Topups.mark_topup_paid(r.id, "manual")
 
       assert %{payments: 0, gross_cents: 0} = Revenue.summary(~D[2026-01-01], ~D[2026-12-31])
       assert Revenue.invoices(~D[2026-01-01], ~D[2026-12-31]) == []
@@ -175,9 +176,9 @@ defmodule ControlPlane.BillingRevenueTest do
       u = user("hand5@bunk.test")
 
       {:ok, r} =
-        Credits.create_mollie_topup(u.id, 5000, "tr_hand_#{System.unique_integer([:positive])}")
+        Topups.create_mollie_topup(u.id, 5000, "tr_hand_#{System.unique_integer([:positive])}")
 
-      {:ok, r} = Credits.mark_topup_paid(r.id, "manual")
+      {:ok, r} = Topups.mark_topup_paid(r.id, "manual")
 
       Repo.update!(
         Ecto.Changeset.change(r, paid_at: DateTime.new!(~D[2026-03-03], ~T[12:00:00], "Etc/UTC"))
@@ -198,9 +199,9 @@ defmodule ControlPlane.BillingRevenueTest do
       u = user("test1@bunk.test")
 
       {:ok, r} =
-        Credits.create_mollie_topup(u.id, 5000, "tr_test_#{System.unique_integer([:positive])}")
+        Topups.create_mollie_topup(u.id, 5000, "tr_test_#{System.unique_integer([:positive])}")
 
-      {:ok, r} = Credits.mark_topup_paid(r.id, "mollie")
+      {:ok, r} = Topups.mark_topup_paid(r.id, "mollie")
 
       Repo.update!(
         Ecto.Changeset.change(r,
@@ -222,9 +223,9 @@ defmodule ControlPlane.BillingRevenueTest do
       u = user("test2@bunk.test")
 
       {:ok, r} =
-        Credits.create_mollie_topup(u.id, 1500, "tr_null_#{System.unique_integer([:positive])}")
+        Topups.create_mollie_topup(u.id, 1500, "tr_null_#{System.unique_integer([:positive])}")
 
-      {:ok, r} = Credits.mark_topup_paid(r.id, "mollie")
+      {:ok, r} = Topups.mark_topup_paid(r.id, "mollie")
 
       Repo.update!(
         Ecto.Changeset.change(r,
@@ -277,8 +278,8 @@ defmodule ControlPlane.BillingRevenueTest do
       # dat met de hand op betaald zet, dan hoort dat bedrag niet in de aangifte.
       # Zonder deze eis zou het er stilzwijgend in belanden.
       u = user("hand2@bunk.test")
-      {:ok, r} = Credits.create_topup_request(u.id, 2500)
-      {:ok, _} = Credits.mark_topup_paid(r.id, "mollie")
+      {:ok, r} = Topups.create_topup_request(u.id, 2500)
+      {:ok, _} = Topups.mark_topup_paid(r.id, "mollie")
 
       assert %{payments: 0, gross_cents: 0} = Revenue.summary(~D[2026-01-01], ~D[2026-12-31])
     end

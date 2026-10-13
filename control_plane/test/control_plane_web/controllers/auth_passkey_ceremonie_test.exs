@@ -17,6 +17,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
 
   alias ControlPlane.Accounts
   alias ControlPlane.Accounts.PasskeyChallenges
+  alias ControlPlane.Accounts.Passkeys
   alias ControlPlane.SoftwareAuthenticator, as: Authenticator
 
   setup do
@@ -238,7 +239,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       {user, auth} = met_passkey()
 
       assert %{"error" => "invalid_passkey"} = user |> registreer(auth) |> json_response(422)
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
     end
 
     test "een label dat geen tekst is valt terug op de standaardnaam" do
@@ -256,7 +257,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       assert %{"error" => "invalid_passkey"} =
                user |> registreer(auth, String.duplicate("a", 61)) |> json_response(422)
 
-      assert Accounts.list_passkeys(user) == []
+      assert Passkeys.list_passkeys(user) == []
 
       # Tegenproef: zestig tekens mag.
       assert %{"passkey" => _} =
@@ -274,10 +275,10 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
 
     test "je eigen passkey verwijderen haalt de tweede factor weg" do
       {user, _auth} = met_passkey()
-      [pk] = Accounts.list_passkeys(user)
+      [pk] = Passkeys.list_passkeys(user)
 
       assert user |> verwijder(pk.id, valid_user_password()) |> response(204)
-      assert Accounts.list_passkeys(user) == []
+      assert Passkeys.list_passkeys(user) == []
 
       # Zonder tweede factor is het wachtwoord weer genoeg.
       user |> login() |> ingelogd!()
@@ -287,7 +288,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       # Het gat: met alleen een gekaapte sessie de passkey weghalen, en daarmee
       # de tweede factor. De sessie hier is geldig; alleen het wachtwoord mist.
       {user, auth} = met_passkey()
-      [pk] = Accounts.list_passkeys(user)
+      [pk] = Passkeys.list_passkeys(user)
 
       assert %{"error" => "missing_password"} =
                user |> verwijder(pk.id, nil) |> json_response(422)
@@ -295,7 +296,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       assert %{"error" => "wrong_current_password"} =
                user |> verwijder(pk.id, "niet-het-wachtwoord") |> json_response(422)
 
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
 
       # En de passkey werkt nog: wachtwoord alleen geeft geen sessie, de
       # passkey erbij wel.
@@ -306,26 +307,26 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       # wachtwoord gaat hij wel weg. Zonder deze stap slaagden de weigeringen
       # hierboven ook als de route om een andere reden kapot was.
       assert user |> verwijder(pk.id, valid_user_password()) |> response(204)
-      assert Accounts.list_passkeys(user) == []
+      assert Passkeys.list_passkeys(user) == []
     end
 
     test "een fout wachtwoord telt mee voor het inlogslot" do
       # Anders is dit de plek om met een gekaapte sessie ongelimiteerd naar het
       # wachtwoord te raden. Na genoeg fouten helpt ook het goede even niet.
       {user, _} = met_passkey()
-      [pk] = Accounts.list_passkeys(user)
+      [pk] = Passkeys.list_passkeys(user)
 
       for _ <- 1..10, do: verwijder(user, pk.id, "niet-het-wachtwoord")
 
       assert %{"error" => "wrong_current_password"} =
                user |> verwijder(pk.id, valid_user_password()) |> json_response(422)
 
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
     end
 
     test "andermans passkey verwijderen kan niet, en verraadt niet dat hij bestaat" do
       {eigenaar, _} = met_passkey()
-      [pk] = Accounts.list_passkeys(eigenaar)
+      [pk] = Passkeys.list_passkeys(eigenaar)
       vreemde = confirmed_user_fixture()
 
       # Met het eigen, juiste wachtwoord van de vreemde: anders strandt het al
@@ -335,7 +336,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
 
       # Hetzelfde antwoord voor "bestaat niet" en "niet van jou".
       assert json_response(bestaand, 404) == json_response(onbekend, 404)
-      assert [_] = Accounts.list_passkeys(eigenaar)
+      assert [_] = Passkeys.list_passkeys(eigenaar)
     end
 
     test "een id dat geen uuid is, of geen sessie, levert niets op" do
@@ -344,7 +345,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
       geen_uuid = verwijder(user, "geen-uuid", valid_user_password())
       assert %{"error" => "not_found"} = json_response(geen_uuid, 404)
 
-      [pk] = Accounts.list_passkeys(user)
+      [pk] = Passkeys.list_passkeys(user)
 
       assert %{"error" => "unauthorized"} =
                build_conn()
@@ -353,7 +354,7 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
                })
                |> json_response(401)
 
-      assert [_] = Accounts.list_passkeys(user)
+      assert [_] = Passkeys.list_passkeys(user)
     end
   end
 end

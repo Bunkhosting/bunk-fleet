@@ -25,7 +25,7 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   """
   require Logger
 
-  alias ControlPlane.Credits
+  alias ControlPlane.Credits.Topups
   alias ControlPlane.Mollie
 
   @dag_ms 24 * 60 * 60 * 1000
@@ -58,7 +58,7 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   """
   @spec verzoen(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   def verzoen(ouder_dan_seconden \\ 900, budget_ms \\ 20_000) do
-    openstaand = Credits.openstaande_topups_om_te_verzoenen(ouder_dan_seconden)
+    openstaand = Topups.openstaande_topups_om_te_verzoenen(ouder_dan_seconden)
     tot = System.monotonic_time(:millisecond) + budget_ms
 
     # Een tijdsbudget per ronde. Dit draait in de tik van de reconciler, en
@@ -123,7 +123,7 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   def afhandelen(payment_id, {:ok, %{status: status}}, bron) when status in @unpaid_terminal do
     # Terminal, unpaid: release the pending row so it stops counting against the
     # user's pending-topup cap.
-    Credits.cancel_topup_by_mollie_id(payment_id)
+    Topups.cancel_topup_by_mollie_id(payment_id)
     Logger.info("mollie #{bron} #{payment_id} status=#{status} (topup cancelled)")
   end
 
@@ -150,7 +150,7 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
   end
 
   defp bijschrijven_echt(payment_id, amount, metadata) do
-    case Credits.mark_topup_paid_by_mollie_id(payment_id, amount) do
+    case Topups.mark_topup_paid_by_mollie_id(payment_id, amount) do
       {:error, :not_found} ->
         case metadata do
           %{"topup_id" => topup_id} when is_binary(topup_id) ->
@@ -158,7 +158,7 @@ defmodule ControlPlane.Billing.MollieAfhandeling do
               "mollie #{payment_id}: geen rij op het betaal-id, teruggevallen op topup_id uit de metadata"
             )
 
-            Credits.mark_topup_paid_by_id(topup_id, amount)
+            Topups.mark_topup_paid_by_id(topup_id, amount)
 
           _ ->
             {:error, :not_found}

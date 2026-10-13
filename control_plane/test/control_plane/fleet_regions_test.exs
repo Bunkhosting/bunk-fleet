@@ -9,9 +9,10 @@ defmodule ControlPlane.FleetRegionsTest do
   """
   use ControlPlane.DataCase, async: true
 
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Node
+  alias ControlPlane.Fleet.NodeAdmin
   alias ControlPlane.Fleet.Region
+  alias ControlPlane.Fleet.Regions
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Repo
 
@@ -51,7 +52,7 @@ defmodule ControlPlane.FleetRegionsTest do
       fleet_node(aan)
       fleet_node(uit)
 
-      codes = Fleet.available_regions() |> Enum.map(& &1.code)
+      codes = Regions.available_regions() |> Enum.map(& &1.code)
 
       assert aan.code in codes
       refute uit.code in codes
@@ -62,7 +63,7 @@ defmodule ControlPlane.FleetRegionsTest do
       uit = regio(%{enabled: false})
       fleet_node(uit)
 
-      assert {:error, :no_capacity} = Fleet.auto_region_id(verzoek())
+      assert {:error, :no_capacity} = Regions.auto_region_id(verzoek())
     end
 
     test "staat wel in de keuzelijst van de eigenaar die er een node heeft" do
@@ -71,8 +72,8 @@ defmodule ControlPlane.FleetRegionsTest do
       uit = regio(%{enabled: false})
       n = fleet_node(uit)
 
-      refute uit.code in (Fleet.selectable_regions() |> Enum.map(& &1.code))
-      assert uit.code in (Fleet.selectable_regions([n.region_id]) |> Enum.map(& &1.code))
+      refute uit.code in (Regions.selectable_regions() |> Enum.map(& &1.code))
+      assert uit.code in (Regions.selectable_regions([n.region_id]) |> Enum.map(& &1.code))
     end
 
     test "een node zonder regio laat de lijst met rust" do
@@ -81,7 +82,7 @@ defmodule ControlPlane.FleetRegionsTest do
       aan = regio()
       uit = regio(%{enabled: false})
 
-      codes = Fleet.selectable_regions([nil]) |> Enum.map(& &1.code)
+      codes = Regions.selectable_regions([nil]) |> Enum.map(& &1.code)
 
       assert aan.code in codes
       refute uit.code in codes
@@ -93,7 +94,7 @@ defmodule ControlPlane.FleetRegionsTest do
       fleet_node(aan)
       fleet_node(uit)
 
-      assert {:ok, gekozen} = Fleet.auto_region_id(verzoek())
+      assert {:ok, gekozen} = Regions.auto_region_id(verzoek())
       assert gekozen == aan.id
     end
   end
@@ -134,7 +135,7 @@ defmodule ControlPlane.FleetRegionsTest do
       # opvraagt.
       draait = vps_op(n, van, :active)
 
-      assert {:ok, bijgewerkt} = Fleet.move_node_to_region(n.id, u, naar.id)
+      assert {:ok, bijgewerkt} = NodeAdmin.move_node_to_region(n.id, u, naar.id)
       assert bijgewerkt.region_id == naar.id
       assert Repo.get!(Vps, draait.id).region_id == naar.id
     end
@@ -143,7 +144,7 @@ defmodule ControlPlane.FleetRegionsTest do
       # Die draait nergens meer; zijn geschiedenis hoort te blijven kloppen.
       weg = vps_op(n, van, :deleted)
 
-      assert {:ok, _} = Fleet.move_node_to_region(n.id, u, naar.id)
+      assert {:ok, _} = NodeAdmin.move_node_to_region(n.id, u, naar.id)
       assert Repo.get!(Vps, weg.id).region_id == van.id
     end
 
@@ -154,12 +155,12 @@ defmodule ControlPlane.FleetRegionsTest do
           password: "Str0ngPassphrase!42"
         })
 
-      assert {:error, :forbidden} = Fleet.move_node_to_region(n.id, vreemde, naar.id)
+      assert {:error, :forbidden} = NodeAdmin.move_node_to_region(n.id, vreemde, naar.id)
     end
 
     test "een regio die niet bestaat wordt geweigerd", %{user: u, node: n, van: van} do
       assert {:error, :unknown_region} =
-               Fleet.move_node_to_region(n.id, u, Ecto.UUID.generate())
+               NodeAdmin.move_node_to_region(n.id, u, Ecto.UUID.generate())
 
       assert Repo.get!(Node, n.id).region_id == van.id
     end
@@ -183,7 +184,7 @@ defmodule ControlPlane.FleetRegionsTest do
     test "een plaats die nog niet bestaat wordt aangemaakt", %{user: u, node: n} do
       # Dit is de kern: wachten tot een beheerder jouw stad heeft toegevoegd is
       # geen instelling maar een blokkade.
-      assert {:ok, bijgewerkt} = Fleet.move_node_to_named_region(n.id, u, "Eindhoven")
+      assert {:ok, bijgewerkt} = NodeAdmin.move_node_to_named_region(n.id, u, "Eindhoven")
 
       nieuw = Repo.get!(Region, bijgewerkt.region_id)
       assert nieuw.name == "Eindhoven"
@@ -194,8 +195,8 @@ defmodule ControlPlane.FleetRegionsTest do
     test "dezelfde plaats twee keer levert één locatie op", %{user: u, node: n} do
       # Twee rijen "Eindhoven" zouden dezelfde plek zijn met een ander id, en dan
       # splitst de capaciteit van één datacenter zich over twee keuzes.
-      {:ok, eerst} = Fleet.move_node_to_named_region(n.id, u, "Eindhoven")
-      {:ok, weer} = Fleet.move_node_to_named_region(n.id, u, "  eindhoven ")
+      {:ok, eerst} = NodeAdmin.move_node_to_named_region(n.id, u, "Eindhoven")
+      {:ok, weer} = NodeAdmin.move_node_to_named_region(n.id, u, "  eindhoven ")
 
       assert weer.region_id == eerst.region_id
       assert Repo.aggregate(from(r in Region, where: r.name == "Eindhoven"), :count) == 1
@@ -204,8 +205,8 @@ defmodule ControlPlane.FleetRegionsTest do
     test "de code van een bestaande locatie intypen vindt die locatie", %{user: u, node: n} do
       # De code staat in de installatie-instructies van elke node in die regio,
       # dus dat is wat een operator voor zich heeft als hij dit invult.
-      {:ok, eerst} = Fleet.move_node_to_named_region(n.id, u, "Den Haag")
-      {:ok, weer} = Fleet.move_node_to_named_region(n.id, u, "den-haag")
+      {:ok, eerst} = NodeAdmin.move_node_to_named_region(n.id, u, "Den Haag")
+      {:ok, weer} = NodeAdmin.move_node_to_named_region(n.id, u, "den-haag")
 
       assert weer.region_id == eerst.region_id
     end
@@ -213,8 +214,8 @@ defmodule ControlPlane.FleetRegionsTest do
     test "twee namen die tot dezelfde code leiden krijgen er een nummer bij", %{user: u, node: n} do
       # Verschillende namen, en geen van beide is de code van de ander: dit zijn
       # twee locaties, dus de tweede mag de eerste niet overnemen.
-      {:ok, een} = Fleet.move_node_to_named_region(n.id, u, "Sankt Pölten")
-      {:ok, twee} = Fleet.move_node_to_named_region(n.id, u, "Sankt Polten")
+      {:ok, een} = NodeAdmin.move_node_to_named_region(n.id, u, "Sankt Pölten")
+      {:ok, twee} = NodeAdmin.move_node_to_named_region(n.id, u, "Sankt Polten")
 
       refute een.region_id == twee.region_id
       assert Repo.get!(Region, een.region_id).code == "sankt-polten"
@@ -224,12 +225,12 @@ defmodule ControlPlane.FleetRegionsTest do
     test "een bestaande locatie wordt hergebruikt, niet gekopieerd", %{user: u, node: n} do
       bestaand = regio(%{name: "Amsterdam"})
 
-      assert {:ok, bijgewerkt} = Fleet.move_node_to_named_region(n.id, u, "AMSTERDAM")
+      assert {:ok, bijgewerkt} = NodeAdmin.move_node_to_named_region(n.id, u, "AMSTERDAM")
       assert bijgewerkt.region_id == bestaand.id
     end
 
     test "een naam die te kort is verandert niets", %{user: u, node: n, van: van} do
-      assert {:error, :invalid_region} = Fleet.move_node_to_named_region(n.id, u, " x ")
+      assert {:error, :invalid_region} = NodeAdmin.move_node_to_named_region(n.id, u, " x ")
       assert Repo.get!(Node, n.id).region_id == van.id
     end
 
@@ -243,13 +244,15 @@ defmodule ControlPlane.FleetRegionsTest do
           password: "Str0ngPassphrase!42"
         })
 
-      assert {:error, :forbidden} = Fleet.move_node_to_named_region(n.id, vreemde, "Rotterdam")
+      assert {:error, :forbidden} =
+               NodeAdmin.move_node_to_named_region(n.id, vreemde, "Rotterdam")
+
       assert Repo.aggregate(from(r in Region, where: r.name == "Rotterdam"), :count) == 0
     end
 
     test "een node die niet bestaat maakt niets aan", %{user: u} do
       assert {:error, :not_found} =
-               Fleet.move_node_to_named_region(Ecto.UUID.generate(), u, "Utrecht")
+               NodeAdmin.move_node_to_named_region(Ecto.UUID.generate(), u, "Utrecht")
 
       assert Repo.aggregate(from(r in Region, where: r.name == "Utrecht"), :count) == 0
     end
@@ -264,7 +267,7 @@ defmodule ControlPlane.FleetRegionsTest do
       fleet_node(vol)
       fleet_node(vol)
 
-      rijen = Fleet.list_regions_with_counts() |> Map.new(&{&1.region.id, &1.node_count})
+      rijen = Regions.list_regions_with_counts() |> Map.new(&{&1.region.id, &1.node_count})
 
       assert rijen[vol.id] == 2
       assert rijen[leeg.id] == 0
@@ -277,7 +280,7 @@ defmodule ControlPlane.FleetRegionsTest do
       r = regio()
 
       assert {:ok, bijgewerkt} =
-               Fleet.update_region(r.id, %{"name" => "Amsterdam", "code" => "ams-1"})
+               Regions.update_region(r.id, %{"name" => "Amsterdam", "code" => "ams-1"})
 
       assert bijgewerkt.name == "Amsterdam"
       assert bijgewerkt.code == "ams-1"
@@ -288,7 +291,7 @@ defmodule ControlPlane.FleetRegionsTest do
       r = regio()
       n = fleet_node(r)
 
-      {:ok, _} = Fleet.update_region(r.id, %{"code" => "nieuw-hier"})
+      {:ok, _} = Regions.update_region(r.id, %{"code" => "nieuw-hier"})
 
       assert Repo.get!(Node, n.id).region_id == r.id
     end
@@ -297,7 +300,7 @@ defmodule ControlPlane.FleetRegionsTest do
       bezet = regio()
       r = regio()
 
-      assert {:error, changeset} = Fleet.update_region(r.id, %{"code" => bezet.code})
+      assert {:error, changeset} = Regions.update_region(r.id, %{"code" => bezet.code})
       assert Keyword.has_key?(changeset.errors, :code)
       assert Repo.get!(Region, r.id).code == r.code
     end
@@ -307,28 +310,28 @@ defmodule ControlPlane.FleetRegionsTest do
       # in iets wat over de URL gaat.
       r = regio()
 
-      assert {:ok, bijgewerkt} = Fleet.update_region(r.id, %{"code" => "NL-9"})
+      assert {:ok, bijgewerkt} = Regions.update_region(r.id, %{"code" => "NL-9"})
       assert bijgewerkt.code == "nl-9"
 
-      assert {:error, changeset} = Fleet.update_region(r.id, %{"code" => "nl 9"})
+      assert {:error, changeset} = Regions.update_region(r.id, %{"code" => "nl 9"})
       assert Keyword.has_key?(changeset.errors, :code)
     end
 
     test "aan- en uitzetten werkt" do
       r = regio()
 
-      assert {:ok, %Region{enabled: false}} = Fleet.update_region(r.id, %{"enabled" => false})
-      assert {:ok, %Region{enabled: true}} = Fleet.update_region(r.id, %{"enabled" => true})
+      assert {:ok, %Region{enabled: false}} = Regions.update_region(r.id, %{"enabled" => false})
+      assert {:ok, %Region{enabled: true}} = Regions.update_region(r.id, %{"enabled" => true})
     end
 
     test "een regio die niet bestaat geeft not_found" do
-      assert {:error, :not_found} = Fleet.update_region(Ecto.UUID.generate(), %{"name" => "X"})
+      assert {:error, :not_found} = Regions.update_region(Ecto.UUID.generate(), %{"name" => "X"})
     end
 
     test "twee regio's met dezelfde code kan niet" do
       r = regio()
 
-      assert {:error, changeset} = Fleet.create_region(%{code: r.code, name: "Dubbel"})
+      assert {:error, changeset} = Regions.create_region(%{code: r.code, name: "Dubbel"})
       assert Keyword.has_key?(changeset.errors, :code)
     end
   end

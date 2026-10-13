@@ -14,8 +14,8 @@ defmodule ControlPlane.LaatResultaatVerwijderdeVpsTest do
 
   alias ControlPlane.Credits
   alias ControlPlane.Credits.LedgerEntry
-  alias ControlPlane.Fleet
   alias ControlPlane.Fleet.Command
+  alias ControlPlane.Fleet.Housekeeping
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Reservation
@@ -69,7 +69,7 @@ defmodule ControlPlane.LaatResultaatVerwijderdeVpsTest do
   # vastgehouden reservering daarna één keer vrij, zoals in productie.
   defp verwijder(%Vps{} = vps) do
     vps |> Ecto.Changeset.change(status: :deleted) |> Repo.update!()
-    assert Fleet.release_orphaned_reservations() >= 1
+    assert Housekeeping.release_orphaned_reservations() >= 1
   end
 
   defp grootboekregels(user) do
