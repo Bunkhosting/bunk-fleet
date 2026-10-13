@@ -6,5 +6,9 @@ set -euo pipefail
 # map waar dit script zelf in staat, zodat een handmatige aanroep vanaf /opt
 # blijft werken zoals hij deed.
 ROOT="${BUNK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-docker build -t bunk-frontend:latest "$ROOT/frontend"
+# In de uitrol bouwt de workflow het image elders en laadt het hier in; dan
+# niet nog eens bouwen. Handmatig aanroepen bouwt gewoon, zoals altijd.
+if [ "${BUNK_SKIP_BUILD:-}" != "1" ]; then
+  docker build -t bunk-frontend:latest "$ROOT/frontend"
+fi
 BUNK_ROOT="$ROOT" bash "$ROOT/deploy-edge.sh"

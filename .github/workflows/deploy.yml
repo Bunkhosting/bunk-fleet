@@ -32,7 +32,54 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Bouwen op een runner van GitHub, niet op VM102. Die machine heeft twee cores
+  # en draait daarnaast productie; tijdens een build liep de load naar 34 en werd
+  # de dienst meetbaar traag. Hier komt alleen het resultaat naartoe: twee images
+  # als artefact van deze run, die de uitrol hieronder inlaadt.
+  #
+  # Er gaat niets geheims in: het control plane krijgt zijn geheimen pas bij het
+  # starten uit .env.prod, en de waarden die de frontend bij het bouwen leest
+  # staan openbaar in frontend/.env.production. Een image van hier is dus
+  # hetzelfde als een image van VM102 -- de repo is openbaar, dit artefact ook.
+  bouwen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      - name: Control plane en agent bouwen
+        run: bash build-prod.sh
+      - name: Frontend bouwen
+        run: docker build -t bunk-frontend:latest frontend
+      - name: Images inpakken
+        run: |
+          docker save bunk-fleet-cp:latest bunk-frontend:latest | gzip -1 > images.tar.gz
+          ls -la images.tar.gz .build-version
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: images
+          path: |
+            images.tar.gz
+            .build-version
+          include-hidden-files: true
+          retention-days: 1
+          compression-level: 0
+
   deploy:
+    # Wacht op de bouw, maar loopt ook als die mislukte: dan bouwt VM102 zelf,
+    # zoals het altijd deed. Een storing bij GitHub mag geen uitrol tegenhouden.
+    needs: bouwen
     # De self-hosted runner draait op de machine waar de stack staat. Dat is
     # bewust: de secrets liggen daar in .env.prod en hoeven zo nooit in GitHub.
     runs-on: [self-hosted, bunk-fleet]
@@ -54,13 +101,14 @@ jobs:
     # Handmatig starten mag alleen vanaf main: anders gaat een branch die de CI
     # nooit zag zo live.
     if: >-
+      !cancelled() && (
       (github.event_name == 'workflow_dispatch' &&
        github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
+       github.event.workflow_run.head_repository.full_name == github.repository))
 
     steps:
       # De commit die de CI daadwerkelijk heeft gekeurd, niet de laatste stand
@@ -69,8 +117,25 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
-      - name: Bouwen
-        run: bash build-prod.sh
+      - name: Images ophalen
+        if: needs.bouwen.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: images
+
+      - name: Images inladen
+        if: needs.bouwen.result == 'success'
+        run: |
+          gunzip -c images.tar.gz | docker load
+          rm -f images.tar.gz
+          echo "versie: $(cat .build-version)"
+
+      - name: Bouwen op VM102 (vangnet)
+        if: needs.bouwen.result != 'success'
+        run: |
+          echo "::warning::de bouw op GitHub mislukte of liep niet; VM102 bouwt zelf"
+          bash build-prod.sh
+          docker build -t bunk-frontend:latest frontend
 
       - name: Control plane uitrollen
         # Draait de migraties en vervangt de container. Het script faalt zelf als
@@ -79,6 +144,9 @@ jobs:
         run: bash deploy-prod.sh
 
       - name: Frontend en edge uitrollen
+        # Het image staat er al: van de bouwjob, of van het vangnet hierboven.
+        env:
+          BUNK_SKIP_BUILD: "1"
         run: bash deploy-frontend.sh
 
       - name: Controleren dat het draait
