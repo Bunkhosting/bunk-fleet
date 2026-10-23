@@ -85,9 +85,20 @@ for naam, methode, pad, body, status_verwacht, code_verwacht in GEVALLEN:
 # de weg ernaartoe open is -- zou dit 201 geven, dan staat er nu een VPS.
 if BASIS:
     status, antwoord, _, _ = roep("POST", "/vpses", BASIS, token=token)
-    controleer("een bestelling die het tegoed te boven gaat wordt geweigerd",
-               status == 402 and antwoord.get("error") == "insufficient_credits",
+    controleer("een te dure bestelling levert geen VPS op",
+               status not in (200, 201, 202),
                f"status {status}: {str(antwoord)[:160]}", "KRITIEK")
+    # De capaciteit wordt vóór het tegoed gecontroleerd. Past het onbetaalbare
+    # pakket nergens (op 2026-10-23 gold dat voor Pro en Business), dan komt de
+    # bestelling niet bij de tegoedcontrole en is die vandaag niet te toetsen.
+    # Dat is geen fout van het product, dus ook geen rode regel.
+    if status == 409 and antwoord.get("error") == "no_capacity":
+        print("  niet te toetsen: het pakket past op geen enkele node, dus de "
+              "bestelling strandt al op de capaciteit (409 no_capacity).")
+    else:
+        controleer("een bestelling die het tegoed te boven gaat wordt geweigerd",
+                   status == 402 and antwoord.get("error") == "insufficient_credits",
+                   f"status {status}: {str(antwoord)[:160]}", "KRITIEK")
 else:
     print("  overgeslagen: de 402-controle (geen pakket duurder dan het saldo).")
 
