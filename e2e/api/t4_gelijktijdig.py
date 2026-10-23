@@ -27,24 +27,22 @@ def parallel(n, fn):
 
 
 # --- 1. Tien bestellingen tegelijk die alle tien te duur zijn --------------
-_, pakketten, _, _ = roep("GET", "/packages", token=token)
-duur = max(pakketten["results"], key=lambda p: float(p["price_monthly"]))
-print(f"  (gekozen pakket: {duur['name']} à €{duur['price_monthly']}, saldo €{saldo()/100:.2f})")
+duur = onbetaalbaar_pakket(token)
+if duur:
+    print(f"  (gekozen pakket: {duur['pakket']} à {duur['prijs_cents']} cent, saldo {saldo()} cent)")
+    voor = saldo()
+    uitkomsten = parallel(10, lambda i: roep("POST", "/vpses",
+                                             bestelling(duur, name=f"harnas-{i}"), token=token))
+    na = saldo()
 
-voor = saldo()
-uitkomsten = parallel(10, lambda i: roep("POST", "/vpses", {
-    "package_id": duur["id"], "os": "ubuntu-22.04",
-    "label": f"harnas-{i}", "immediate_delivery_consent": True}, token=token))
-na = saldo()
-
-statussen = Counter(s for s, _, _, _ in uitkomsten)
-print(f"  statussen: {dict(statussen)}")
-controleer("geen enkele te dure bestelling lukte", 201 not in statussen and 200 not in statussen,
-           f"statussen {dict(statussen)}", "KRITIEK")
-controleer("geen 5xx onder gelijktijdige druk", all(s < 500 for s in statussen),
-           f"statussen {dict(statussen)}", "HOOG")
-controleer("het saldo is geen cent veranderd", voor == na,
-           f"voor {voor}, na {na} -- er is geld weggelekt op een mislukte bestelling", "KRITIEK")
+    statussen = Counter(s for s, _, _, _ in uitkomsten)
+    print(f"  statussen: {dict(statussen)}")
+    controleer("geen enkele te dure bestelling lukte", not (set(statussen) & {200, 201, 202}),
+               f"statussen {dict(statussen)}", "KRITIEK")
+    controleer("geen 5xx onder gelijktijdige druk", all(s < 500 for s in statussen),
+               f"statussen {dict(statussen)}", "HOOG")
+    controleer("het saldo is geen cent veranderd", voor == na,
+               f"voor {voor}, na {na} -- er is geld weggelekt op een mislukte bestelling", "KRITIEK")
 
 # --- 2. Twintig keer tegelijk inloggen ------------------------------------
 res = parallel(20, lambda i: roep("POST", "/auth/login", {"email": EMAIL, "password": PW},

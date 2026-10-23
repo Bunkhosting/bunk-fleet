@@ -192,3 +192,52 @@ def inloggen():
         print(f"inloggen mislukt ({status}): {body}")
         sys.exit(1)
     return token
+
+
+def onbetaalbaar_pakket(sessie):
+    """Specificaties van het goedkoopste pakket dat het saldo NIET dekt, of None.
+
+    Elke test die een bestelling probeert te doen gebruikt deze helper en niets
+    anders. Een bestelling op zo'n pakket strandt altijd op 402
+    insufficient_credits (de afschrijving controleert het saldo atomair), dus er
+    ontstaat nooit een VPS en er beweegt geen cent. Is er geen pakket duurder dan
+    het saldo, of kan het saldo of de catalogus niet gelezen worden, dan is er
+    GEEN veilige bestelling en geeft dit None: de aanroeper slaat over.
+
+    Geeft {"name", "vcpu", "ram_mb", "disk_gb", "prijs_cents", "pakket"}; de
+    eerste vier zijn precies de velden die POST /vpses leest.
+    """
+    from decimal import Decimal, InvalidOperation
+    st_w, wallet, _, _ = roep("GET", "/billing/wallet", token=sessie)
+    saldo = wallet.get("balance_cents") if isinstance(wallet, dict) else None
+    if st_w != 200 or not isinstance(saldo, int) or isinstance(saldo, bool):
+        print("  overgeslagen: het saldo is niet te lezen, dus niet te garanderen dat een bestelling afketst.")
+        return None
+    st_p, body, _, _ = roep("GET", "/packages", token=sessie)
+    if st_p != 200:
+        print("  overgeslagen: de pakketcatalogus is niet te lezen.")
+        return None
+    kandidaten = []
+    for p in lijst_uit(body):
+        try:
+            cents = int((Decimal(str(p["price_monthly"])) * 100).to_integral_value())
+            spec = {"name": "harnas-nooit", "vcpu": int(p["cpu_cores"]),
+                    "ram_mb": int(p["ram_gb"]) * 1024, "disk_gb": int(p["disk_gb"])}
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            continue
+        if cents > saldo:
+            kandidaten.append((cents, p.get("name"), spec))
+    if not kandidaten:
+        print(f"  overgeslagen: geen pakket is duurder dan het saldo ({saldo} cent); "
+              "elke bestelling zou kunnen slagen.")
+        return None
+    cents, naam, spec = min(kandidaten, key=lambda k: k[0])
+    return dict(spec, prijs_cents=cents, pakket=naam)
+
+
+def bestelling(specs, **extra):
+    """De body voor POST /vpses uit onbetaalbaar_pakket(); alleen de echte velden."""
+    body = {k: specs[k] for k in ("name", "vcpu", "ram_mb", "disk_gb")}
+    body["immediate_delivery_consent"] = True
+    body.update(extra)
+    return body

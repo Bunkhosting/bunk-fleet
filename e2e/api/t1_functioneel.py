@@ -21,7 +21,19 @@ for pad in ["/packages", "/regions", "/vpses", "/billing/wallet", "/billing/usag
 
 status, wallet, _, _ = roep("GET", "/billing/wallet", token=token)
 saldo = wallet.get("balance_cents")
-controleer("het welkomstkrediet staat erop", saldo == 1000, f"saldo_centen = {saldo}")
+posten = wallet.get("entries") or []
+# De API geeft de laatste 25 posten. Alleen als er minder zijn, is het hele
+# grootboek zichtbaar en moeten welkomstpost en som kloppen.
+if len(posten) < 25:
+    controleer("het welkomstkrediet staat in het grootboek",
+               any(e.get("kind") == "signup_bonus" and (e.get("amount_cents") or 0) > 0
+                   for e in posten),
+               f"soorten: {sorted({str(e.get('kind')) for e in posten})}")
+    controleer("het saldo is de som van het grootboek",
+               isinstance(saldo, int) and saldo == sum(e.get("amount_cents") or 0 for e in posten),
+               f"saldo {saldo}, som {sum(e.get('amount_cents') or 0 for e in posten)}")
+else:
+    print("  overgeslagen: 25 posten of meer, het grootboek is hier niet volledig zichtbaar.")
 
 status, vpsen, _, _ = roep("GET", "/vpses", token=token)
 lijst = vpsen.get("results", vpsen if isinstance(vpsen, list) else [])

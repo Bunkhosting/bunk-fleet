@@ -78,8 +78,12 @@ for pad in ["/auth/me", "/vpses", "/billing/wallet", "/nodes"]:
     controleer(f"GET {pad} zonder token geeft 401", status == 401, f"status {status}", "KRITIEK")
 
 # --- een verzonnen of kapot token -----------------------------------------
-for slecht in ["", "onzin", "Bearer", "a" * 500, "../../etc/passwd", token[:-1] + "x"]:
+# Het laatste geval is een echt token met een gewijzigd teken; de naam noemt dat
+# alleen, nooit (een deel van) de waarde.
+for naam, slecht in [("leeg", ""), ("onzin", "onzin"), ("Bearer", "Bearer"),
+                     ("500 tekens", "a" * 500), ("padtraversal", "../../etc/passwd"),
+                     ("gewijzigd echt token", token[:-1] + "x")]:
     status, _, _, _ = roep("GET", "/auth/me", token=slecht)
-    controleer(f"token {slecht[:14]!r} wordt geweigerd", status == 401, f"status {status}", "KRITIEK")
+    controleer(f"token ({naam}) wordt geweigerd", status == 401, f"status {status}", "KRITIEK")
 
 print(json.dumps({"goed": tellers["goed"], "fout": tellers["fout"]}))

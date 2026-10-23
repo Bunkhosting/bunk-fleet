@@ -27,25 +27,32 @@ for r in ROMMEL:
                f"status {status}: {str(body)[:160]}", "HOOG")
 
 # --- velden in een body ----------------------------------------------------
-for r in ROMMEL[:14]:
-    status, body, _, _ = roep("POST", "/vpses",
-                              {"package_id": r, "os": r, "label": r,
-                               "region_code": r, "immediate_delivery_consent": True},
-                              token=token)
-    controleer(f"POST /vpses met {r[:22]!r} -> geen 5xx", status < 500,
-               f"status {status}: {str(body)[:160]}", "HOOG")
+# Echte velden van POST /vpses, op specificaties van een pakket dat het saldo
+# niet dekt: ook als de rommel in een veld toevallig door de validatie komt,
+# strandt de bestelling op het tegoed. Geen zo'n pakket: overslaan.
+basis = onbetaalbaar_pakket(token)
+if basis:
+    for r in ROMMEL[:14]:
+        status, body, _, _ = roep("POST", "/vpses",
+                                  bestelling(basis, name=r, region_code=r), token=token)
+        controleer(f"POST /vpses met {r[:22]!r} -> geen 5xx", status < 500,
+                   f"status {status}: {str(body)[:160]}", "HOOG")
+        controleer(f"POST /vpses met {r[:22]!r} -> geen bestelling", status not in (200, 201, 202),
+                   f"status {status}", "KRITIEK")
 
-# --- verkeerde typen -------------------------------------------------------
-GEKKE_TYPEN = [
-    {"package_id": [1, 2, 3]}, {"package_id": {"a": 1}}, {"package_id": True},
-    {"package_id": 1e309}, {"package_id": -2**63}, {"package_id": 2**63},
-    {"label": ["lijst"]}, {"label": {"diep": {"dieper": {"nog dieper": 1}}}},
-    {"immediate_delivery_consent": "ja"}, {"immediate_delivery_consent": 1},
-]
-for data in GEKKE_TYPEN:
-    status, body, _, _ = roep("POST", "/vpses", data, token=token)
-    controleer(f"POST /vpses {str(data)[:40]} -> geen 5xx", status < 500,
-               f"status {status}: {str(body)[:160]}", "HOOG")
+    # --- verkeerde typen ---------------------------------------------------
+    GEKKE_TYPEN = [
+        {"vcpu": [1, 2, 3]}, {"vcpu": {"a": 1}}, {"vcpu": True},
+        {"ram_mb": 1e309}, {"disk_gb": -2**63}, {"disk_gb": 2**63},
+        {"name": ["lijst"]}, {"name": {"diep": {"dieper": {"nog dieper": 1}}}},
+        {"immediate_delivery_consent": "ja"}, {"immediate_delivery_consent": 1},
+    ]
+    for data in GEKKE_TYPEN:
+        status, body, _, _ = roep("POST", "/vpses", bestelling(basis, **data), token=token)
+        controleer(f"POST /vpses {str(data)[:40]} -> geen 5xx", status < 500,
+                   f"status {status}: {str(body)[:160]}", "HOOG")
+        controleer(f"POST /vpses {str(data)[:40]} -> geen bestelling", status not in (200, 201, 202),
+                   f"status {status}", "KRITIEK")
 
 # --- kapotte JSON en rare content-types ------------------------------------
 for ruw, ct in [(b"{niet echt json", "application/json"),

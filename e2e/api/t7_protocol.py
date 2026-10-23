@@ -42,13 +42,15 @@ for methode in ["TRACE", "TRACK", "CONNECT", "PATCH", "PUT"]:
                f"status {status}", "MIDDEL")
 
 # --- kop-injectie via een veld dat teruggegeven wordt ---------------------
-status, body, _, h = roep("POST", "/vpses",
-                          {"package_id": 1, "os": "ubuntu-22.04",
-                           "label": "kwaad\r\nX-Ingespoten: ja",
-                           "immediate_delivery_consent": True}, token=token)
-controleer("een label met regeleindes levert geen ingespoten header op",
-           "X-Ingespoten" not in h and status < 500,
-           f"status {status}, headers {list(h)[:10]}", "HOOG")
+basis = onbetaalbaar_pakket(token)
+if basis:
+    status, body, _, h = roep("POST", "/vpses",
+                              bestelling(basis, name="kwaad\r\nX-Ingespoten: ja"), token=token)
+    controleer("een naam met regeleindes levert geen ingespoten header op",
+               "X-Ingespoten" not in h and status < 500,
+               f"status {status}, headers {list(h)[:10]}", "HOOG")
+    controleer("die bestelling is niet geslaagd", status not in (200, 201, 202),
+               f"status {status}", "KRITIEK")
 
 # --- Host-header --------------------------------------------------------
 status, body, _, h = roep("GET", "/auth/me", token=token,
