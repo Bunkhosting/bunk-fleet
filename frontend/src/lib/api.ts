@@ -653,9 +653,12 @@ export const authApi = {
 
 // ── Packages ──────────────────────────────────────────────────────────
 export const packagesApi = {
+  // Altijd vers van de server: `available` volgt de capaciteit van dat moment en
+  // mag niet uit de sessiecache komen. De cache blijft voor de VPS-lijst.
   list: async () => {
-    const packages = await ensurePackages();
-    return { data: { count: packages.length, results: packages } };
+    const res = await api.get<{ count: number; results: VpsPackage[] }>("/packages");
+    packageCache = res.data.results;
+    return { data: { count: res.data.count, results: res.data.results } };
   },
 };
 

@@ -48,6 +48,11 @@ export interface VpsPackage {
   bandwidth_mbit: number;
   price_monthly: string;
   description: string;
+  /**
+   * Of er nu een node is die dit pakket kan hosten. Ontbreekt bij een oudere
+   * server en bij pakketten uit een VPS-rij; ontbrekend telt als beschikbaar.
+   */
+  available?: boolean;
 }
 
 export interface Vps {

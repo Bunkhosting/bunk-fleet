@@ -80,30 +80,63 @@ defmodule ControlPlane.Fleet.Scheduler do
 
   # Load online nodes in the region that fit the request, locking the rows FOR
   # UPDATE so capacity decisions are serialized across concurrent schedulers.
-  defp lock_candidates(repo, %{vcpu: vcpu, ram_mb: ram_mb, disk_gb: disk_gb} = request) do
+  defp lock_candidates(repo, request) do
     Liveness.online_nodes_in_region_query(request.region_id)
-    |> where(
-      [n],
-      n.available_vcpu >= ^vcpu and
-        n.available_ram_mb >= ^ram_mb and
-        n.available_disk_gb >= ^disk_gb
-    )
-    # Tweede horde: wat de agent zelf nog vrij ziet. available_* begint bij het
-    # totaal van de machine en weet niets van wat daar al op draaide voordat
-    # Bunk er was — op de eerste node scheelde dat 7 GB. is_nil laat een node
-    # door die nog niets heeft gemeld; die stond er voorheen ook, en hem nu
-    # blokkeren zou een werkende node onbruikbaar maken op een ontbrekend cijfer.
-    |> where(
-      [n],
-      (is_nil(n.reported_avail_vcpu) or n.reported_avail_vcpu >= ^vcpu) and
-        (is_nil(n.reported_avail_ram_mb) or n.reported_avail_ram_mb >= ^ram_mb) and
-        (is_nil(n.reported_avail_disk_gb) or n.reported_avail_disk_gb >= ^disk_gb)
-    )
+    |> where(^fits_condition(request))
     # Deterministic lock-acquisition order so concurrent schedulers never grab
     # the same candidate rows in opposite orders (deadlock avoidance).
     |> order_by([n], asc: n.id)
     |> lock("FOR UPDATE")
     |> repo.all()
+  end
+
+  @doc """
+  Ecto-conditie: de node heeft genoeg vrije capaciteit voor `request`
+  (`:vcpu`, `:ram_mb`, `:disk_gb`). Dit is DE plaatsingsregel; `lock_candidates/2`
+  en `fits?/2` gebruiken hem allebei, zodat de catalogus nooit iets anders
+  belooft dan de scheduler doet.
+  """
+  def fits_condition(%{vcpu: vcpu, ram_mb: ram_mb, disk_gb: disk_gb}) do
+    # Eerste horde: wat het control plane zelf bijhoudt (available_*).
+    # Tweede horde: wat de agent zelf nog vrij ziet. available_* begint bij het
+    # totaal van de machine en weet niets van wat daar al op draaide voordat
+    # Bunk er was — op de eerste node scheelde dat 7 GB. is_nil laat een node
+    # door die nog niets heeft gemeld; die stond er voorheen ook, en hem nu
+    # blokkeren zou een werkende node onbruikbaar maken op een ontbrekend cijfer.
+    dynamic(
+      [n],
+      n.available_vcpu >= ^vcpu and
+        n.available_ram_mb >= ^ram_mb and
+        n.available_disk_gb >= ^disk_gb and
+        (is_nil(n.reported_avail_vcpu) or n.reported_avail_vcpu >= ^vcpu) and
+        (is_nil(n.reported_avail_ram_mb) or n.reported_avail_ram_mb >= ^ram_mb) and
+        (is_nil(n.reported_avail_disk_gb) or n.reported_avail_disk_gb >= ^disk_gb)
+    )
+  end
+
+  @doc """
+  Dezelfde regel als `fits_condition/1`, maar op een al geladen node. Moet altijd
+  hetzelfde antwoord geven (zie de overeenkomsttest in de scheduler-tests).
+  """
+  @spec fits?(Node.t(), request() | map()) :: boolean()
+  def fits?(%Node{} = n, %{vcpu: vcpu, ram_mb: ram_mb, disk_gb: disk_gb}) do
+    n.available_vcpu >= vcpu and n.available_ram_mb >= ram_mb and
+      n.available_disk_gb >= disk_gb and
+      reported_ok?(n.reported_avail_vcpu, vcpu) and
+      reported_ok?(n.reported_avail_ram_mb, ram_mb) and
+      reported_ok?(n.reported_avail_disk_gb, disk_gb)
+  end
+
+  defp reported_ok?(nil, _gevraagd), do: true
+  defp reported_ok?(gemeld, gevraagd), do: gemeld >= gevraagd
+
+  @doc """
+  Alle nodes die nu meedoen voor plaatsing, in elke regio. Eén query; voor de
+  publieke catalogus, die dit per pakket met `fits?/2` evalueert.
+  """
+  @spec placeable_nodes() :: [Node.t()]
+  def placeable_nodes do
+    Repo.all(Liveness.online_nodes_in_region_query(nil))
   end
 
   # Choose the least-loaded fitting node: the one that retains the most headroom

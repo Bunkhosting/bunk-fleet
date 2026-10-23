@@ -22,6 +22,9 @@ import type { BunkRegion } from "@/lib/api";
 import { cn, formatEuro, formatBalance, formatBandbreedte } from "@/lib/utils";
 import type { VpsPackage } from "@/lib/types";
 
+// Ontbrekend veld (oudere server) telt als bestelbaar.
+const isBestelbaar = (pkg: VpsPackage) => pkg.available !== false;
+
 export default function NewVpsPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -58,6 +61,13 @@ export default function NewVpsPage() {
     packagesRequest
       .then((res) => {
         setPackages(res.data.results);
+        // Een pakket dat uitverkocht is mag niet voorgeselecteerd blijven staan.
+        setSelectedPackageId((huidig) =>
+          huidig !== null &&
+          res.data.results.some((p) => p.id === huidig && isBestelbaar(p))
+            ? huidig
+            : null
+        );
         setPakkettenFout(false);
       })
       .catch(() => setPakkettenFout(true))
@@ -154,7 +164,7 @@ export default function NewVpsPage() {
     }
   };
 
-  const gekozen = packages.find((p) => p.id === selectedPackageId);
+  const gekozen = packages.find((p) => p.id === selectedPackageId && isBestelbaar(p));
   const prijsCents = gekozen ? Math.round(parseFloat(gekozen.price_monthly) * 100) : null;
   const tekort = prijsCents !== null && balanceCents !== null && balanceCents < prijsCents;
   const blokkade: string | null = !gekozen
@@ -202,47 +212,65 @@ export default function NewVpsPage() {
       <fieldset className="space-y-4">
         <legend className="mb-4 text-xl font-semibold">Kies een pakket</legend>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {packages.map((pkg) => (
-            <label key={pkg.id} className="block cursor-pointer">
-            <input
-              type="radio"
-              name="pakket"
-              value={pkg.id}
-              checked={selectedPackageId === pkg.id}
-              onChange={() => setSelectedPackageId(pkg.id)}
-              className="peer sr-only"
-            />
-            <Card
-              className={cn(
-                "transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background",
-                selectedPackageId === pkg.id
-                  ? "border-primary ring-2 ring-primary"
-                  : "hover:border-primary/50"
-              )}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">{pkg.name}</CardTitle>
-                  {selectedPackageId === pkg.id && (
-                    <Check className="h-5 w-5 text-primary" />
-                  )}
-                </div>
-                <CardDescription>{pkg.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-1 text-sm">
-                  <p>{pkg.cpu_cores} vCPU</p>
-                  <p>{pkg.ram_gb} GB RAM</p>
-                  <p>{pkg.disk_gb} GB NVMe opslag</p>
-                  <p>{formatBandbreedte(pkg.bandwidth_mbit)} netwerk</p>
-                </div>
-                <p className="mt-3 text-lg font-bold text-primary-text">
-                  {formatEuro(pkg.price_monthly)}/maand
-                </p>
-              </CardContent>
-            </Card>
-            </label>
-          ))}
+          {packages.map((pkg) => {
+            const bestelbaar = isBestelbaar(pkg);
+            return (
+              <label
+                key={pkg.id}
+                className={cn("block", bestelbaar ? "cursor-pointer" : "cursor-not-allowed")}
+              >
+              <input
+                type="radio"
+                name="pakket"
+                value={pkg.id}
+                checked={selectedPackageId === pkg.id}
+                onChange={() => setSelectedPackageId(pkg.id)}
+                disabled={!bestelbaar}
+                aria-disabled={!bestelbaar}
+                aria-describedby={bestelbaar ? undefined : `uitverkocht-${pkg.id}`}
+                className="peer sr-only"
+              />
+              <Card
+                className={cn(
+                  "transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background",
+                  !bestelbaar && "opacity-60",
+                  selectedPackageId === pkg.id
+                    ? "border-primary ring-2 ring-primary"
+                    : bestelbaar && "hover:border-primary/50"
+                )}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">{pkg.name}</CardTitle>
+                    {selectedPackageId === pkg.id && (
+                      <Check className="h-5 w-5 text-primary" />
+                    )}
+                    {!bestelbaar && (
+                      <span
+                        id={`uitverkocht-${pkg.id}`}
+                        className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+                      >
+                        Tijdelijk uitverkocht
+                      </span>
+                    )}
+                  </div>
+                  <CardDescription>{pkg.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1 text-sm">
+                    <p>{pkg.cpu_cores} vCPU</p>
+                    <p>{pkg.ram_gb} GB RAM</p>
+                    <p>{pkg.disk_gb} GB NVMe opslag</p>
+                    <p>{formatBandbreedte(pkg.bandwidth_mbit)} netwerk</p>
+                  </div>
+                  <p className="mt-3 text-lg font-bold text-primary-text">
+                    {formatEuro(pkg.price_monthly)}/maand
+                  </p>
+                </CardContent>
+              </Card>
+              </label>
+            );
+          })}
         </div>
       </fieldset>
 
