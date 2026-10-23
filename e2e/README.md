@@ -85,6 +85,7 @@ Andere omgeving: `BUNK_APP_URL` / `BUNK_WWW_URL`.
 | `tests/api-unauth.spec.ts` | 401-gedrag, JSON-vorm, geen stacktrace/versielek |
 | `tests/mobile.spec.ts` | 390px: horizontale scroll, aanraakdoelen |
 | `tests/a11y.spec.ts` | axe-core WCAG 2.1 AA, labels, focusvolgorde, alt |
+| `tests/passkey.spec.ts` | passkey-ceremonie met Chromium's virtuele authenticator: toevoegen, inloggen, verwijderen. Muteert alleen het testaccount (één passkey erbij en weer eraf, ook bij falen); slaat over zonder `e2e/.testpw` |
 | `tests/wellknown-404.spec.ts` | healthz, robots, sitemap, security.txt, 404 |
 | `tests/zz-capaciteit.spec.ts` | wat de suite zélf met de dienst deed (loopt als laatste) |
 
