@@ -99,15 +99,27 @@ defmodule ControlPlaneWeb.CommandController do
   # is something the control plane will later act on. Every field a command kind
   # can report has to be named — a backup that reports an archive the control
   # plane then drops is a backup nobody can find.
+  #
+  # Elk tekstveld is ook begrensd in lengte, niet alleen de lijst gasten in
+  # aantal. Dit wordt in `commands.result` bewaard, negentig dagen, en een node
+  # krijgt elk half uur een nieuwe inventarisatie om te vullen: zonder grens kon
+  # een node die niet van ons is per opdracht twee megabyte in de gedeelde
+  # database en de log zetten. De grenzen liggen ruim boven wat een eerlijke
+  # agent meldt.
   defp result_attrs(params) do
     %{
       "status" => params["status"],
-      "vm_id" => params["vm_id"],
-      "ip" => params["ip"],
-      "error" => params["error"],
+      "vm_id" => tekst(params["vm_id"], 64),
+      "ip" => tekst(params["ip"], 64),
+      "error" => tekst(params["error"], 500),
       # Backups: where the node put the archive, and how big it is.
-      "volid" => params["volid"],
-      "size_bytes" => params["size_bytes"],
+      "volid" => tekst(params["volid"], 255),
+      # Getal of cijfers als tekst; `VpsBackup` parseert en weigert de rest.
+      "size_bytes" =>
+        if(is_binary(params["size_bytes"]),
+          do: tekst(params["size_bytes"], 32),
+          else: params["size_bytes"]
+        ),
       # Inventarisatie: elk gast-id dat de node zegt te hebben. Begrensd, want
       # dit komt van een machine die niet van ons hoeft te zijn: een lijst van
       # een miljoen strings zou hier een rij van een miljoen strings worden.
@@ -125,7 +137,13 @@ defmodule ControlPlaneWeb.CommandController do
     lijst
     |> Enum.filter(&is_binary/1)
     |> Enum.take(@max_guests)
+    |> Enum.map(&tekst(&1, 64))
   end
 
   defp gasten(_anders), do: nil
+
+  # Ingekort, niet geweigerd: een te lange foutmelding is nog steeds een
+  # mislukking die de control plane moet verwerken. Wat geen tekst is, telt niet.
+  defp tekst(waarde, max) when is_binary(waarde), do: String.slice(waarde, 0, max)
+  defp tekst(_waarde, _max), do: nil
 end

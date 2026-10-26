@@ -159,6 +159,18 @@ defmodule ControlPlane.FleetReportedCapacityTest do
     assert bijgewerkt.available_ram_mb == 3651
   end
 
+  test "een node die leeg meldt terwijl er VPS'en op staan, krijgt niet meer dan er over is" do
+    # Een node die niet van ons is, kon altijd "alles vrij" melden en won zo elke
+    # plaatsing. Wat er aan VPS'en op staat weet de control plane zelf.
+    r = regio()
+    n = node(r, %{available_ram_mb: 10_819})
+    gereserveerd(n, 8192, :committed)
+
+    {:ok, bijgewerkt} = heartbeat(n, %{"reported_avail_ram_mb" => 11_843})
+
+    assert bijgewerkt.available_ram_mb == 11_843 - 8192
+  end
+
   test "een agent die niets meldt houdt de bestaande boekhouding" do
     # Een oudere agent kent reported_avail_* niet. Die node op nul zetten zou hem
     # uit de roulatie halen voor iets wat hij niet verkeerd doet.
