@@ -227,6 +227,21 @@ export function parseApiError(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/**
+ * Bouwt een API-pad en codeert elk ingevoegd stuk met encodeURIComponent.
+ *
+ * Een id komt vaak uit de URL van de pagina (useParams). Zonder codering maakt
+ * een link als `/dashboard/vps/..%2Fbeheer%2Fnodes%2F<id>%2Fresume%3F/terminal`
+ * van het automatische POST-verzoek van de terminal een verzoek naar een heel
+ * ander endpoint -- same-origin, dus de CSRF-controle laat het door, met de
+ * sessie van wie de link opent. Gebruik `pad` voor elk pad met een variabele.
+ */
+export const pad = (delen: TemplateStringsArray, ...waarden: string[]): string =>
+  delen.reduce(
+    (acc, deel, i) => acc + deel + (i < waarden.length ? encodeURIComponent(waarden[i]) : ""),
+    "",
+  );
+
 const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
   headers: { "Content-Type": "application/json" },
@@ -629,7 +644,7 @@ export const authApi = {
      * `wrong_current_password` en `missing_password`, net als bij wachtwoord wijzigen.
      */
     remove: (id: string, currentPassword: string) =>
-      api.delete(`/auth/passkeys/${id}`, { data: { current_password: currentPassword } }),
+      api.delete(pad`/auth/passkeys/${id}`, { data: { current_password: currentPassword } }),
     /** Vertaalt het resultaat van navigator.credentials.get() naar wat /auth/login verwacht. */
     assertion: (challenge_id: string, credential: PublicKeyCredential): PasskeyAssertion => {
       const r = credential.response as AuthenticatorAssertionResponse;
@@ -711,7 +726,7 @@ export const vpsApi = {
   get: async (id: string) => {
     const [, res] = await Promise.all([
       ensurePackages().catch(() => []),
-      api.get<{ vps: BunkVps }>(`/vpses/${id}`),
+      api.get<{ vps: BunkVps }>(pad`/vpses/${id}`),
     ]);
     return { data: transformVps(res.data.vps) };
   },
@@ -762,38 +777,38 @@ export const vpsApi = {
 
   /** A VPS's restore points, newest first. Failures are listed too — they are news. */
   backups: async (id: string): Promise<VpsBackup[]> =>
-    (await api.get<{ backups: VpsBackup[] }>(`/vpses/${id}/backups`)).data.backups,
+    (await api.get<{ backups: VpsBackup[] }>(pad`/vpses/${id}/backups`)).data.backups,
   /**
    * Start nu een back-up, buiten het nachtelijke schema om. Het moment waarop je
    * er een wilt is vlak vóór iets engs, en dan is "vannacht" geen antwoord.
    */
-  backupNow: (id: string) => api.post(`/vpses/${id}/backups`),
+  backupNow: (id: string) => api.post(pad`/vpses/${id}/backups`),
 
   /**
    * Roll a VPS back to one of its restore points. Destructive: everything
    * written since that backup is gone.
    */
   restore: (id: string, backupId: string) =>
-    api.post(`/vpses/${id}/backups/${backupId}/restore`),
+    api.post(pad`/vpses/${id}/backups/${backupId}/restore`),
 
-  delete: (id: string) => api.delete(`/vpses/${id}`),
-  start: (id: string) => api.post<{ detail: string }>(`/vpses/${id}/start`),
-  stop: (id: string) => api.post<{ detail: string }>(`/vpses/${id}/stop`),
+  delete: (id: string) => api.delete(pad`/vpses/${id}`),
+  start: (id: string) => api.post<{ detail: string }>(pad`/vpses/${id}/start`),
+  stop: (id: string) => api.post<{ detail: string }>(pad`/vpses/${id}/stop`),
   /**
    * Herstart van binnenuit: het besturingssysteem wordt gevraagd af te sluiten
    * en komt weer op. Wie de stekker eruit wil trekken doet stop en daarna
    * start -- dat is een andere handeling en ziet er ook anders uit.
    */
-  reboot: (id: string) => api.post<{ detail: string }>(`/vpses/${id}/reboot`),
+  reboot: (id: string) => api.post<{ detail: string }>(pad`/vpses/${id}/reboot`),
   /**
    * Hernoemt een VPS. Alleen het label dat jij ziet: de naam waaronder de gast
    * op de hypervisor staat blijft wat hij was, want daar herkent de agent zijn
    * machine aan.
    */
-  rename: (id: string, name: string) => api.patch(`/vpses/${id}`, { name }),
+  rename: (id: string, name: string) => api.patch(pad`/vpses/${id}`, { name }),
   // Mint a single-use console ticket (the WS handshake can't carry the bearer).
   consoleTicket: async (id: string): Promise<{ ticket: string }> => {
-    const res = await api.post<{ ticket: string }>(`/vpses/${id}/console-ticket`);
+    const res = await api.post<{ ticket: string }>(pad`/vpses/${id}/console-ticket`);
     return res.data;
   },
 };
@@ -920,7 +935,7 @@ export const nodeApi = {
    * van iemand anders geeft 404, want dat hij bestaat is al te veel informatie.
    */
   updateSettings: async (id: string, settings: Partial<NodeSettings>): Promise<MyNode> =>
-    (await api.patch<{ node: MyNode }>(`/nodes/${id}/settings`, settings)).data.node,
+    (await api.patch<{ node: MyNode }>(pad`/nodes/${id}/settings`, settings)).data.node,
 
   /**
    * Draagt een node over aan een andere gebruiker, of haalt de eigenaar eraf.
@@ -928,7 +943,7 @@ export const nodeApi = {
    * eigenaar heeft toewijzen.
    */
   assignOwner: async (id: string, ownerEmail: string | null): Promise<MyNode> =>
-    (await api.post<{ node: MyNode }>(`/nodes/${id}/owner`, { owner_email: ownerEmail })).data.node,
+    (await api.post<{ node: MyNode }>(pad`/nodes/${id}/owner`, { owner_email: ownerEmail })).data.node,
 
   /**
    * Verplaatst de node naar de locatie met deze naam, en maakt die aan als hij
@@ -941,7 +956,7 @@ export const nodeApi = {
    * hoofdletters maken niet uit -- dan gaat de node daarin.
    */
   moveRegion: async (id: string, regionName: string): Promise<MyNode> =>
-    (await api.post<{ node: MyNode }>(`/nodes/${id}/region`, { region_name: regionName })).data
+    (await api.post<{ node: MyNode }>(pad`/nodes/${id}/region`, { region_name: regionName })).data
       .node,
 };
 
@@ -1141,19 +1156,19 @@ export const adminApi = {
    * melden bij iets wat blijft bestaan zou onwaar zijn.
    */
   deleteUser: async (id: string): Promise<"deleted" | "anonymised"> =>
-    (await api.delete<{ result: "deleted" | "anonymised" }>(`/beheer/users/${id}`)).data.result,
+    (await api.delete<{ result: "deleted" | "anonymised" }>(pad`/beheer/users/${id}`)).data.result,
 
   setRole: (id: string, role: "user" | "admin") =>
-    api.patch<{ id: string; role: string }>(`/beheer/users/${id}`, { role }),
+    api.patch<{ id: string; role: string }>(pad`/beheer/users/${id}`, { role }),
   addCredit: (id: string, amountCents: number) =>
-    api.post<{ id: string; balance_cents: number }>(`/beheer/users/${id}/credit`, {
+    api.post<{ id: string; balance_cents: number }>(pad`/beheer/users/${id}/credit`, {
       amount_cents: amountCents,
     }),
   vpses: async (): Promise<AdminVps[]> =>
     (await api.get<{ vpses: AdminVps[] }>("/beheer/vpses")).data.vpses,
-  vpsStart: (id: string) => api.post(`/beheer/vpses/${id}/start`),
-  vpsStop: (id: string) => api.post(`/beheer/vpses/${id}/stop`),
-  vpsDelete: (id: string) => api.delete(`/beheer/vpses/${id}`),
+  vpsStart: (id: string) => api.post(pad`/beheer/vpses/${id}/start`),
+  vpsStop: (id: string) => api.post(pad`/beheer/vpses/${id}/stop`),
+  vpsDelete: (id: string) => api.delete(pad`/beheer/vpses/${id}`),
   regions: async (): Promise<AdminRegion[]> =>
     (await api.get<{ regions: AdminRegion[] }>("/beheer/regions")).data.regions,
 
@@ -1161,21 +1176,21 @@ export const adminApi = {
     (await api.post<{ region: AdminRegion }>("/beheer/regions", { code, name })).data.region,
 
   deleteRegion: async (id: string): Promise<void> => {
-    await api.delete(`/beheer/regions/${id}`);
+    await api.delete(pad`/beheer/regions/${id}`);
   },
 
   updateRegion: async (
     id: string,
     changes: { name?: string; code?: string; enabled?: boolean },
   ): Promise<AdminRegion> =>
-    (await api.patch<{ region: AdminRegion }>(`/beheer/regions/${id}`, changes)).data.region,
+    (await api.patch<{ region: AdminRegion }>(pad`/beheer/regions/${id}`, changes)).data.region,
 
   nodes: async (): Promise<AdminNode[]> =>
     (await api.get<{ nodes: AdminNode[] }>("/beheer/nodes")).data.nodes,
 
-  nodeDelete: (id: string) => api.delete(`/beheer/nodes/${id}`),
+  nodeDelete: (id: string) => api.delete(pad`/beheer/nodes/${id}`),
   userDetail: async (id: string): Promise<AdminUserDetail> =>
-    (await api.get<AdminUserDetail>(`/beheer/users/${id}`)).data,
+    (await api.get<AdminUserDetail>(pad`/beheer/users/${id}`)).data,
   subscriptions: async () =>
     (
       await api.get<{
@@ -1202,7 +1217,7 @@ export const adminApi = {
    * being served — this is what you reach for before maintenance, not a way to
    * take a machine down.
    */
-  nodeDrain: (id: string) => api.post(`/beheer/nodes/${id}/drain`),
+  nodeDrain: (id: string) => api.post(pad`/beheer/nodes/${id}/drain`),
   /**
    * Mint een eenmalig enroll-token voor een nieuwe node. Het pad is /beheer en
    * niet /admin: Cloudflare's WAF blokkeert /admin voor het de origin bereikt.
@@ -1216,7 +1231,7 @@ export const adminApi = {
         install: string;
       }>("/beheer/enroll-tokens", regionCode ? { region_code: regionCode } : {})
     ).data,
-  nodeResume: (id: string) => api.post(`/beheer/nodes/${id}/resume`),
+  nodeResume: (id: string) => api.post(pad`/beheer/nodes/${id}/resume`),
 };
 
 // Billing — adapted to bunk-fleet. The overview is derived live from the
