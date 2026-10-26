@@ -60,10 +60,9 @@ defmodule ControlPlaneWeb.NodeController do
   @doc """
   Draagt een node over aan een andere gebruiker, of haalt de eigenaar eraf.
 
-  Alleen de eigenaar zelf. Een beheerder kan een node die nog geen eigenaar
-  heeft toewijzen -- zonder dat zou een node die met een beheerderstoken is
-  ingeschreven er nooit een kunnen krijgen -- maar daarna gaat de eigenaar er
-  alleen over.
+  Alleen de eigenaar zelf. Een node die nog geen eigenaar heeft, wijst een
+  beheerder toe via `POST /api/v1/beheer/nodes/:id/owner`, achter tweede factor
+  en auditlog; hier niet.
   """
   def assign_owner(conn, %{"id" => id} = params) do
     with {:ok, node_id} <- Ecto.UUID.cast(id) |> ok_or(:not_found),

@@ -153,12 +153,13 @@ defmodule ControlPlane.Fleet.NodeAdmin do
   end
 
   @doc """
-  Draagt een node over, of wijst er voor het eerst een eigenaar aan.
+  Draagt een node over, of haalt de eigenaar eraf.
 
-  Wie mag dat: de eigenaar zelf, en verder niemand. Een beheerder kan een node
-  die nog géén eigenaar heeft toewijzen -- anders zou een node die met een
-  beheerderstoken is ingeschreven er nooit een kunnen krijgen -- maar zodra er
-  een eigenaar is, is die de enige die hem kan overdragen.
+  Wie mag dat: de eigenaar zelf, en verder niemand. Een node die nog géén
+  eigenaar heeft, krijgt er een via `assign_unowned_node/2` in het beheerpaneel
+  -- anders zou een node die met een beheerderstoken is ingeschreven er nooit een
+  kunnen krijgen -- maar zodra er een eigenaar is, is die de enige die hem kan
+  overdragen.
 
   Dat heeft een scherpe kant en die hoort hier te staan: raakt een eigenaar
   onbereikbaar, dan kan niemand die node nog overdragen. Het alternatief was een
@@ -170,23 +171,39 @@ defmodule ControlPlane.Fleet.NodeAdmin do
           | {:error, :not_found | :forbidden | :unknown_user | Ecto.Changeset.t()}
   def assign_node_owner(node_id, %User{} = door, owner_id) do
     with {:ok, node} <- fetch_node(node_id),
-         :ok <- mag_overdragen(node, door),
+         :ok <- if(node_owner?(node, door), do: :ok, else: {:error, :forbidden}),
          :ok <- known_user(owner_id) do
-      node
-      |> Node.changeset(%{owner_id: owner_id})
-      |> Repo.update()
-      |> tap_ok(fn _ -> Events.broadcast_changed(:node) end)
-      |> met_regio()
+      zet_eigenaar(node, owner_id)
     end
   end
 
-  # Een node zonder eigenaar mag een beheerder toewijzen; dat is het enige
-  # moment waarop iemand anders dan de eigenaar erover gaat.
-  defp mag_overdragen(%Node{owner_id: nil}, %User{role: :admin}), do: :ok
-  defp mag_overdragen(%Node{owner_id: nil}, _user), do: {:error, :forbidden}
+  @doc """
+  Geeft een node die nog geen eigenaar heeft er een. Alleen voor het
+  beheerpaneel.
 
-  defp mag_overdragen(%Node{} = node, %User{} = user) do
-    if node_owner?(node, user), do: :ok, else: {:error, :forbidden}
+  Dit is het enige moment waarop iemand anders dan de eigenaar over een node
+  gaat, en het hoort daarom achter dezelfde drempel als elke andere
+  beheerhandeling: een sessie met tweede factor en een regel in het auditlog.
+  Het zat eerst in `assign_node_owner/3` als uitzondering voor de rol
+  `:admin`, op de gewone gebruikersroute, en daar gold geen van beide.
+  """
+  @spec assign_unowned_node(Ecto.UUID.t(), Ecto.UUID.t()) ::
+          {:ok, Node.t()}
+          | {:error, :not_found | :already_owned | :unknown_user | Ecto.Changeset.t()}
+  def assign_unowned_node(node_id, owner_id) do
+    with {:ok, node} <- fetch_node(node_id),
+         :ok <- if(is_nil(node.owner_id), do: :ok, else: {:error, :already_owned}),
+         :ok <- known_user(owner_id) do
+      zet_eigenaar(node, owner_id)
+    end
+  end
+
+  defp zet_eigenaar(%Node{} = node, owner_id) do
+    node
+    |> Node.changeset(%{owner_id: owner_id})
+    |> Repo.update()
+    |> tap_ok(fn _ -> Events.broadcast_changed(:node) end)
+    |> met_regio()
   end
 
   # De templates waarmee besteld kan worden. Los opgehaald zodat het changeset

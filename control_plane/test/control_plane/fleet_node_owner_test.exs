@@ -39,16 +39,35 @@ defmodule ControlPlane.FleetNodeOwnerTest do
   end
 
   describe "toewijzen en overdragen" do
-    test "een beheerder wijst een node zonder eigenaar toe" do
+    test "het beheerpaneel wijst een node zonder eigenaar toe" do
       # Het enige moment waarop iemand anders dan de eigenaar erover gaat. Zonder
       # dit zou een node die met een beheerderstoken is ingeschreven nooit een
       # eigenaar kunnen krijgen.
-      {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm1@bunk.test"), :admin)
       u = gebruiker("eigenaar1@bunk.test")
       n = fleet_node()
 
-      assert {:ok, bijgewerkt} = NodeAdmin.assign_node_owner(n.id, beheerder, u.id)
+      assert {:ok, bijgewerkt} = NodeAdmin.assign_unowned_node(n.id, u.id)
       assert bijgewerkt.owner_id == u.id
+    end
+
+    test "een node met eigenaar kan het beheerpaneel niet toewijzen" do
+      eigenaar = gebruiker("eigenaar1b@bunk.test")
+      n = fleet_node()
+      {:ok, n} = NodeAdmin.assign_unowned_node(n.id, eigenaar.id)
+
+      assert {:error, :already_owned} =
+               NodeAdmin.assign_unowned_node(n.id, gebruiker("ander@bunk.test").id)
+
+      assert Repo.get!(Node, n.id).owner_id == eigenaar.id
+    end
+
+    test "een beheerder claimt een node zonder eigenaar niet langs de eigenaarsroute" do
+      # Daar gold geen tweede factor en geen auditlog; dat hoort in het beheerpaneel.
+      {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm1@bunk.test"), :admin)
+      n = fleet_node()
+
+      assert {:error, :forbidden} = NodeAdmin.assign_node_owner(n.id, beheerder, beheerder.id)
+      assert is_nil(Repo.get!(Node, n.id).owner_id)
     end
 
     test "een gewone gebruiker kan een node zonder eigenaar niet claimen" do
@@ -60,11 +79,10 @@ defmodule ControlPlane.FleetNodeOwnerTest do
     end
 
     test "de eigenaar draagt zijn eigen node over" do
-      {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm2@bunk.test"), :admin)
       eigenaar = gebruiker("eigenaar2@bunk.test")
       opvolger = gebruiker("opvolger@bunk.test")
       n = fleet_node()
-      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_unowned_node(n.id, eigenaar.id)
 
       assert {:ok, bijgewerkt} = NodeAdmin.assign_node_owner(n.id, eigenaar, opvolger.id)
       assert bijgewerkt.owner_id == opvolger.id
@@ -76,38 +94,34 @@ defmodule ControlPlane.FleetNodeOwnerTest do
       {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm3@bunk.test"), :admin)
       eigenaar = gebruiker("eigenaar3@bunk.test")
       n = fleet_node()
-      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_unowned_node(n.id, eigenaar.id)
 
       assert {:error, :forbidden} = NodeAdmin.assign_node_owner(n.id, beheerder, beheerder.id)
       assert Repo.get!(Node, n.id).owner_id == eigenaar.id
     end
 
     test "een andere gebruiker kan een node met eigenaar niet overnemen" do
-      {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm4@bunk.test"), :admin)
       eigenaar = gebruiker("eigenaar4@bunk.test")
       vreemde = gebruiker("vreemde@bunk.test")
       n = fleet_node()
-      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_unowned_node(n.id, eigenaar.id)
 
       assert {:error, :forbidden} = NodeAdmin.assign_node_owner(n.id, vreemde, vreemde.id)
     end
 
     test "de eigenaar kan zijn node eigenaarloos maken" do
-      {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm5@bunk.test"), :admin)
       eigenaar = gebruiker("eigenaar5@bunk.test")
       n = fleet_node()
-      {:ok, n} = NodeAdmin.assign_node_owner(n.id, beheerder, eigenaar.id)
+      {:ok, n} = NodeAdmin.assign_unowned_node(n.id, eigenaar.id)
 
       assert {:ok, bijgewerkt} = NodeAdmin.assign_node_owner(n.id, eigenaar, nil)
       assert is_nil(bijgewerkt.owner_id)
     end
 
     test "weigert een gebruiker die niet bestaat" do
-      {:ok, beheerder} = Accounts.update_user_role(gebruiker("adm6@bunk.test"), :admin)
       n = fleet_node()
 
-      assert {:error, :unknown_user} =
-               NodeAdmin.assign_node_owner(n.id, beheerder, Ecto.UUID.generate())
+      assert {:error, :unknown_user} = NodeAdmin.assign_unowned_node(n.id, Ecto.UUID.generate())
 
       assert is_nil(Repo.get!(Node, n.id).owner_id)
     end

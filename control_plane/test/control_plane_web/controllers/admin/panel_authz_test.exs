@@ -69,6 +69,7 @@ defmodule ControlPlaneWeb.Admin.PanelAuthzTest do
       {:get, "/api/v1/beheer/nodes"},
       {:post, "/api/v1/beheer/nodes/#{@uuid}/drain"},
       {:post, "/api/v1/beheer/nodes/#{@uuid}/resume"},
+      {:post, "/api/v1/beheer/nodes/#{@uuid}/owner"},
       {:delete, "/api/v1/beheer/nodes/#{@uuid}"}
     ]
   end

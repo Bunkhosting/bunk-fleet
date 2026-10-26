@@ -208,7 +208,10 @@ defmodule ControlPlaneWeb.NodeControllerTest do
       assert Repo.get!(Node, n.id).owner_id == opvolger.id
     end
 
-    test "een beheerder wijst een node zonder eigenaar toe", %{conn: conn} do
+    test "een beheerder wijst een node zonder eigenaar hier NIET toe", %{conn: conn} do
+      # Dat hoort in het beheerpaneel, achter tweede factor en auditlog. Deze
+      # route kende geen van beide, en een beheerderssessie zonder tweede factor
+      # kon hier zo een node claimen.
       beheerder = gebruiker(:admin)
       nieuwe = gebruiker()
       n = fleet_node(nil)
@@ -216,9 +219,9 @@ defmodule ControlPlaneWeb.NodeControllerTest do
       conn
       |> ingelogd(beheerder)
       |> post(~p"/api/v1/nodes/#{n.id}/owner", %{"owner_email" => nieuwe.email})
-      |> json_response(200)
+      |> json_response(404)
 
-      assert Repo.get!(Node, n.id).owner_id == nieuwe.id
+      assert is_nil(Repo.get!(Node, n.id).owner_id)
     end
 
     test "een beheerder kan een node mét eigenaar niet overnemen", %{conn: conn} do

@@ -10,6 +10,7 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   use ControlPlaneWeb, :controller
   import ControlPlaneWeb.Admin.PanelHelpers, only: [error: 3, ok_or: 2, region_code: 1]
 
+  alias ControlPlane.Accounts
   alias ControlPlane.Accounts.User
   alias ControlPlane.Enrollment
   alias ControlPlane.Fleet.Node
@@ -138,6 +139,29 @@ defmodule ControlPlaneWeb.Admin.PanelFleetController do
   def drain_node(conn, %{"id" => id}), do: node_transition(conn, id, &NodeAdmin.drain_node/1)
 
   def resume_node(conn, %{"id" => id}), do: node_transition(conn, id, &NodeAdmin.resume_node/1)
+
+  @doc """
+  Geeft een node zonder eigenaar er een, op e-mailadres.
+
+  Staat hier en niet op `/api/v1/nodes/:id/owner`, zodat het onder de
+  beheerdrempel valt: een sessie met tweede factor, en een regel in het
+  auditlog. Een node die al een eigenaar heeft, draagt alleen die eigenaar over.
+  """
+  def assign_node_owner(conn, %{"id" => id, "owner_email" => email}) when is_binary(email) do
+    with {:ok, node_id} <- Ecto.UUID.cast(id),
+         %User{id: owner_id} <- Accounts.get_user_by_email(String.trim(email)),
+         {:ok, node} <- NodeAdmin.assign_unowned_node(node_id, owner_id) do
+      json(conn, %{node: node_json(node)})
+    else
+      :error -> error(conn, :not_found, "not_found")
+      nil -> error(conn, :unprocessable_entity, "unknown_user")
+      {:error, :not_found} -> error(conn, :not_found, "not_found")
+      {:error, :already_owned} -> error(conn, :conflict, "already_owned")
+      {:error, _reason} -> error(conn, :unprocessable_entity, "invalid_node")
+    end
+  end
+
+  def assign_node_owner(conn, _params), do: error(conn, :unprocessable_entity, "missing_owner")
 
   defp node_transition(conn, id, change) do
     with {:ok, node_id} <- Ecto.UUID.cast(id),

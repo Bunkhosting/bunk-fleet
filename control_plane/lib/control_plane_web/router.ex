@@ -347,6 +347,7 @@ defmodule ControlPlaneWeb.Router do
     post "/enroll-tokens", PanelFleetController, :create_enroll_token
     post "/nodes/:id/drain", PanelFleetController, :drain_node
     post "/nodes/:id/resume", PanelFleetController, :resume_node
+    post "/nodes/:id/owner", PanelFleetController, :assign_node_owner
     delete "/nodes/:id", PanelFleetController, :delete_node
   end
 
