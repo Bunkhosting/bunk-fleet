@@ -53,7 +53,7 @@ Two keypairs, and the split is the design:
 |---|---|---|
 | `backup.crt` (encrypt) | the control-plane host | nothing: it only encrypts |
 | `backup.key` (decrypt) | **off the machine** | every backup is readable |
-| `id_ed25519` (push) | the control-plane host | nothing useful: forced command |
+| `id_ed25519` (push) | the control-plane host | it can fill the store so new backups are refused; history survives |
 
 The destination runs `tools/backup-receive.sh` as a forced command, so the key
 the control plane holds can do exactly one thing — append a blob. It cannot
@@ -61,6 +61,15 @@ list, read or delete. An attacker who takes the control plane can therefore
 neither retrieve the history nor destroy it, and the destination stores
 something it cannot read. That last property is what will let the archive
 eventually live on hardware we do not own.
+
+Retention is by age, not by count: an archive is removed once it has been on the
+destination for `BUNK_BACKUP_MIN_AGE_DAYS` (30) days, judged by the time it
+arrived, which the sender cannot set. It used to keep "the newest 30", and that
+let the push key erase history: thirty one-byte uploads pushed every real
+archive out. Above `BUNK_BACKUP_MAX_FILES` (90) the receiver refuses new uploads
+instead of rotating, so a flood shows up as a failing nightly backup and the
+backup alert, not as missing history. Only names of the exact shape
+`tools/backup.sh` produces (`bunk-<UTC timestamp>.tar.zst.enc`) are accepted.
 
 ## Setting it up
 
