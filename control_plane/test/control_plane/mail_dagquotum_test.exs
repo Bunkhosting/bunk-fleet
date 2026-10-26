@@ -52,7 +52,9 @@ defmodule ControlPlane.MailDagquotumTest do
     end
   end
 
-  defp stuur_klantmail(klant), do: Notifier.deliver_reset_password_instructions(klant, "token")
+  # Een bevestigingsmail, en geen resetmail: die heeft daarbinnen nog een eigen,
+  # kleiner deel (zie de test daarvoor onderaan).
+  defp stuur_klantmail(klant), do: Notifier.deliver_confirmation_instructions(klant, "token")
 
   defp assert_klantmail_verstuurd do
     assert_email_sent(fn email -> assert [{_, "klant@example.com"}] = email.to end)
@@ -113,6 +115,26 @@ defmodule ControlPlane.MailDagquotumTest do
 
     assert Notifier.deliver_operational_alert("Schijf vol", "bewijs") == :ok
     assert_email_sent(subject: "[Bunk] Schijf vol")
+  end
+
+  test "resetmails kunnen het klantquotum niet in hun eentje opmaken", %{klant: klant} do
+    # Een reset vragen kan iedereen, zonder in te loggen. Met een handvol adressen
+    # kon één aanvrager zo de hele dag aan klantmail opmaken. Limiet 10, reserve 2:
+    # klantmail mag er acht, resetmail daarvan hooguit vier.
+    Application.put_env(:control_plane, :mail_daily_limit, 10)
+
+    for _ <- 1..4 do
+      assert Notifier.deliver_reset_password_instructions(klant, "token") == :ok
+    end
+
+    capture_log(fn ->
+      assert Notifier.deliver_reset_password_instructions(klant, "token") ==
+               {:error, :daily_quota_reserved_for_ops}
+    end)
+
+    drain_emails()
+    assert stuur_klantmail(klant) == :ok
+    assert_klantmail_verstuurd()
   end
 
   defmodule VolleServer do
