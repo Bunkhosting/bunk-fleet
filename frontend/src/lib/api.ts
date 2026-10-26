@@ -57,6 +57,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   admin_mfa_required:
     "Het beheerpaneel vraagt een tweede factor. Zet een authenticator-app of een passkey aan onder Beveiliging.",
   admin_reauth_required: "Log opnieuw in met je tweede factor om het beheerpaneel te openen.",
+  reauth_required: "Log opnieuw in met je tweede factor om er een toe te voegen.",
   not_found: "Niet gevonden.",
   rate_limited: "Te veel pogingen. Probeer het over een minuutje opnieuw.",
   captcha_failed: "De verificatie is niet gelukt. Probeer het opnieuw.",
@@ -144,6 +145,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_role: "Deze rol bestaat niet.",
   unknown_user: "Deze gebruiker bestaat niet.",
   invalid_owner: "Deze eigenaar bestaat niet.",
+  already_owned: "Deze node heeft al een eigenaar. Alleen die kan hem overdragen.",
+  missing_owner: "Vul het e-mailadres van de nieuwe eigenaar in.",
   user_not_found: "Deze gebruiker bestaat niet.",
   invalid_node: "Deze node kan zo niet opgeslagen worden.",
   invalid_enroll_token: "Deze uitnodiging is ongeldig of al gebruikt.",
