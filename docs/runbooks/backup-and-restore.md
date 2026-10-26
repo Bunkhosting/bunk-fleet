@@ -66,7 +66,11 @@ Retention is by age, not by count: an archive is removed once it has been on the
 destination for `BUNK_BACKUP_MIN_AGE_DAYS` (30) days, judged by the time it
 arrived, which the sender cannot set. It used to keep "the newest 30", and that
 let the push key erase history: thirty one-byte uploads pushed every real
-archive out. Above `BUNK_BACKUP_MAX_FILES` (90) the receiver refuses new uploads
+archive out. Age alone would still leave one way in: stop the real backups,
+wait thirty days, upload once, and everything genuine is old enough to go. So
+the last arrival of each calendar month is kept for `BUNK_BACKUP_KEEP_MONTHS`
+(12) months; an attacker's uploads arrive after the compromise, so the months
+before it keep a real archive. Above `BUNK_BACKUP_MAX_FILES` (90) the receiver refuses new uploads
 instead of rotating, so a flood shows up as a failing nightly backup and the
 backup alert, not as missing history. Only names of the exact shape
 `tools/backup.sh` produces (`bunk-<UTC timestamp>.tar.zst.enc`) are accepted.

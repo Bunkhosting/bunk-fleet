@@ -70,10 +70,27 @@ chmod 400 "$DEST/$name"
 
 echo "stored $name ($size bytes, sha256 $(sha256sum "$DEST/$name" | cut -c1-16)…)"
 
-# Retention by age only, measured by the mtime this host gave each file when it
-# arrived -- something the sender cannot set. No number of uploads can make a
-# young archive old, so the sender cannot be used to delete history.
-find "$DEST" -maxdepth 1 -name 'bunk-*.tar.zst.enc' -mmin +"$((MIN_AGE_DAYS * 1440))" -print | while read -r old; do
-  echo "pruning $(basename "$old")"
-  rm -f -- "$old"
-done
+# Retention by arrival time: the mtime this host gave each file when it arrived,
+# something the sender cannot set. No number of uploads can make a young archive
+# old, so nothing younger than MIN_AGE_DAYS is ever removed.
+#
+# Age alone is not enough, though. An attacker who holds the control plane can
+# stop the real backups, wait MIN_AGE_DAYS and upload once: every genuine archive
+# is old by then. So the last arrival of each calendar month is kept for
+# KEEP_MONTHS months. Uploads from an attacker arrive after the compromise, so
+# the months before it keep a genuine archive whatever the sender does.
+KEEP_MONTHS="${BUNK_BACKUP_KEEP_MONTHS:-12}"
+now=$(date +%s)
+declare -A monthly
+find "$DEST" -maxdepth 1 -name 'bunk-*.tar.zst.enc' -printf '%T@ %p\n' | sort -rn |
+  while read -r mtime old; do
+    age_days=$(( (now - ${mtime%.*}) / 86400 ))
+    [ "$age_days" -ge "$MIN_AGE_DAYS" ] || continue
+    month=$(date -d "@${mtime%.*}" +%Y-%m)
+    if [ "$age_days" -lt "$((KEEP_MONTHS * 31))" ] && [ -z "${monthly[$month]:-}" ]; then
+      monthly[$month]=1
+      continue
+    fi
+    echo "pruning $(basename "$old")"
+    rm -f -- "$old"
+  done
