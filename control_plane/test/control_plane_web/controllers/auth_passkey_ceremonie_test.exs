@@ -48,15 +48,28 @@ defmodule ControlPlaneWeb.AuthPasskeyCeremonieTest do
 
   defp b64(bytes), do: Base.url_encode64(bytes, padding: false)
 
+  # Een factor toevoegen aan een account dat er al een heeft, vraagt een sessie
+  # die met een tweede factor begon; zo komt wie al een passkey heeft ook binnen.
+  # Dat een sessie zonder factor hier geweigerd wordt, staat in AuthTotpTest.
+  defp ingelogd_met_factor(user) do
+    token =
+      user |> Accounts.generate_user_session_token(mfa: true) |> Base.url_encode64(padding: false)
+
+    put_req_header(build_conn(), "authorization", "Bearer " <> token)
+  end
+
   # Stap één van het beveiligingsscherm: een registratie-challenge halen.
   defp registratie_challenge(user) do
-    user |> ingelogd() |> post(~p"/api/v1/auth/passkeys/challenge") |> json_response(200)
+    user
+    |> ingelogd_met_factor()
+    |> post(~p"/api/v1/auth/passkeys/challenge")
+    |> json_response(200)
   end
 
   # Stap twee: het antwoord van de authenticator terugsturen.
   defp registratie_insturen(user, challenge_id, antwoord, label \\ "Telefoon") do
     user
-    |> ingelogd()
+    |> ingelogd_met_factor()
     |> post(~p"/api/v1/auth/passkeys", %{
       "challenge_id" => challenge_id,
       "label" => label,
