@@ -1,12 +1,14 @@
 defmodule ControlPlane.BackupsTest do
   use ControlPlane.DataCase, async: true
 
+  alias ControlPlane.Accounts
   alias ControlPlane.Backups
   alias ControlPlane.Backups.VpsBackup
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Node
   alias ControlPlane.Fleet.Region
   alias ControlPlane.Fleet.Vps
+  alias ControlPlane.Subscriptions.Subscription
 
   defp region do
     code = "r-#{System.unique_integer([:positive])}"
@@ -343,6 +345,56 @@ defmodule ControlPlane.BackupsTest do
       machine = vps(r, node_in(r))
 
       assert {:error, :not_found} = Backups.restore(machine, Ecto.UUID.generate())
+    end
+
+    # Een geschorste VPS mag een restore niet gebruiken om weer te gaan draaien:
+    # starten weigert `VpsController.start` voor hem, en een restore was de weg
+    # eromheen.
+    defp geschorst(machine) do
+      {:ok, eigenaar} =
+        Accounts.register_user(%{
+          email: "geschorst-#{System.unique_integer([:positive])}@bunk.test",
+          password: "test-only-password-4f2b9c1e"
+        })
+
+      %Subscription{}
+      |> Subscription.changeset(%{
+        vps_id: machine.id,
+        owner_id: eigenaar.id,
+        package_id: 1,
+        price_monthly: Decimal.new("5.00"),
+        status: :past_due,
+        started_at: DateTime.truncate(DateTime.utc_now(), :second),
+        next_billing_date: Date.utc_today()
+      })
+      |> Repo.insert!()
+    end
+
+    test "a suspended VPS is not told to come back running" do
+      r = region()
+      machine = vps(r, node_in(r))
+      geschorst(machine)
+      point = restorable_backup(machine)
+
+      {:ok, _} = Backups.restore(machine, point.id)
+
+      assert [command] = commands_for(machine.id, :restore_backup)
+      assert command.payload["start_after"] == false
+    end
+
+    test "a restore that lands after a suspension is stopped again" do
+      # De schorsing kwam tijdens de restore: start_after stond al aan, en
+      # schorsen slaat een VPS in :restoring over.
+      r = region()
+      machine = vps(r, node_in(r))
+      point = restorable_backup(machine)
+      {:ok, _} = Backups.restore(machine, point.id)
+      geschorst(machine)
+      [command] = commands_for(machine.id, :restore_backup)
+
+      {:ok, _} = ControlPlane.Provisioning.apply_result(command, %{"status" => "done"})
+
+      assert [_stop] = commands_for(machine.id, :stop)
     end
 
     test "a finished restore puts a running VPS back to running" do
