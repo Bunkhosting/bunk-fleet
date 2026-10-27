@@ -37,6 +37,7 @@ defmodule ControlPlane.Provisioning.Results do
   alias ControlPlane.Fleet.Reservation
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Net
+  alias ControlPlane.Provisioning.Power
   alias ControlPlane.Provisioning.Reservations
   alias ControlPlane.Repo
   alias ControlPlane.Subscriptions
@@ -331,7 +332,9 @@ defmodule ControlPlane.Provisioning.Results do
        when not is_nil(vps_id) do
     target = if p["start_after"], do: :active, else: :stopped
 
-    Multi.run(multi, :vps, fn repo, _changes -> land_restored_vps(repo, vps_id, target) end)
+    multi
+    |> Multi.run(:vps, fn repo, _changes -> land_restored_vps(repo, vps_id, target) end)
+    |> Multi.run(:schorsing, fn _repo, %{vps: vps} -> schors_na_restore(vps) end)
   end
 
   defp finalize_vps(multi, %Command{kind: :restore_backup, vps_id: vps_id}, :failed, result)
@@ -520,6 +523,27 @@ defmodule ControlPlane.Provisioning.Results do
   end
 
   defp status_changeset(vps, status), do: Vps.changeset(vps, %{status: status})
+
+  # Een abonnement dat tijdens de restore niet betaald kon worden, kreeg geen
+  # stopcommando: schorsen slaat een VPS in :restoring over, en `start_after` was
+  # al gezet toen de restore begon. Zonder dit draaide hij na de restore gewoon,
+  # onbetaald, tot de volgende dagelijkse poging. Dus hier alsnog de stop die de
+  # schorsing had gestuurd.
+  #
+  # Altijd {:ok, _}: een stop die niet verstuurd kon worden mag de restore zelf
+  # niet terugdraaien. De dagelijkse poging stopt hem dan alsnog.
+  defp schors_na_restore(%Vps{status: :active, id: id}) do
+    with true <- Subscriptions.geschorst?(id),
+         {:error, reden} <- Power.stop_vps(id) do
+      Logger.warning("geschorste vps #{id} na restore niet gestopt: #{inspect(reden)}")
+      {:ok, :stop_niet_verstuurd}
+    else
+      false -> {:ok, :niet_geschorst}
+      {:ok, _} = verstuurd -> verstuurd
+    end
+  end
+
+  defp schors_na_restore(_vps), do: {:ok, :niet_actief}
 
   defp land_restored_vps(repo, vps_id, target) do
     vps = repo.one!(from(v in Vps, where: v.id == ^vps_id, lock: "FOR UPDATE"))

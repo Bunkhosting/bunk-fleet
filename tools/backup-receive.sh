@@ -17,23 +17,34 @@
 set -euo pipefail
 
 DEST="${BUNK_BACKUP_DIR:-/var/backups/bunk}"
-KEEP="${BUNK_BACKUP_KEEP:-30}"
+MIN_AGE_DAYS="${BUNK_BACKUP_MIN_AGE_DAYS:-30}"
+MAX_FILES="${BUNK_BACKUP_MAX_FILES:-90}"
 MAX_BYTES="${BUNK_BACKUP_MAX_BYTES:-2147483648}"   # 2 GiB
 
 install -d -m 700 "$DEST"
 
-# The client passes the filename as the (forced-away) command line. Take only a
-# basename of a shape we chose, never a path: this input comes from a host we are
-# defending against.
+# One upload at a time. Without it the file-count check below is check-then-act,
+# and parallel connections could each write up to MAX_BYTES at once.
+exec 9>"$DEST/.lock"
+flock 9
+
+# The client passes the filename as the (forced-away) command line. Take only the
+# exact shape tools/backup.sh produces, never a path: this input comes from a
+# host we are defending against.
 raw="${SSH_ORIGINAL_COMMAND:-}"
 name="$(basename -- "$raw")"
-case "$name" in
-  bunk-*.tar.zst.enc) : ;;
-  *) echo "refusing name: $raw" >&2; exit 2 ;;
-esac
-case "$name" in
-  *..*|*/*) echo "refusing name: $raw" >&2; exit 2 ;;
-esac
+[[ "$name" =~ ^bunk-[0-9]{8}T[0-9]{6}Z\.tar\.zst\.enc$ ]] || {
+  echo "refusing name: $raw" >&2; exit 2;
+}
+
+# A full store refuses instead of rotating. Rotating here is what let the sender
+# delete history: enough uploads pushed every genuine archive out of a
+# "keep the newest N" window. A flood now makes the next real backup fail --
+# loud, and recoverable -- instead of erasing the ones that already exist.
+count=$(find "$DEST" -maxdepth 1 -name 'bunk-*.tar.zst.enc' | wc -l)
+[ "$count" -lt "$MAX_FILES" ] || {
+  echo "refusing upload: store already holds $count archives (cap $MAX_FILES)" >&2; exit 6;
+}
 
 # Append-only means append-only. Without this, a key that cannot delete can
 # still overwrite yesterday's backup with a byte of garbage under the same name,
@@ -59,9 +70,27 @@ chmod 400 "$DEST/$name"
 
 echo "stored $name ($size bytes, sha256 $(sha256sum "$DEST/$name" | cut -c1-16)…)"
 
-# Rotation happens here rather than on the sender, so the sender cannot be used
-# to delete history.
-ls -1t "$DEST"/bunk-*.tar.zst.enc 2>/dev/null | tail -n +"$((KEEP + 1))" | while read -r old; do
-  echo "pruning $(basename "$old")"
-  rm -f -- "$old"
-done
+# Retention by arrival time: the mtime this host gave each file when it arrived,
+# something the sender cannot set. No number of uploads can make a young archive
+# old, so nothing younger than MIN_AGE_DAYS is ever removed.
+#
+# Age alone is not enough, though. An attacker who holds the control plane can
+# stop the real backups, wait MIN_AGE_DAYS and upload once: every genuine archive
+# is old by then. So the last arrival of each calendar month is kept for
+# KEEP_MONTHS months. Uploads from an attacker arrive after the compromise, so
+# the months before it keep a genuine archive whatever the sender does.
+KEEP_MONTHS="${BUNK_BACKUP_KEEP_MONTHS:-12}"
+now=$(date +%s)
+declare -A monthly
+find "$DEST" -maxdepth 1 -name 'bunk-*.tar.zst.enc' -printf '%T@ %p\n' | sort -rn |
+  while read -r mtime old; do
+    age_days=$(( (now - ${mtime%.*}) / 86400 ))
+    [ "$age_days" -ge "$MIN_AGE_DAYS" ] || continue
+    month=$(date -d "@${mtime%.*}" +%Y-%m)
+    if [ "$age_days" -lt "$((KEEP_MONTHS * 31))" ] && [ -z "${monthly[$month]:-}" ]; then
+      monthly[$month]=1
+      continue
+    fi
+    echo "pruning $(basename "$old")"
+    rm -f -- "$old"
+  done

@@ -64,7 +64,7 @@ defmodule ControlPlane.Notifier do
       subject: "Wachtwoord opnieuw instellen — Bunk Hosting",
       text: text,
       html: html,
-      soort: :klant
+      soort: :reset
     })
   end
 
@@ -208,6 +208,23 @@ defmodule ControlPlane.Notifier do
   @ops_reserve_min 5
   @dag_ms 24 * 60 * 60 * 1000
   @dagteller "mail:dagquotum"
+
+  # Een resetmail krijgt bovendien een eigen deel: hooguit de helft van wat er
+  # voor klanten is. Een reset vragen kan iedereen, zonder in te loggen, voor elk
+  # adres dat een account heeft; de limieten per adres en per IP houden één
+  # aanvrager niet tegen die er een handvol adressen voor gebruikt. Zonder dit
+  # deel kon zo iemand in een kwartier het hele klantquotum opmaken, en kreeg
+  # niemand die dag nog een bevestigings- of saldomail.
+  defp past_in_dagquotum?(:reset) do
+    case Application.get_env(:control_plane, :mail_daily_limit) do
+      limiet when is_integer(limiet) ->
+        RateLimiter.hit(@dagteller <> ":reset", div(grens(:klant, limiet), 2), @dag_ms) == :ok and
+          past_in_dagquotum?(:klant)
+
+      _ ->
+        true
+    end
+  end
 
   defp past_in_dagquotum?(soort) do
     case Application.get_env(:control_plane, :mail_daily_limit) do

@@ -149,7 +149,7 @@ export default function VpsTerminalPage() {
       }
       if (destroyed) return;
 
-      const wsUrl = `${wsBase}/ws/console/${id}/?ticket=${encodeURIComponent(ticket)}`;
+      const wsUrl = `${wsBase}/ws/console/${encodeURIComponent(id)}/?ticket=${encodeURIComponent(ticket)}`;
       const ws = new WebSocket(wsUrl);
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;

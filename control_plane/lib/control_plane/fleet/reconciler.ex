@@ -40,6 +40,7 @@ defmodule ControlPlane.Fleet.Reconciler do
   alias ControlPlane.Billing
   alias ControlPlane.Billing.MollieAfhandeling
   alias ControlPlane.Credits
+  alias ControlPlane.Fleet.Afscherming
   alias ControlPlane.Fleet.AgentUpdate
   alias ControlPlane.Fleet.Drift
   alias ControlPlane.Fleet.HartslagNaarBuiten
@@ -105,6 +106,11 @@ defmodule ControlPlane.Fleet.Reconciler do
   # honderdtwintig pogingen per uur.
   @default_stil_interval_ms 5 * 60 * 1000
 
+  # Eens per etmaal kijken of er klanten op één node staan die niet van elkaar
+  # zijn afgeschermd. Het is een toestand die blijft tot iemand de firewall
+  # aanzet; een keer per dag zeggen is genoeg om hem niet te vergeten.
+  @default_afscherming_interval_ms 24 * 60 * 60 * 1000
+
   # Hoogstens één melding per etmaal over de schijf. Een volle schijf is geen
   # gebeurtenis maar een toestand: hij blijft vol tot iemand er iets aan doet, en
   # vier keer per dag hetzelfde zeggen is hoe een melding een ding wordt dat je
@@ -138,6 +144,9 @@ defmodule ControlPlane.Fleet.Reconciler do
     archief_interval_ms = Keyword.get(opts, :archief_interval_ms, @default_archief_interval_ms)
     stil_interval_ms = Keyword.get(opts, :stil_interval_ms, @default_stil_interval_ms)
 
+    afscherming_interval_ms =
+      Keyword.get(opts, :afscherming_interval_ms, @default_afscherming_interval_ms)
+
     schedule_tick(interval_ms)
     HartslagNaarBuiten.meld_stand()
 
@@ -162,6 +171,8 @@ defmodule ControlPlane.Fleet.Reconciler do
        last_archief_ms: nil,
        stil_interval_ms: stil_interval_ms,
        last_stil_ms: nil,
+       afscherming_interval_ms: afscherming_interval_ms,
+       last_afscherming_ms: nil,
        last_hartslag_ms: nil
      }}
   end
@@ -201,6 +212,7 @@ defmodule ControlPlane.Fleet.Reconciler do
     state = stap(state, "mollie-verzoening", &maybe_verzoen_betalingen/1)
     state = stap(state, "archieven", &maybe_ruim_archieven/1)
     state = stap(state, "stille nodes", &maybe_meld_stille_nodes/1)
+    state = stap(state, "afscherming", &maybe_meld_afscherming/1)
     stap("abonnementen", fn -> settle_subscriptions() end)
     stap("agent-uitrol", fn -> roll_out_agent() end)
     stap("vastgelopen commando's", fn -> meld_vastgelopen_commandos() end)
@@ -396,6 +408,32 @@ defmodule ControlPlane.Fleet.Reconciler do
   end
 
   defp maybe_meld_stille_nodes(state), do: state
+
+  defp maybe_meld_afscherming(%{afscherming_interval_ms: ai, last_afscherming_ms: last} = state) do
+    now = System.monotonic_time(:millisecond)
+
+    if is_nil(last) or now - last >= ai do
+      meld_afscherming()
+      %{state | last_afscherming_ms: now}
+    else
+      state
+    end
+  end
+
+  defp maybe_meld_afscherming(state), do: state
+
+  defp meld_afscherming do
+    case Afscherming.melden() do
+      0 -> :ok
+      n -> Logger.warning("#{n} node(s) gemeld met klanten die niet zijn afgeschermd")
+    end
+  rescue
+    exception ->
+      Logger.error(
+        "melden van afscherming faalde: " <> Exception.message(exception),
+        crash_reason: {exception, __STACKTRACE__}
+      )
+  end
 
   defp meld_stille_nodes do
     case StilleNodes.melden() do

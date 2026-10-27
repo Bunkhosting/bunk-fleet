@@ -32,6 +32,15 @@ defmodule ControlPlaneWeb.AuthController do
   # 7-day HttpOnly session cookie (matches the token's own lifetime).
   @session_cookie_max_age 60 * 60 * 24 * 7
 
+  # Een factor toevoegen aan een account dat er al een heeft, vraagt een sessie
+  # die zelf met een tweede factor begon. Anders kon wie het wachtwoord plus een
+  # oude sessie had (van vóór de 2FA, of via XSS) een eigen passkey registreren,
+  # opnieuw inloggen met wachtwoord en die passkey, en zo het beheerpaneel in
+  # zonder ooit de echte tweede factor te tonen. De allereerste factor blijft
+  # vrij: zonder factor is er niets om mee te bewijzen.
+  plug :eis_factor_sessie
+       when action in [:passkey_register_challenge, :passkey_register, :totp_setup, :totp_confirm]
+
   def register(conn, params) do
     # Verify the CAPTCHA server-side BEFORE creating an account (and granting the
     # signup bonus). Without this a bot skips the browser widget by calling the API
@@ -376,6 +385,21 @@ defmodule ControlPlaneWeb.AuthController do
 
   defp poging?(params), do: is_binary(params["code"]) or is_map(params["passkey"])
 
+  defp eis_factor_sessie(conn, _opts) do
+    if Accounts.has_second_factor?(conn.assigns.current_user) and
+         not Accounts.session_mfa?(conn.assigns[:current_session_token]) do
+      conn
+      |> put_status(:forbidden)
+      |> json(%{
+        error: "reauth_required",
+        detail: "Log opnieuw in met je tweede factor om er een toe te voegen."
+      })
+      |> halt()
+    else
+      conn
+    end
+  end
+
   defp poging_fout(%{"passkey" => %{}}), do: "invalid_passkey"
   defp poging_fout(_params), do: "invalid_code"
 
@@ -554,15 +578,31 @@ defmodule ControlPlaneWeb.AuthController do
       |> put_status(:unprocessable_entity)
       |> json(%{error: "missing_code", detail: "code is required"})
 
-  @doc "Disables TOTP — requires a valid current code (defence in depth)."
+  @doc """
+  Disables TOTP — requires a valid current code (defence in depth).
+
+  Telt mee in dezelfde `2fa:`-teller als het inloggen. Zonder die teller was dit
+  de route om de code te raden: wie een sessie had, kon hier zo vaak proberen als
+  de algemene limiet per gebruiker toeliet, en na een treffer zijn eigen
+  authenticator aanzetten en de eigenaar buitensluiten.
+  """
   def totp_disable(conn, %{"code" => code}) when is_binary(code) do
     user = conn.assigns.current_user
+    sleutel = "2fa:" <> user.email
 
-    if Totp.valid_totp?(user, code) do
-      {:ok, _} = Totp.disable_totp(user)
-      json(conn, %{detail: "ok"})
-    else
-      conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_code"})
+    cond do
+      # Zelfde antwoord als een foute code, net als bij het inloggen.
+      LoginThrottle.blocked?(sleutel) ->
+        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_code"})
+
+      Totp.valid_totp?(user, code) ->
+        LoginThrottle.clear(sleutel)
+        {:ok, _} = Totp.disable_totp(user)
+        json(conn, %{detail: "ok"})
+
+      true ->
+        LoginThrottle.note_failure(sleutel)
+        conn |> put_status(:unprocessable_entity) |> json(%{error: "invalid_code"})
     end
   end
 

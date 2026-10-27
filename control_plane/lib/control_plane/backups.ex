@@ -31,6 +31,7 @@ defmodule ControlPlane.Backups do
   alias ControlPlane.Fleet.Command
   alias ControlPlane.Fleet.Vps
   alias ControlPlane.Repo
+  alias ControlPlane.Subscriptions
   alias Ecto.Multi
 
   @doc "How often each VPS is backed up, unless configured otherwise."
@@ -408,8 +409,11 @@ defmodule ControlPlane.Backups do
             "vm_id" => locked.provider_vm_id,
             "volid" => backup.volid,
             # What to leave the guest as afterwards. A VPS that was running
-            # before a restore should be running after it.
-            "start_after" => vps.status == :active
+            # before a restore should be running after it -- unless it is
+            # suspended for non-payment. Starting it then is exactly what
+            # `VpsController.start` refuses, and a restore must not be the way
+            # around that.
+            "start_after" => vps.status == :active and not Subscriptions.geschorst?(locked.id)
           }
         })
       end)

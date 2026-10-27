@@ -183,7 +183,7 @@ defmodule ControlPlane.Fleet.Liveness do
   defp derive_available(attrs, %Node{} = node, totals) do
     case reported_capacity(totals) do
       nil -> maybe_init_available(attrs, node, totals)
-      reported -> Map.merge(attrs, minus_held(node.id, reported))
+      reported -> Map.merge(attrs, minus_held(node.id, reported, totals))
     end
   end
 
@@ -201,23 +201,42 @@ defmodule ControlPlane.Fleet.Liveness do
 
   defp reported_capacity(_totals), do: nil
 
-  defp minus_held(node_id, reported) do
-    held =
-      Repo.one(
-        from r in Reservation,
-          where: r.node_id == ^node_id and r.status == :held,
-          select: %{
-            vcpu: coalesce(sum(r.vcpu), 0),
-            ram_mb: coalesce(sum(r.ram_mb), 0),
-            disk_gb: coalesce(sum(r.disk_gb), 0)
-          }
-      ) || %{vcpu: 0, ram_mb: 0, disk_gb: 0}
+  # Daarbovenop een plafond dat de control plane zelf kent: het totaal min alles
+  # wat er al aan VPS'en op staat of komt. Zonder dat kon een node die niet van
+  # ons is altijd "leeg" melden en zo elke plaatsing winnen -- precies wat het
+  # plafond in `Node` moet voorkomen, maar daar alleen tegen het totaal. Alleen
+  # geheugen en schijf: vCPU mag de eigenaar overboeken (`vcpu_oversubscribe`),
+  # dus totaal min toegezegd zegt daar niets.
+  defp minus_held(node_id, reported, totals) do
+    held = som_reserveringen(node_id, [:held])
+    beloofd = som_reserveringen(node_id, [:held, :committed])
 
     %{
       available_vcpu: max(0, reported.vcpu - held.vcpu),
-      available_ram_mb: max(0, reported.ram_mb - held.ram_mb),
-      available_disk_gb: max(0, reported.disk_gb - held.disk_gb)
+      available_ram_mb:
+        reported.ram_mb |> Kernel.-(held.ram_mb) |> plafond(totals[:total_ram_mb], beloofd.ram_mb),
+      available_disk_gb:
+        reported.disk_gb
+        |> Kernel.-(held.disk_gb)
+        |> plafond(totals[:total_disk_gb], beloofd.disk_gb)
     }
+  end
+
+  defp plafond(vrij, totaal, beloofd) when is_integer(totaal),
+    do: vrij |> min(totaal - beloofd) |> max(0)
+
+  defp plafond(vrij, _totaal, _beloofd), do: max(0, vrij)
+
+  defp som_reserveringen(node_id, statussen) do
+    Repo.one(
+      from r in Reservation,
+        where: r.node_id == ^node_id and r.status in ^statussen,
+        select: %{
+          vcpu: coalesce(sum(r.vcpu), 0),
+          ram_mb: coalesce(sum(r.ram_mb), 0),
+          disk_gb: coalesce(sum(r.disk_gb), 0)
+        }
+    ) || %{vcpu: 0, ram_mb: 0, disk_gb: 0}
   end
 
   # Alleen nog voor een agent die geen reported_avail_* meldt: een node schrijft

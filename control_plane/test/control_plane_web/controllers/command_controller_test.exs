@@ -180,6 +180,23 @@ defmodule ControlPlaneWeb.CommandControllerTest do
       assert Repo.get_by!(Reservation, vps_id: vps.id).status == :released
     end
 
+    test "een te lange foutmelding wordt ingekort bewaard", %{conn: conn, region: region} do
+      # De node hoeft niet van ons te zijn: zonder grens zette hij per opdracht
+      # twee megabyte in de gedeelde database.
+      %{agent_token: agent_token} = enroll_node(region)
+      %{command: command} = create_vps(region)
+
+      conn
+      |> put_req_header("authorization", "Bearer " <> agent_token)
+      |> post(~p"/v1/commands/#{command.id}/result", %{
+        "status" => "failed",
+        "error" => String.duplicate("x", 100_000)
+      })
+      |> response(204)
+
+      assert String.length(Repo.get!(Command, command.id).result["error"]) == 500
+    end
+
     test "a command belonging to another node returns 404", %{conn: conn, region: region} do
       # The command is placed onto the first enrolled node...
       %{node: _first} = enroll_node(region)
